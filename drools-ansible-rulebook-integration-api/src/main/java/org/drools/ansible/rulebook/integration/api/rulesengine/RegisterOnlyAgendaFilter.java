@@ -74,6 +74,7 @@ public class RegisterOnlyAgendaFilter implements AgendaFilter {
         matchedEvents.clear();
 
         List<Match> matches = new ArrayList<>( matchedRules );
+        log.info("matchedRules: " + matchedRules);
         matchedRules.clear();
 
         if (event && matches.size() > 1 && !rulesExecutorSession.isMatchMultipleRules()) {

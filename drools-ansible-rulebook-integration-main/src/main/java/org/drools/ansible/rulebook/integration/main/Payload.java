@@ -133,6 +133,12 @@ public class Payload {
             long start = System.currentTimeMillis();
             for (int i = 0; i < payload.loopCount; i++) {
                 for (String p : payload.list) {
+                    System.out.println("Payload: " + p);
+//                    try {
+//                        Thread.sleep(990);
+//                    } catch (InterruptedException e) {
+//                        throw new RuntimeException(e);
+//                    }
                     String resultJson = engine.assertEvent(sessionId, p);
                     if (!payload.discardMatchedEvents) {
                         returnedMatches.addAll(JsonMapper.readValueAsListOfMapOfStringAndObject(resultJson));

@@ -1,0 +1,62 @@
+[
+    {
+        "RuleSet": {
+            "name": "Checking not defined",
+            "hosts": [
+                "all"
+            ],
+            "sources": [
+                {
+                    "EventSource": {
+                        "name": "generic",
+                        "source_name": "generic",
+                        "source_args": {
+                            "payload": [
+                                {
+                                    "meta": {
+                                        "headers": {
+                                            "token": 123
+                                        }
+                                    }
+                                },
+                                {
+                                    "beta": {
+                                        "headers": {
+                                            "age": 23
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "source_filters": []
+                    }
+                }
+            ],
+            "rules": [
+                {
+                    "Rule": {
+                        "name": "r1",
+                        "condition": {
+                            "AllCondition": [
+                                {
+                                    "IsNotDefinedExpression": {
+                                        "Event": "beta.xheaders.age"
+                                    }
+                                }
+                            ]
+                        },
+                        "actions": [
+                            {
+                                "Action": {
+                                    "action": "debug",
+                                    "action_args": {}
+                                }
+                            }
+                        ],
+                        "enabled": true
+                    }
+                }
+            ]
+        }
+    }
+]
