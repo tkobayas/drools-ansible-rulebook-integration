@@ -16,7 +16,6 @@ jobs:
           java-version: '17'
           distribution: 'adopt'
 
-
       - name: Checkout Drools 9.101.0
         uses: actions/checkout@v3
         with:
