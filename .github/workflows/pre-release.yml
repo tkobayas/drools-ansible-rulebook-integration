@@ -1,4 +1,4 @@
-name: Java CI
+name: 1.0.x Development Build
 
 on:
   push:
