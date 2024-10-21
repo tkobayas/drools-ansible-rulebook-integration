@@ -7,7 +7,7 @@ An integration layer allowing Ansible Rulebook to use Drools as rule engine for 
 ## Manual end-to-end testing with `drools_jpy` and `ansible-rulebook`
 
 Assuming the following local setup:
-
+ 
 ```
 .
 ├── ansible-rulebook
