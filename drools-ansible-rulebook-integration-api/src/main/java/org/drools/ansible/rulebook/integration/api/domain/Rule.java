@@ -6,6 +6,7 @@ import org.drools.ansible.rulebook.integration.api.domain.actions.Action;
 import org.drools.ansible.rulebook.integration.api.domain.actions.MapAction;
 import org.drools.ansible.rulebook.integration.api.domain.conditions.AstCondition;
 import org.drools.ansible.rulebook.integration.api.domain.conditions.Condition;
+import org.drools.ansible.rulebook.integration.api.domain.temporal.BlackOut;
 import org.drools.ansible.rulebook.integration.api.domain.temporal.Throttle;
 import org.drools.ansible.rulebook.integration.api.domain.temporal.TimeWindowDefinition;
 import org.drools.ansible.rulebook.integration.api.rulesengine.RulesExecutionController;
@@ -32,6 +33,8 @@ public class Rule {
     private RuleConfigurationOptions options;
 
     private Condition condition;
+
+    private BlackOut blackOut;
 
     public String getRuleSetName() {
         return ruleSetName;
@@ -125,7 +128,19 @@ public class Rule {
     public boolean requiresAsyncExecution() {
         return ruleGenerationContext.requiresAsyncExecution(this);
     }
-    
+
+    public BlackOut getBlackOut() {
+        return blackOut;
+    }
+
+    public BlackOut getBlack_out() {
+        return blackOut;
+    }
+
+    public void setBlack_out(BlackOut blackOut) {
+        this.blackOut = blackOut;
+    }
+
     public List<org.drools.model.Rule> toExecModelRules(RulesSet rulesSet, RulesExecutionController rulesExecutionController, AtomicInteger ruleCounter) {
     	return ruleGenerationContext.toExecModelRules(rulesSet, this, rulesExecutionController, ruleCounter);
     	

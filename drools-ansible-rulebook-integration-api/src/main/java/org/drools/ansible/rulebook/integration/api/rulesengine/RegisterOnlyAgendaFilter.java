@@ -1,6 +1,7 @@
 package org.drools.ansible.rulebook.integration.api.rulesengine;
 
 import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
+import org.drools.ansible.rulebook.integration.api.domain.temporal.BlackOut;
 import org.drools.core.common.InternalFactHandle;
 import org.kie.api.runtime.rule.AgendaFilter;
 import org.kie.api.runtime.rule.FactHandle;
@@ -8,8 +9,13 @@ import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
@@ -37,6 +43,7 @@ public class RegisterOnlyAgendaFilter implements AgendaFilter {
         this.rulesExecutorSession = rulesExecutorSession;
     }
 
+
     @Override
     public boolean accept(Match match) {
         List<InternalFactHandle> fhs = (List<InternalFactHandle>) match.getFactHandles();
@@ -45,6 +52,12 @@ public class RegisterOnlyAgendaFilter implements AgendaFilter {
         if (validMatch) {
             if (log.isDebugEnabled()) {
                 log.debug(matchToString(match));
+            }
+
+            String ruleName = match.getRule().getName();
+            if (rulesExecutorSession.isBlackOutActive(ruleName)) {
+                rulesExecutorSession.queueBlackOutMatch(ruleName, match);
+                return true;
             }
 
             Map<String, Object> metadata = match.getRule().getMetaData();

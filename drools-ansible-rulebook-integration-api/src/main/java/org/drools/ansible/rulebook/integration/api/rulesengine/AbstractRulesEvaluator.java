@@ -145,6 +145,13 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
         if (!matches.isEmpty() && log.isInfoEnabled()) {
             log.info("Match(es) caused by automatic clock advance: " + matches);
         }
+
+        List<Match> matchesAfterBlackOut = rulesExecutorSession.getMatchesAfterBlackOut();
+        if (!matchesAfterBlackOut.isEmpty() && log.isInfoEnabled()) {
+            log.info("Retrieving Match(es) after black out: " + matchesAfterBlackOut);
+        }
+
+        matches.addAll(matchesAfterBlackOut);
         return matches;
     }
 
