@@ -144,8 +144,8 @@ public class RulesSet {
         return matchMultipleRules;
     }
 
-    public boolean hasTemporalConstraint() {
-        return rules.stream().map(RuleContainer::getRule).anyMatch(Rule::hasTemporalConstraint);
+    public boolean requiresPseudoClock() {
+        return rules.stream().map(RuleContainer::getRule).anyMatch(Rule::requiresPseudoClock);
     }
 
     public boolean requiresAsyncExecution() {

@@ -1,7 +1,6 @@
 package org.drools.ansible.rulebook.integration.api;
 
 public enum RuleConfigurationOption {
-    EVENTS_PROCESSING,
     USE_PSEUDO_CLOCK,
     /**
      * When this option is set, there is no automatic advance of the internal pseudoclock.

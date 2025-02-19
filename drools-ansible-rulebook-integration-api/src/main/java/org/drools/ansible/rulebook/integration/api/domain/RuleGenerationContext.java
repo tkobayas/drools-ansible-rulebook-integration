@@ -129,16 +129,16 @@ public class RuleGenerationContext {
         this.timeConstraint = timeConstraint;
     }
 
-    public boolean hasTemporalConstraint(org.drools.ansible.rulebook.integration.api.domain.Rule ansibleRule) {
-    	updateContextFromRule(ansibleRule);
+    public boolean requiresPseudoClock(org.drools.ansible.rulebook.integration.api.domain.Rule rule) {
+        updateContextFromRule(rule);
         getOrCreateLHS();
-        return timeConstraint != null;
+        return timeConstraint != null || rule.getBlackOut() != null;
     }
 
     public boolean requiresAsyncExecution(org.drools.ansible.rulebook.integration.api.domain.Rule rule) {
     	updateContextFromRule(rule);
         getOrCreateLHS();
-        return timeConstraint != null && timeConstraint.requiresAsyncExecution();
+        return timeConstraint != null && timeConstraint.requiresAsyncExecution() || rule.getBlackOut() != null;
     }
 
     public List<Rule> createRules(RulesExecutionController rulesExecutionController) {
@@ -225,11 +225,7 @@ public class RuleGenerationContext {
 	        setRuleName("r_" + ruleCounter.getAndIncrement());
 	    }
 
-	    List<org.drools.model.Rule> rules = createRules(rulesExecutionController);
-	    if (hasTemporalConstraint(ansibleRule)) {
-	        rulesSet.withOptions(RuleConfigurationOption.EVENTS_PROCESSING);
-	    }
-	    return rules;
+        return createRules(rulesExecutionController);
 	}
 
     private void updateContextFromRule(org.drools.ansible.rulebook.integration.api.domain.Rule anisbleRule) {

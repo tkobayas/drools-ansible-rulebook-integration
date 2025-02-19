@@ -121,8 +121,8 @@ public class Rule {
         ruleGenerationContext.setTimeConstraint(TimeWindowDefinition.parseTimeWindow(timeWindow));
     }
 
-    public boolean hasTemporalConstraint() {
-        return ruleGenerationContext.hasTemporalConstraint(this);
+    public boolean requiresPseudoClock() {
+        return ruleGenerationContext.requiresPseudoClock(this);
     }
 
     public boolean requiresAsyncExecution() {

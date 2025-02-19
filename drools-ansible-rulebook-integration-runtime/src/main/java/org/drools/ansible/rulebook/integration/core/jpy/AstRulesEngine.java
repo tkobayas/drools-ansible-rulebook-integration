@@ -27,7 +27,7 @@ public class AstRulesEngine implements Closeable {
 
     public long createRuleset(RulesSet rulesSet) {
         checkAlive();
-        if (rulesSet.hasTemporalConstraint()) {
+        if (rulesSet.requiresPseudoClock()) {
             rulesSet.withOptions(RuleConfigurationOption.USE_PSEUDO_CLOCK);
             if (rulesSet.hasAsyncExecution()) {
                 rulesExecutorContainer.allowAsync();
