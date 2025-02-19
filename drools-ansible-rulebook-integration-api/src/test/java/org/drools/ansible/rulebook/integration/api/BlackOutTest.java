@@ -217,7 +217,6 @@ public class BlackOutTest {
         assertEquals(0, matchedRules.size());
 
         CompletableFuture<List<Match>> matches = rulesExecutor.advanceTime(2, TimeUnit.HOURS);
-//        matches.get().forEach(match -> System.out.println("Match: " + match.getRule().getName()));
         System.out.println("Matches: " + RuleMatch.asList(matches.get()));
         assertEquals(1, matches.get().size());
     }

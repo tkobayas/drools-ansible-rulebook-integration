@@ -156,6 +156,14 @@ public class RulesSet {
         return clockPeriod != null || requiresAsyncExecution();
     }
 
+    public void validate() {
+        rules.forEach(rule -> {
+            if (rule.getRule().getBlackOut() != null) {
+                rule.getRule().getBlackOut().validate();
+            }
+        });
+    }
+
     @Override
     public String toString() {
         return "RulesSet{" +
