@@ -1,21 +1,7 @@
 package org.drools.ansible.rulebook.integration.api.rulesengine;
 
-import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
-import org.drools.ansible.rulebook.integration.api.domain.temporal.BlackOut;
-import org.drools.core.common.InternalFactHandle;
-import org.kie.api.runtime.rule.AgendaFilter;
-import org.kie.api.runtime.rule.FactHandle;
-import org.kie.api.runtime.rule.Match;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
@@ -24,6 +10,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
+import org.drools.core.common.InternalFactHandle;
+import org.kie.api.runtime.rule.AgendaFilter;
+import org.kie.api.runtime.rule.FactHandle;
+import org.kie.api.runtime.rule.Match;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class RegisterOnlyAgendaFilter implements AgendaFilter {
 
@@ -54,18 +48,18 @@ public class RegisterOnlyAgendaFilter implements AgendaFilter {
                 log.debug(matchToString(match));
             }
 
-            String ruleName = match.getRule().getName();
-            if (rulesExecutorSession.isBlackOutActive(ruleName)) {
-                rulesExecutorSession.queueBlackOutMatch(ruleName, match);
-                return true;
-            }
-
             Map<String, Object> metadata = match.getRule().getMetaData();
             if ( metadata.get(SYNTHETIC_RULE_TAG) != null ) {
                 return true;
             }
 
-            matchedRules.add( matchTransformers.getOrDefault(metadata.get(RULE_TYPE_TAG), Function.identity()).apply(match) );
+            String ruleName = match.getRule().getName();
+            if (rulesExecutorSession.isBlackOutActive(ruleName)) {
+                // queue the match for later processing, not add it to the matchedRules. But matched events should be removed
+                rulesExecutorSession.queueBlackOutMatch(ruleName, match);
+            } else {
+                matchedRules.add( matchTransformers.getOrDefault(metadata.get(RULE_TYPE_TAG), Function.identity()).apply(match) );
+            }
         }
 
         for (InternalFactHandle fh : fhs) {

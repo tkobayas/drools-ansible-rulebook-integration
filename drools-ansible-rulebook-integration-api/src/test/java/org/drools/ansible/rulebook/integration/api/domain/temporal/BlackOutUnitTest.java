@@ -1,12 +1,34 @@
 package org.drools.ansible.rulebook.integration.api.domain.temporal;
 
 import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
+import java.util.Arrays;
+import java.util.Collection;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@RunWith(Parameterized.class)
 public class BlackOutUnitTest {
+
+    @Parameterized.Parameter
+    public BlackOut.Timezone timezone;
+
+    @Parameterized.Parameters(name = "Timezone: {0}")
+    public static Collection<Object[]> data() {
+        return Arrays.asList(new Object[][] {
+                { BlackOut.Timezone.UTC },
+                { BlackOut.Timezone.LOCAL }
+        });
+    }
+
+    // Helper: given a LocalDateTime, convert it into a ZonedDateTime using the BlackOut's effectiveZone.
+    private ZonedDateTime toZdt(LocalDateTime ldt, BlackOut blackOut) {
+        return ldt.atZone(blackOut.getEffectiveZone());
+    }
 
     // ====================
     // DAILY TESTS
@@ -14,58 +36,73 @@ public class BlackOutUnitTest {
 
     @Test
     public void testDailyIsBlackOut() {
-        // Daily blackout: Every day between 2:30 PM and 4:15 PM (non-spanning)
         TimeSpec dailyStart = new TimeSpec(30, 14, null, null, null);
         TimeSpec dailyEnd = new TimeSpec(15, 16, null, null, null);
-        BlackOut dailyBlackOut = new BlackOut(dailyStart, dailyEnd);
+        BlackOut dailyBlackOut = new BlackOut(dailyStart, dailyEnd, timezone);
 
-        LocalDateTime dtInside = LocalDateTime.of(2025, 2, 14, 15, 0);
-        assertThat(dailyBlackOut.isBlackOutActive(dtInside)).isTrue();
+        // Build ZonedDateTime from LocalDateTime using the blackout's effective zone.
+        ZonedDateTime dtInside = toZdt(LocalDateTime.of(2025, 2, 14, 15, 0), dailyBlackOut);
 
-        LocalDateTime dtBefore = LocalDateTime.of(2025, 2, 14, 14, 0);
-        assertThat(dailyBlackOut.isBlackOutActive(dtBefore)).isFalse();
+        assertThat(dailyBlackOut.isBlackOutActive(dtInside))
+                .as("Daily inside for tz=" + timezone)
+                .isTrue();
 
-        LocalDateTime dtAfter = LocalDateTime.of(2025, 2, 14, 16, 30);
-        assertThat(dailyBlackOut.isBlackOutActive(dtAfter)).isFalse();
+        ZonedDateTime dtBefore = toZdt(LocalDateTime.of(2025, 2, 14, 14, 0), dailyBlackOut);
+        assertThat(dailyBlackOut.isBlackOutActive(dtBefore))
+                .as("Daily before for tz=" + timezone)
+                .isFalse();
+
+        ZonedDateTime dtAfter = toZdt(LocalDateTime.of(2025, 2, 14, 16, 30), dailyBlackOut);
+        assertThat(dailyBlackOut.isBlackOutActive(dtAfter))
+                .as("Daily after for tz=" + timezone)
+                .isFalse();
     }
 
     @Test
     public void testDailyNextEndTime() {
         TimeSpec dailyStart = new TimeSpec(30, 14, null, null, null);
         TimeSpec dailyEnd = new TimeSpec(15, 16, null, null, null);
-        BlackOut dailyBlackOut = new BlackOut(dailyStart, dailyEnd);
+        BlackOut dailyBlackOut = new BlackOut(dailyStart, dailyEnd, timezone);
 
-        LocalDateTime current = LocalDateTime.of(2025, 2, 14, 15, 30);
-        LocalDateTime expected = LocalDateTime.of(2025, 2, 14, 16, 15);
-        assertThat(dailyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        ZonedDateTime current = toZdt(LocalDateTime.of(2025, 2, 14, 15, 30), dailyBlackOut);
+        ZonedDateTime expected = toZdt(LocalDateTime.of(2025, 2, 14, 16, 15), dailyBlackOut);
+        assertThat(dailyBlackOut.getBlackOutNextEndTime(current))
+                .as("Daily next end time for tz=" + timezone)
+                .isEqualTo(expected);
 
-        current = LocalDateTime.of(2025, 2, 14, 16, 30);
-        expected = LocalDateTime.of(2025, 2, 15, 16, 15);
-        assertThat(dailyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        current = toZdt(LocalDateTime.of(2025, 2, 14, 16, 30), dailyBlackOut);
+        expected = toZdt(LocalDateTime.of(2025, 2, 15, 16, 15), dailyBlackOut);
+        assertThat(dailyBlackOut.getBlackOutNextEndTime(current))
+                .as("Daily next end time (after period) for tz=" + timezone)
+                .isEqualTo(expected);
     }
 
-    // Daily Spanning Boundary Tests (e.g. blackout from 22:00 to 02:00)
     @Test
     public void testDailySpanningBoundaryIsBlackOut() {
+        // Blackout from 22:00 to 02:00 spanning midnight.
         TimeSpec dailyStart = new TimeSpec(0, 22, null, null, null);
         TimeSpec dailyEnd = new TimeSpec(0, 2, null, null, null);
-        BlackOut dailyBlackOut = new BlackOut(dailyStart, dailyEnd);
+        BlackOut dailyBlackOut = new BlackOut(dailyStart, dailyEnd, timezone);
 
-        // Exactly at start boundary: 22:00 is active.
-        LocalDateTime dtStartBoundary = LocalDateTime.of(2025, 6, 10, 22, 0);
-        assertThat(dailyBlackOut.isBlackOutActive(dtStartBoundary)).isTrue();
+        ZonedDateTime dtStartBoundary = toZdt(LocalDateTime.of(2025, 6, 10, 22, 0), dailyBlackOut);
+        assertThat(dailyBlackOut.isBlackOutActive(dtStartBoundary))
+                .as("Daily spanning at start boundary for tz=" + timezone)
+                .isTrue();
 
-        // In the middle of the period (before midnight)
-        LocalDateTime dtBeforeMidnight = LocalDateTime.of(2025, 6, 10, 23, 30);
-        assertThat(dailyBlackOut.isBlackOutActive(dtBeforeMidnight)).isTrue();
+        ZonedDateTime dtBeforeMidnight = toZdt(LocalDateTime.of(2025, 6, 10, 23, 30), dailyBlackOut);
+        assertThat(dailyBlackOut.isBlackOutActive(dtBeforeMidnight))
+                .as("Daily spanning before midnight for tz=" + timezone)
+                .isTrue();
 
-        // After midnight, still within blackout (e.g., 01:30)
-        LocalDateTime dtAfterMidnight = LocalDateTime.of(2025, 6, 11, 1, 30);
-        assertThat(dailyBlackOut.isBlackOutActive(dtAfterMidnight)).isTrue();
+        ZonedDateTime dtAfterMidnight = toZdt(LocalDateTime.of(2025, 6, 11, 1, 30), dailyBlackOut);
+        assertThat(dailyBlackOut.isBlackOutActive(dtAfterMidnight))
+                .as("Daily spanning after midnight for tz=" + timezone)
+                .isTrue();
 
-        // Exactly at end boundary: 02:00 should be inactive.
-        LocalDateTime dtEndBoundary = LocalDateTime.of(2025, 6, 11, 2, 0);
-        assertThat(dailyBlackOut.isBlackOutActive(dtEndBoundary)).isFalse();
+        ZonedDateTime dtEndBoundary = toZdt(LocalDateTime.of(2025, 6, 11, 2, 0), dailyBlackOut);
+        assertThat(dailyBlackOut.isBlackOutActive(dtEndBoundary))
+                .as("Daily spanning at end boundary for tz=" + timezone)
+                .isFalse();
     }
 
     // ====================
@@ -74,61 +111,73 @@ public class BlackOutUnitTest {
 
     @Test
     public void testWeeklyIsBlackOut() {
-        // Weekly blackout: Every Thursday between 3:00 AM and 4:00 AM.
-        // Assume dayOfWeek=4 represents Thursday.
+        // Weekly blackout: Every Thursday from 03:00 to 04:00.
         TimeSpec weeklyStart = new TimeSpec(null, 3, 4, null, null);
         TimeSpec weeklyEnd = new TimeSpec(null, 4, 4, null, null);
-        BlackOut weeklyBlackOut = new BlackOut(weeklyStart, weeklyEnd);
+        BlackOut weeklyBlackOut = new BlackOut(weeklyStart, weeklyEnd, timezone);
 
-        LocalDateTime dtInside = LocalDateTime.of(2025, 2, 13, 3, 30);
-        assertThat(weeklyBlackOut.isBlackOutActive(dtInside)).isTrue();
+        ZonedDateTime dtInside = toZdt(LocalDateTime.of(2025, 2, 13, 3, 30), weeklyBlackOut);
+        assertThat(weeklyBlackOut.isBlackOutActive(dtInside))
+                .as("Weekly inside for tz=" + timezone)
+                .isTrue();
 
-        LocalDateTime dtBefore = LocalDateTime.of(2025, 2, 13, 2, 30);
-        assertThat(weeklyBlackOut.isBlackOutActive(dtBefore)).isFalse();
+        ZonedDateTime dtBefore = toZdt(LocalDateTime.of(2025, 2, 13, 2, 30), weeklyBlackOut);
+        assertThat(weeklyBlackOut.isBlackOutActive(dtBefore))
+                .as("Weekly before for tz=" + timezone)
+                .isFalse();
 
-        LocalDateTime dtAfter = LocalDateTime.of(2025, 2, 13, 4, 30);
-        assertThat(weeklyBlackOut.isBlackOutActive(dtAfter)).isFalse();
+        ZonedDateTime dtAfter = toZdt(LocalDateTime.of(2025, 2, 13, 4, 30), weeklyBlackOut);
+        assertThat(weeklyBlackOut.isBlackOutActive(dtAfter))
+                .as("Weekly after for tz=" + timezone)
+                .isFalse();
     }
 
     @Test
     public void testWeeklyNextEndTime() {
         TimeSpec weeklyStart = new TimeSpec(null, 3, 4, null, null);
         TimeSpec weeklyEnd = new TimeSpec(null, 4, 4, null, null);
-        BlackOut weeklyBlackOut = new BlackOut(weeklyStart, weeklyEnd);
+        BlackOut weeklyBlackOut = new BlackOut(weeklyStart, weeklyEnd, timezone);
 
-        LocalDateTime current = LocalDateTime.of(2025, 2, 13, 3, 30);
-        LocalDateTime expected = LocalDateTime.of(2025, 2, 13, 4, 0);
-        assertThat(weeklyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        ZonedDateTime current = toZdt(LocalDateTime.of(2025, 2, 13, 3, 30), weeklyBlackOut);
+        ZonedDateTime expected = toZdt(LocalDateTime.of(2025, 2, 13, 4, 0), weeklyBlackOut);
+        assertThat(weeklyBlackOut.getBlackOutNextEndTime(current))
+                .as("Weekly next end time for tz=" + timezone)
+                .isEqualTo(expected);
 
-        current = LocalDateTime.of(2025, 2, 13, 4, 30);
-        expected = LocalDateTime.of(2025, 2, 20, 4, 0);
-        assertThat(weeklyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        current = toZdt(LocalDateTime.of(2025, 2, 13, 4, 30), weeklyBlackOut);
+        expected = toZdt(LocalDateTime.of(2025, 2, 20, 4, 0), weeklyBlackOut);
+        assertThat(weeklyBlackOut.getBlackOutNextEndTime(current))
+                .as("Weekly next end time (after period) for tz=" + timezone)
+                .isEqualTo(expected);
     }
 
-    // Weekly Spanning Boundary Tests (spanning midnight with same dayOfWeek)
     @Test
     public void testWeeklySpanningBoundaryIsBlackOut() {
-        // Define a weekly blackout for Thursday that spans midnight:
-        // Start at 23:00 on Thursday and end at 02:00 (interpreted as Friday 02:00).
-        TimeSpec weeklyStart = new TimeSpec(null, 23, 4, null, null); // 4 = Thursday
-        TimeSpec weeklyEnd   = new TimeSpec(null, 2, 4, null, null);
-        BlackOut weeklyBlackOut = new BlackOut(weeklyStart, weeklyEnd);
+        // Weekly blackout spanning midnight: Thursday from 23:00 to 02:00.
+        // We use dayOfWeek = 4 for Thursday.
+        TimeSpec weeklyStart = new TimeSpec(null, 23, 4, null, null);
+        TimeSpec weeklyEnd = new TimeSpec(null, 2, 4, null, null);
+        BlackOut weeklyBlackOut = new BlackOut(weeklyStart, weeklyEnd, timezone);
 
-        // Thursday at 23:00 should be active.
-        LocalDateTime dtStart = LocalDateTime.of(2025, 6, 12, 23, 0);
-        assertThat(weeklyBlackOut.isBlackOutActive(dtStart)).isTrue();
+        ZonedDateTime dtStart = toZdt(LocalDateTime.of(2025, 6, 12, 23, 0), weeklyBlackOut);
+        assertThat(weeklyBlackOut.isBlackOutActive(dtStart))
+                .as("Weekly spanning at start for tz=" + timezone)
+                .isTrue();
 
-        // Later on Thursday night
-        LocalDateTime dtDuring = LocalDateTime.of(2025, 6, 12, 23, 30);
-        assertThat(weeklyBlackOut.isBlackOutActive(dtDuring)).isTrue();
+        ZonedDateTime dtDuring = toZdt(LocalDateTime.of(2025, 6, 12, 23, 30), weeklyBlackOut);
+        assertThat(weeklyBlackOut.isBlackOutActive(dtDuring))
+                .as("Weekly spanning during for tz=" + timezone)
+                .isTrue();
 
-        // Early Friday morning (still within blackout period)
-        LocalDateTime dtAfterMidnight = LocalDateTime.of(2025, 6, 13, 1, 30);
-        assertThat(weeklyBlackOut.isBlackOutActive(dtAfterMidnight)).isTrue();
+        ZonedDateTime dtAfterMidnight = toZdt(LocalDateTime.of(2025, 6, 13, 1, 30), weeklyBlackOut);
+        assertThat(weeklyBlackOut.isBlackOutActive(dtAfterMidnight))
+                .as("Weekly spanning after midnight for tz=" + timezone)
+                .isTrue();
 
-        // Exactly at 02:00 on Friday: blackout ends.
-        LocalDateTime dtEnd = LocalDateTime.of(2025, 6, 13, 2, 0);
-        assertThat(weeklyBlackOut.isBlackOutActive(dtEnd)).isFalse();
+        ZonedDateTime dtEnd = toZdt(LocalDateTime.of(2025, 6, 13, 2, 0), weeklyBlackOut);
+        assertThat(weeklyBlackOut.isBlackOutActive(dtEnd))
+                .as("Weekly spanning at end for tz=" + timezone)
+                .isFalse();
     }
 
     // ====================
@@ -137,58 +186,72 @@ public class BlackOutUnitTest {
 
     @Test
     public void testAnnualIsBlackOut() {
-        // Annual blackout: from December 23 (00:00) to January 2 (00:00)
+        // Annual blackout: December 23 00:00 to January 2 00:00.
         TimeSpec annualStart = new TimeSpec(null, 0, null, 23, 12);
         TimeSpec annualEnd = new TimeSpec(null, 0, null, 2, 1);
-        BlackOut annualBlackOut = new BlackOut(annualStart, annualEnd);
+        BlackOut annualBlackOut = new BlackOut(annualStart, annualEnd, timezone);
 
-        LocalDateTime dtInside = LocalDateTime.of(2025, 12, 25, 10, 0);
-        assertThat(annualBlackOut.isBlackOutActive(dtInside)).isTrue();
+        ZonedDateTime dtInside = toZdt(LocalDateTime.of(2025, 12, 25, 10, 0), annualBlackOut);
+        assertThat(annualBlackOut.isBlackOutActive(dtInside))
+                .as("Annual inside for tz=" + timezone)
+                .isTrue();
 
-        LocalDateTime dtBefore = LocalDateTime.of(2025, 12, 22, 10, 0);
-        assertThat(annualBlackOut.isBlackOutActive(dtBefore)).isFalse();
+        ZonedDateTime dtBefore = toZdt(LocalDateTime.of(2025, 12, 22, 10, 0), annualBlackOut);
+        assertThat(annualBlackOut.isBlackOutActive(dtBefore))
+                .as("Annual before for tz=" + timezone)
+                .isFalse();
 
-        LocalDateTime dtAfter = LocalDateTime.of(2026, 1, 3, 10, 0);
-        assertThat(annualBlackOut.isBlackOutActive(dtAfter)).isFalse();
+        ZonedDateTime dtAfter = toZdt(LocalDateTime.of(2026, 1, 3, 10, 0), annualBlackOut);
+        assertThat(annualBlackOut.isBlackOutActive(dtAfter))
+                .as("Annual after for tz=" + timezone)
+                .isFalse();
     }
 
     @Test
     public void testAnnualNextEndTime() {
         TimeSpec annualStart = new TimeSpec(null, 0, null, 23, 12);
         TimeSpec annualEnd = new TimeSpec(null, 0, null, 2, 1);
-        BlackOut annualBlackOut = new BlackOut(annualStart, annualEnd);
+        BlackOut annualBlackOut = new BlackOut(annualStart, annualEnd, timezone);
 
-        LocalDateTime current = LocalDateTime.of(2025, 12, 25, 10, 0);
-        LocalDateTime expected = LocalDateTime.of(2026, 1, 2, 0, 0);
-        assertThat(annualBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        ZonedDateTime current = toZdt(LocalDateTime.of(2025, 12, 25, 10, 0), annualBlackOut);
+        ZonedDateTime expected = toZdt(LocalDateTime.of(2026, 1, 2, 0, 0), annualBlackOut);
+        assertThat(annualBlackOut.getBlackOutNextEndTime(current))
+                .as("Annual next end time for tz=" + timezone)
+                .isEqualTo(expected);
 
-        current = LocalDateTime.of(2025, 12, 22, 10, 0);
-        expected = LocalDateTime.of(2026, 1, 2, 0, 0);
-        assertThat(annualBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        current = toZdt(LocalDateTime.of(2025, 12, 22, 10, 0), annualBlackOut);
+        expected = toZdt(LocalDateTime.of(2026, 1, 2, 0, 0), annualBlackOut);
+        assertThat(annualBlackOut.getBlackOutNextEndTime(current))
+                .as("Annual next end time (before) for tz=" + timezone)
+                .isEqualTo(expected);
 
-        current = LocalDateTime.of(2026, 1, 3, 10, 0);
-        expected = LocalDateTime.of(2027, 1, 2, 0, 0);
-        assertThat(annualBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        current = toZdt(LocalDateTime.of(2026, 1, 3, 10, 0), annualBlackOut);
+        expected = toZdt(LocalDateTime.of(2027, 1, 2, 0, 0), annualBlackOut);
+        assertThat(annualBlackOut.getBlackOutNextEndTime(current))
+                .as("Annual next end time (after) for tz=" + timezone)
+                .isEqualTo(expected);
     }
 
-    // Annual On-Boundary Tests
     @Test
     public void testAnnualOnBoundary() {
         TimeSpec annualStart = new TimeSpec(null, 0, null, 23, 12);
         TimeSpec annualEnd = new TimeSpec(null, 0, null, 2, 1);
-        BlackOut annualBlackOut = new BlackOut(annualStart, annualEnd);
+        BlackOut annualBlackOut = new BlackOut(annualStart, annualEnd, timezone);
 
-        // On the start boundary: December 23, 2025 at 00:00 is active.
-        LocalDateTime dtStart = LocalDateTime.of(2025, 12, 23, 0, 0);
-        assertThat(annualBlackOut.isBlackOutActive(dtStart)).isTrue();
+        ZonedDateTime dtStart = toZdt(LocalDateTime.of(2025, 12, 23, 0, 0), annualBlackOut);
+        assertThat(annualBlackOut.isBlackOutActive(dtStart))
+                .as("Annual on boundary (start) for tz=" + timezone)
+                .isTrue();
 
-        // Just before the end boundary: January 1, 2026 at 23:59 is active.
-        LocalDateTime dtJustBeforeEnd = LocalDateTime.of(2026, 1, 1, 23, 59);
-        assertThat(annualBlackOut.isBlackOutActive(dtJustBeforeEnd)).isTrue();
+        ZonedDateTime dtJustBeforeEnd = toZdt(LocalDateTime.of(2026, 1, 1, 23, 59), annualBlackOut);
+        assertThat(annualBlackOut.isBlackOutActive(dtJustBeforeEnd))
+                .as("Annual on boundary (just before end) for tz=" + timezone)
+                .isTrue();
 
-        // Exactly at the end boundary: January 2, 2026 at 00:00 is inactive.
-        LocalDateTime dtEnd = LocalDateTime.of(2026, 1, 2, 0, 0);
-        assertThat(annualBlackOut.isBlackOutActive(dtEnd)).isFalse();
+        ZonedDateTime dtEnd = toZdt(LocalDateTime.of(2026, 1, 2, 0, 0), annualBlackOut);
+        assertThat(annualBlackOut.isBlackOutActive(dtEnd))
+                .as("Annual on boundary (end) for tz=" + timezone)
+                .isFalse();
     }
 
     // ====================
@@ -200,26 +263,26 @@ public class BlackOutUnitTest {
         // Monthly blackout: Every month from the 15th at 20:00 to the 16th at 02:00.
         TimeSpec monthlyStart = new TimeSpec(0, 20, null, 15, null);
         TimeSpec monthlyEnd = new TimeSpec(0, 2, null, 16, null);
-        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd);
+        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd, timezone);
 
-        LocalDateTime dtInside = LocalDateTime.of(2025, 3, 15, 21, 0);
+        ZonedDateTime dtInside = toZdt(LocalDateTime.of(2025, 3, 15, 21, 0), monthlyBlackOut);
         assertThat(monthlyBlackOut.isBlackOutActive(dtInside))
-                .as("March 15, 21:00 should be in blackout")
+                .as("Monthly inside for tz=" + timezone)
                 .isTrue();
 
-        LocalDateTime dtAtEnd = LocalDateTime.of(2025, 3, 16, 2, 0);
+        ZonedDateTime dtAtEnd = toZdt(LocalDateTime.of(2025, 3, 16, 2, 0), monthlyBlackOut);
         assertThat(monthlyBlackOut.isBlackOutActive(dtAtEnd))
-                .as("March 16, 02:00 should not be in blackout")
+                .as("Monthly at end for tz=" + timezone)
                 .isFalse();
 
-        LocalDateTime dtJustBeforeEnd = LocalDateTime.of(2025, 3, 16, 1, 59);
+        ZonedDateTime dtJustBeforeEnd = toZdt(LocalDateTime.of(2025, 3, 16, 1, 59), monthlyBlackOut);
         assertThat(monthlyBlackOut.isBlackOutActive(dtJustBeforeEnd))
-                .as("March 16, 01:59 should be in blackout")
+                .as("Monthly just before end for tz=" + timezone)
                 .isTrue();
 
-        LocalDateTime dtBefore = LocalDateTime.of(2025, 3, 15, 19, 59);
+        ZonedDateTime dtBefore = toZdt(LocalDateTime.of(2025, 3, 15, 19, 59), monthlyBlackOut);
         assertThat(monthlyBlackOut.isBlackOutActive(dtBefore))
-                .as("March 15, 19:59 should not be in blackout")
+                .as("Monthly before period for tz=" + timezone)
                 .isFalse();
     }
 
@@ -227,79 +290,89 @@ public class BlackOutUnitTest {
     public void testMonthlyNextEndTime() {
         TimeSpec monthlyStart = new TimeSpec(0, 20, null, 15, null);
         TimeSpec monthlyEnd = new TimeSpec(0, 2, null, 16, null);
-        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd);
+        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd, timezone);
 
-        LocalDateTime current = LocalDateTime.of(2025, 3, 15, 21, 0);
-        LocalDateTime expected = LocalDateTime.of(2025, 3, 16, 2, 0);
-        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        ZonedDateTime current = toZdt(LocalDateTime.of(2025, 3, 15, 21, 0), monthlyBlackOut);
+        ZonedDateTime expected = toZdt(LocalDateTime.of(2025, 3, 16, 2, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current))
+                .as("Monthly next end time for tz=" + timezone)
+                .isEqualTo(expected);
 
-        current = LocalDateTime.of(2025, 3, 16, 2, 1);
-        expected = LocalDateTime.of(2025, 4, 16, 2, 0);
-        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        current = toZdt(LocalDateTime.of(2025, 3, 16, 2, 1), monthlyBlackOut);
+        expected = toZdt(LocalDateTime.of(2025, 4, 16, 2, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current))
+                .as("Monthly next end time (after period) for tz=" + timezone)
+                .isEqualTo(expected);
 
-        current = LocalDateTime.of(2025, 3, 15, 19, 0);
-        expected = LocalDateTime.of(2025, 3, 16, 2, 0);
-        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        current = toZdt(LocalDateTime.of(2025, 3, 15, 19, 0), monthlyBlackOut);
+        expected = toZdt(LocalDateTime.of(2025, 3, 16, 2, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current))
+                .as("Monthly next end time (before period) for tz=" + timezone)
+                .isEqualTo(expected);
     }
 
-    // Monthly Spanning Boundary Tests (e.g. blackout from the 28th at 22:00 to the 2nd at 06:00)
     @Test
     public void testMonthlySpanningBoundaryIsBlackOut() {
+        // Monthly blackout spanning the month boundary: from the 28th at 22:00 to the 2nd at 06:00.
         TimeSpec monthlyStart = new TimeSpec(0, 22, null, 28, null);
         TimeSpec monthlyEnd = new TimeSpec(0, 6, null, 2, null);
-        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd);
+        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd, timezone);
 
-        // Test a time in the current month: May 29, 2025 at 23:00 should be active.
-        LocalDateTime dtInside = LocalDateTime.of(2025, 5, 29, 23, 0);
-        assertThat(monthlyBlackOut.isBlackOutActive(dtInside)).isTrue();
+        ZonedDateTime dtInside = toZdt(LocalDateTime.of(2025, 5, 29, 23, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.isBlackOutActive(dtInside))
+                .as("Monthly spanning inside for tz=" + timezone)
+                .isTrue();
 
-        // Test a time in the new month: June 2, 2025 at 05:30 should be active.
-        dtInside = LocalDateTime.of(2025, 6, 2, 5, 30);
-        assertThat(monthlyBlackOut.isBlackOutActive(dtInside)).isTrue();
+        dtInside = toZdt(LocalDateTime.of(2025, 6, 2, 5, 30), monthlyBlackOut);
+        assertThat(monthlyBlackOut.isBlackOutActive(dtInside))
+                .as("Monthly spanning inside (new month) for tz=" + timezone)
+                .isTrue();
 
-        // Exactly at end boundary: June 2, 2025 at 06:00 should be inactive.
-        LocalDateTime dtAtEnd = LocalDateTime.of(2025, 6, 2, 6, 0);
-        assertThat(monthlyBlackOut.isBlackOutActive(dtAtEnd)).isFalse();
+        ZonedDateTime dtAtEnd = toZdt(LocalDateTime.of(2025, 6, 2, 6, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.isBlackOutActive(dtAtEnd))
+                .as("Monthly spanning at end for tz=" + timezone)
+                .isFalse();
     }
 
     @Test
     public void testMonthlySpanningBoundaryNextEndTime() {
         TimeSpec monthlyStart = new TimeSpec(0, 22, null, 28, null);
         TimeSpec monthlyEnd = new TimeSpec(0, 6, null, 2, null);
-        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd);
+        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd, timezone);
 
-        LocalDateTime current = LocalDateTime.of(2025, 5, 29, 23, 0);
-        LocalDateTime expected = LocalDateTime.of(2025, 6, 2, 6, 0);
-        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        ZonedDateTime current = toZdt(LocalDateTime.of(2025, 5, 29, 23, 0), monthlyBlackOut);
+        ZonedDateTime expected = toZdt(LocalDateTime.of(2025, 6, 2, 6, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current))
+                .as("Monthly spanning next end time for tz=" + timezone)
+                .isEqualTo(expected);
 
-        current = LocalDateTime.of(2025, 6, 2, 6, 1);
-        expected = LocalDateTime.of(2025, 7, 2, 6, 0);
-        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current)).isEqualTo(expected);
+        current = toZdt(LocalDateTime.of(2025, 6, 2, 6, 1), monthlyBlackOut);
+        expected = toZdt(LocalDateTime.of(2025, 7, 2, 6, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.getBlackOutNextEndTime(current))
+                .as("Monthly spanning next end time (after period) for tz=" + timezone)
+                .isEqualTo(expected);
     }
 
-    // Monthly On-Boundary Tests
     @Test
     public void testMonthlyOnBoundary() {
-        // For a monthly blackout from the 15th at 20:00 to the 16th at 02:00:
+        // For a monthly blackout from the 15th at 20:00 to the 16th at 02:00.
         TimeSpec monthlyStart = new TimeSpec(0, 20, null, 15, null);
         TimeSpec monthlyEnd = new TimeSpec(0, 2, null, 16, null);
-        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd);
+        BlackOut monthlyBlackOut = new BlackOut(monthlyStart, monthlyEnd, timezone);
 
-        // On the start boundary (March 15, 2025 at 20:00) should be active.
-        LocalDateTime dtStart = LocalDateTime.of(2025, 3, 15, 20, 0);
-        assertThat(monthlyBlackOut.isBlackOutActive(dtStart)).isTrue();
+        ZonedDateTime dtStart = toZdt(LocalDateTime.of(2025, 3, 15, 20, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.isBlackOutActive(dtStart))
+                .as("Monthly on boundary (start) for tz=" + timezone)
+                .isTrue();
 
-        // Just before the end boundary (March 16, 2025 at 01:59) should be active.
-        LocalDateTime dtJustBeforeEnd = LocalDateTime.of(2025, 3, 16, 1, 59);
-        assertThat(monthlyBlackOut.isBlackOutActive(dtJustBeforeEnd)).isTrue();
+        ZonedDateTime dtJustBeforeEnd = toZdt(LocalDateTime.of(2025, 3, 16, 1, 59), monthlyBlackOut);
+        assertThat(monthlyBlackOut.isBlackOutActive(dtJustBeforeEnd))
+                .as("Monthly on boundary (just before end) for tz=" + timezone)
+                .isTrue();
 
-        // Exactly at the end boundary (March 16, 2025 at 02:00) should be inactive.
-        LocalDateTime dtEnd = LocalDateTime.of(2025, 3, 16, 2, 0);
-        assertThat(monthlyBlackOut.isBlackOutActive(dtEnd)).isFalse();
-    }
-
-    @Test
-    public void invalidDateTime() {
-
+        ZonedDateTime dtEnd = toZdt(LocalDateTime.of(2025, 3, 16, 2, 0), monthlyBlackOut);
+        assertThat(monthlyBlackOut.isBlackOutActive(dtEnd))
+                .as("Monthly on boundary (end) for tz=" + timezone)
+                .isFalse();
     }
 }

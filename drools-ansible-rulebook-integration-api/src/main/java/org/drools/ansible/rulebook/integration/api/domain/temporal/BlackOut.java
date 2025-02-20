@@ -5,6 +5,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.MonthDay;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
 
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -13,6 +16,7 @@ public class BlackOut {
 
     private Trigger trigger = Trigger.ALL;
     private Timezone timezone = Timezone.UTC;
+    private ZoneId effectiveZone = ZoneOffset.UTC; // default is UTC
 
     private TimeSpec startTime;
     private TimeSpec endTime;
@@ -23,6 +27,13 @@ public class BlackOut {
     public BlackOut(TimeSpec startTime, TimeSpec endTime) {
         this.startTime = startTime;
         this.endTime = endTime;
+        setTimezone(Timezone.UTC);
+    }
+
+    public BlackOut(TimeSpec startTime, TimeSpec endTime, Timezone timezone) {
+        this.startTime = startTime;
+        this.endTime = endTime;
+        setTimezone(timezone);
     }
 
     public TimeSpec getStart_time() {
@@ -54,7 +65,12 @@ public class BlackOut {
     }
 
     public void setTimezone(Timezone timezone) {
-        this.timezone = timezone;
+        this.timezone = (timezone != null ? timezone : Timezone.UTC);
+        this.effectiveZone = (this.timezone == Timezone.LOCAL ? ZoneId.systemDefault() : ZoneOffset.UTC);
+    }
+
+    public ZoneId getEffectiveZone() {
+        return effectiveZone;
     }
 
     public void validate() {
@@ -65,50 +81,47 @@ public class BlackOut {
     }
 
     /**
-     * Returns true if the given LocalDateTime falls within the blackout period.
-     * The schedule type is determined by the following rules:
-     * <ul>
-     *   <li><b>Monthly:</b> dayOfMonth is set and month is null.</li>
-     *   <li><b>Annual:</b> both dayOfMonth and month are set.</li>
-     *   <li><b>Weekly:</b> dayOfWeek is set.</li>
-     *   <li><b>Daily:</b> hour (and optionally minute) is set.</li>
-     * </ul>
-     * (Previously named {@code isBlackOut}).
+     * Returns true if the given ZonedDateTime (which is assumed to be expressed in any zone)
+     * falls within the blackout period defined in the configured effectiveZone.
+     * The method first converts the argument to the effective zone.
      */
-    public boolean isBlackOutActive(LocalDateTime dt) {
+    public boolean isBlackOutActive(ZonedDateTime dt) {
+        ZonedDateTime effectiveDt = dt.withZoneSameInstant(effectiveZone);
         if (startTime.getDayOfMonth() != null && startTime.getMonth() == null) {
-            return isInMonthlyInterval(dt);
+            return isInMonthlyInterval(effectiveDt);
         } else if (startTime.getMonth() != null && startTime.getDayOfMonth() != null) {
-            return isInAnnualInterval(dt);
+            return isInAnnualInterval(effectiveDt);
         } else if (startTime.getDayOfWeek() != null) {
-            return isInWeeklyInterval(dt);
+            return isInWeeklyInterval(effectiveDt);
         } else if (startTime.getHour() != null) {
-            return isInDailyInterval(dt);
+            return isInDailyInterval(effectiveDt);
         } else {
             throw new IllegalStateException("Insufficient time specification");
         }
     }
 
     /**
-     * Returns the next blackout end time (the next occurrence when the blackout period ends)
-     * that comes strictly after the provided {@code currentDateTime}.
+     * Returns the next blackout end time (as a ZonedDateTime in the effectiveZone)
+     * that comes strictly after the provided dt.
+     * The dt is first converted to the effective zone.
      */
-    public LocalDateTime getBlackOutNextEndTime(LocalDateTime currentDateTime) {
+    public ZonedDateTime getBlackOutNextEndTime(ZonedDateTime dt) {
+        ZonedDateTime effectiveDt = dt.withZoneSameInstant(effectiveZone);
         if (startTime.getDayOfMonth() != null && startTime.getMonth() == null) {
-            return getMonthlyNextEndTime(currentDateTime);
+            return getMonthlyNextEndTime(effectiveDt);
         } else if (startTime.getMonth() != null && startTime.getDayOfMonth() != null) {
-            return getAnnualNextEndTime(currentDateTime);
+            return getAnnualNextEndTime(effectiveDt);
         } else if (startTime.getDayOfWeek() != null) {
-            return getWeeklyNextEndTime(currentDateTime);
+            return getWeeklyNextEndTime(effectiveDt);
         } else if (startTime.getHour() != null) {
-            return getDailyNextEndTime(currentDateTime);
+            return getDailyNextEndTime(effectiveDt);
         } else {
             throw new IllegalStateException("Insufficient time specification for blackout schedule");
         }
     }
 
     // --- Daily schedule helpers ---
-    private boolean isInDailyInterval(LocalDateTime dt) {
+    private boolean isInDailyInterval(ZonedDateTime dt) {
         LocalTime time = dt.toLocalTime();
         LocalTime start = LocalTime.of(startTime.getHour(),
                                        startTime.getMinute() != null ? startTime.getMinute() : 0);
@@ -116,32 +129,20 @@ public class BlackOut {
                                      endTime.getMinute() != null ? endTime.getMinute() : 0);
         if (!start.isAfter(end)) {
             return !time.isBefore(start) && time.isBefore(end);
-        } else { // spans midnight
+        } else { // spans midnight, e.g., 22:00 to 02:00
             return !time.isBefore(start) || time.isBefore(end);
         }
     }
 
-    private LocalDateTime getDailyNextEndTime(LocalDateTime currentDateTime) {
-        LocalTime start = LocalTime.of(startTime.getHour(), startTime.getMinute() != null ? startTime.getMinute() : 0);
+    private ZonedDateTime getDailyNextEndTime(ZonedDateTime dt) {
+        LocalDate today = dt.toLocalDate();
         LocalTime end = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
-        LocalDate today = currentDateTime.toLocalDate();
-
-        if (!start.isAfter(end)) {
-            LocalDateTime candidate = LocalDateTime.of(today, end);
-            return currentDateTime.isBefore(candidate) ? candidate : LocalDateTime.of(today.plusDays(1), end);
-        } else {
-            LocalTime currentTime = currentDateTime.toLocalTime();
-            if (currentTime.isBefore(end)) {
-                LocalDateTime candidate = LocalDateTime.of(today, end);
-                return currentDateTime.isBefore(candidate) ? candidate : LocalDateTime.of(today.plusDays(1), end);
-            } else {
-                return LocalDateTime.of(today.plusDays(1), end);
-            }
-        }
+        ZonedDateTime candidate = today.atTime(end).atZone(effectiveZone);
+        return dt.toLocalTime().isBefore(end) ? candidate : today.plusDays(1).atTime(end).atZone(effectiveZone);
     }
 
     // --- Weekly schedule helpers ---
-    private boolean isInWeeklyInterval(LocalDateTime dt) {
+    private boolean isInWeeklyInterval(ZonedDateTime dt) {
         DayOfWeek startDow = DayOfWeek.of(startTime.getDayOfWeek());
         DayOfWeek endDow = DayOfWeek.of(endTime.getDayOfWeek());
         LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
@@ -149,22 +150,22 @@ public class BlackOut {
         LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
                                               endTime.getMinute() != null ? endTime.getMinute() : 0);
 
-        LocalDate dtDate = dt.toLocalDate();
-        LocalDate startDate = dtDate.with(TemporalAdjusters.previousOrSame(startDow));
-        LocalDateTime blackoutStart = LocalDateTime.of(startDate, startLocalTime);
-        LocalDateTime blackoutEnd;
+        LocalDate date = dt.toLocalDate();
+        LocalDate startDate = date.with(TemporalAdjusters.previousOrSame(startDow));
+        ZonedDateTime blackoutStart = startDate.atTime(startLocalTime).atZone(effectiveZone);
+        ZonedDateTime blackoutEnd;
         if (startDow.equals(endDow)) {
             if (!startLocalTime.isAfter(endLocalTime)) {
-                blackoutEnd = LocalDateTime.of(startDate, endLocalTime);
+                blackoutEnd = startDate.atTime(endLocalTime).atZone(effectiveZone);
             } else {
-                blackoutEnd = LocalDateTime.of(startDate.plusDays(1), endLocalTime);
+                blackoutEnd = startDate.plusDays(1).atTime(endLocalTime).atZone(effectiveZone);
             }
         } else {
             int daysBetween = endDow.getValue() - startDow.getValue();
             if (daysBetween <= 0) {
                 daysBetween += 7;
             }
-            blackoutEnd = LocalDateTime.of(startDate.plusDays(daysBetween), endLocalTime);
+            blackoutEnd = startDate.plusDays(daysBetween).atTime(endLocalTime).atZone(effectiveZone);
         }
         if (dt.isBefore(blackoutStart)) {
             blackoutStart = blackoutStart.minusWeeks(1);
@@ -173,7 +174,7 @@ public class BlackOut {
         return !dt.isBefore(blackoutStart) && dt.isBefore(blackoutEnd);
     }
 
-    private LocalDateTime getWeeklyNextEndTime(LocalDateTime currentDateTime) {
+    private ZonedDateTime getWeeklyNextEndTime(ZonedDateTime dt) {
         DayOfWeek startDow = DayOfWeek.of(startTime.getDayOfWeek());
         DayOfWeek endDow = DayOfWeek.of(endTime.getDayOfWeek());
         LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
@@ -181,30 +182,30 @@ public class BlackOut {
         LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
                                               endTime.getMinute() != null ? endTime.getMinute() : 0);
 
-        LocalDate baseDate = currentDateTime.toLocalDate();
+        LocalDate baseDate = dt.toLocalDate();
         LocalDate candidateStartDate = baseDate.with(TemporalAdjusters.previousOrSame(startDow));
-        LocalDateTime candidateBlackoutEnd;
+        ZonedDateTime candidateBlackoutEnd;
         if (startDow.equals(endDow)) {
             if (!startLocalTime.isAfter(endLocalTime)) {
-                candidateBlackoutEnd = LocalDateTime.of(candidateStartDate, endLocalTime);
+                candidateBlackoutEnd = candidateStartDate.atTime(endLocalTime).atZone(effectiveZone);
             } else {
-                candidateBlackoutEnd = LocalDateTime.of(candidateStartDate.plusDays(1), endLocalTime);
+                candidateBlackoutEnd = candidateStartDate.plusDays(1).atTime(endLocalTime).atZone(effectiveZone);
             }
         } else {
             int daysBetween = endDow.getValue() - startDow.getValue();
             if (daysBetween <= 0) {
                 daysBetween += 7;
             }
-            candidateBlackoutEnd = LocalDateTime.of(candidateStartDate.plusDays(daysBetween), endLocalTime);
+            candidateBlackoutEnd = candidateStartDate.plusDays(daysBetween).atTime(endLocalTime).atZone(effectiveZone);
         }
-        if (!candidateBlackoutEnd.isAfter(currentDateTime)) {
+        if (!candidateBlackoutEnd.isAfter(dt)) {
             candidateBlackoutEnd = candidateBlackoutEnd.plusWeeks(1);
         }
         return candidateBlackoutEnd;
     }
 
     // --- Annual schedule helpers ---
-    private boolean isInAnnualInterval(LocalDateTime dt) {
+    private boolean isInAnnualInterval(ZonedDateTime dt) {
         MonthDay startMD = MonthDay.of(startTime.getMonth(), startTime.getDayOfMonth());
         MonthDay endMD = MonthDay.of(endTime.getMonth(), endTime.getDayOfMonth());
         LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
@@ -213,55 +214,52 @@ public class BlackOut {
                                               endTime.getMinute() != null ? endTime.getMinute() : 0);
         int year = dt.getYear();
 
-        LocalDateTime blackoutStart;
-        LocalDateTime blackoutEnd;
+        ZonedDateTime blackoutStart;
+        ZonedDateTime blackoutEnd;
         if (startMD.compareTo(endMD) <= 0) {
             blackoutStart = LocalDateTime.of(year, startTime.getMonth(), startTime.getDayOfMonth(),
-                                             startLocalTime.getHour(), startLocalTime.getMinute());
+                                             startLocalTime.getHour(), startLocalTime.getMinute()).atZone(effectiveZone);
             blackoutEnd = LocalDateTime.of(year, endTime.getMonth(), endTime.getDayOfMonth(),
-                                           endLocalTime.getHour(), endLocalTime.getMinute());
+                                           endLocalTime.getHour(), endLocalTime.getMinute()).atZone(effectiveZone);
         } else {
             if (MonthDay.from(dt).compareTo(startMD) >= 0) {
                 blackoutStart = LocalDateTime.of(year, startTime.getMonth(), startTime.getDayOfMonth(),
-                                                 startLocalTime.getHour(), startLocalTime.getMinute());
+                                                 startLocalTime.getHour(), startLocalTime.getMinute()).atZone(effectiveZone);
                 blackoutEnd = LocalDateTime.of(year + 1, endTime.getMonth(), endTime.getDayOfMonth(),
-                                               endLocalTime.getHour(), endLocalTime.getMinute());
+                                               endLocalTime.getHour(), endLocalTime.getMinute()).atZone(effectiveZone);
             } else {
                 blackoutStart = LocalDateTime.of(year - 1, startTime.getMonth(), startTime.getDayOfMonth(),
-                                                 startLocalTime.getHour(), startLocalTime.getMinute());
+                                                 startLocalTime.getHour(), startLocalTime.getMinute()).atZone(effectiveZone);
                 blackoutEnd = LocalDateTime.of(year, endTime.getMonth(), endTime.getDayOfMonth(),
-                                               endLocalTime.getHour(), endLocalTime.getMinute());
+                                               endLocalTime.getHour(), endLocalTime.getMinute()).atZone(effectiveZone);
             }
         }
         return !dt.isBefore(blackoutStart) && dt.isBefore(blackoutEnd);
     }
 
-    private LocalDateTime getAnnualNextEndTime(LocalDateTime currentDateTime) {
+    private ZonedDateTime getAnnualNextEndTime(ZonedDateTime dt) {
         MonthDay startMD = MonthDay.of(startTime.getMonth(), startTime.getDayOfMonth());
         MonthDay endMD = MonthDay.of(endTime.getMonth(), endTime.getDayOfMonth());
-        LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
-                                                startTime.getMinute() != null ? startTime.getMinute() : 0);
         LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
                                               endTime.getMinute() != null ? endTime.getMinute() : 0);
-        int year = currentDateTime.getYear();
-        LocalDateTime candidateBlackoutEnd;
-
+        int year = dt.getYear();
+        ZonedDateTime candidateBlackoutEnd;
         if (startMD.compareTo(endMD) <= 0) {
             candidateBlackoutEnd = LocalDateTime.of(year, endTime.getMonth(), endTime.getDayOfMonth(),
-                                                    endLocalTime.getHour(), endLocalTime.getMinute());
-            if (!candidateBlackoutEnd.isAfter(currentDateTime)) {
+                                                    endLocalTime.getHour(), endLocalTime.getMinute()).atZone(effectiveZone);
+            if (!candidateBlackoutEnd.isAfter(dt)) {
                 candidateBlackoutEnd = LocalDateTime.of(year + 1, endTime.getMonth(), endTime.getDayOfMonth(),
-                                                        endLocalTime.getHour(), endLocalTime.getMinute());
+                                                        endLocalTime.getHour(), endLocalTime.getMinute()).atZone(effectiveZone);
             }
         } else {
-            if (MonthDay.from(currentDateTime).compareTo(startMD) >= 0) {
+            if (MonthDay.from(dt).compareTo(startMD) >= 0) {
                 candidateBlackoutEnd = LocalDateTime.of(year + 1, endTime.getMonth(), endTime.getDayOfMonth(),
-                                                        endLocalTime.getHour(), endLocalTime.getMinute());
+                                                        endLocalTime.getHour(), endLocalTime.getMinute()).atZone(effectiveZone);
             } else {
                 candidateBlackoutEnd = LocalDateTime.of(year, endTime.getMonth(), endTime.getDayOfMonth(),
-                                                        endLocalTime.getHour(), endLocalTime.getMinute());
+                                                        endLocalTime.getHour(), endLocalTime.getMinute()).atZone(effectiveZone);
             }
-            if (!candidateBlackoutEnd.isAfter(currentDateTime)) {
+            if (!candidateBlackoutEnd.isAfter(dt)) {
                 candidateBlackoutEnd = candidateBlackoutEnd.plusYears(1);
             }
         }
@@ -269,7 +267,7 @@ public class BlackOut {
     }
 
     // --- Monthly schedule helpers ---
-    private boolean isInMonthlyInterval(LocalDateTime dt) {
+    private boolean isInMonthlyInterval(ZonedDateTime dt) {
         int startDay = startTime.getDayOfMonth();
         int endDay = endTime.getDayOfMonth();
         LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
@@ -278,56 +276,52 @@ public class BlackOut {
                                               endTime.getMinute() != null ? endTime.getMinute() : 0);
 
         if (startDay <= endDay) {
-            // Blackout period is within the same month.
             LocalDate periodStartDate = LocalDate.of(dt.getYear(), dt.getMonthValue(), startDay);
             LocalDate periodEndDate = LocalDate.of(dt.getYear(), dt.getMonthValue(), endDay);
-            LocalDateTime blackoutStart = LocalDateTime.of(periodStartDate, startLocalTime);
-            LocalDateTime blackoutEnd = LocalDateTime.of(periodEndDate, endLocalTime);
+            ZonedDateTime blackoutStart = periodStartDate.atTime(startLocalTime).atZone(effectiveZone);
+            ZonedDateTime blackoutEnd = periodEndDate.atTime(endLocalTime).atZone(effectiveZone);
             return !dt.isBefore(blackoutStart) && dt.isBefore(blackoutEnd);
         } else {
-            // Blackout period spans the month boundary.
-            LocalDateTime blackoutStart;
-            LocalDateTime blackoutEnd;
+            ZonedDateTime blackoutStart;
+            ZonedDateTime blackoutEnd;
             if (dt.getDayOfMonth() >= startDay) {
-                // Blackout starts this month and ends next month.
-                blackoutStart = LocalDateTime.of(dt.getYear(), dt.getMonthValue(), startDay,
-                                                 startLocalTime.getHour(), startLocalTime.getMinute());
+                blackoutStart = LocalDate.of(dt.getYear(), dt.getMonthValue(), startDay)
+                        .atTime(startLocalTime).atZone(effectiveZone);
                 LocalDate nextMonth = dt.toLocalDate().plusMonths(1);
-                blackoutEnd = LocalDateTime.of(nextMonth.getYear(), nextMonth.getMonthValue(), endDay,
-                                               endLocalTime.getHour(), endLocalTime.getMinute());
-            } else { // This covers dt.getDayOfMonth() < startDay (including when it equals the end day)
+                blackoutEnd = LocalDate.of(nextMonth.getYear(), nextMonth.getMonthValue(), endDay)
+                        .atTime(endLocalTime).atZone(effectiveZone);
+            } else {
                 LocalDate prevMonth = dt.toLocalDate().minusMonths(1);
-                blackoutStart = LocalDateTime.of(prevMonth.getYear(), prevMonth.getMonthValue(), startDay,
-                                                 startLocalTime.getHour(), startLocalTime.getMinute());
-                blackoutEnd = LocalDateTime.of(dt.getYear(), dt.getMonthValue(), endDay,
-                                               endLocalTime.getHour(), endLocalTime.getMinute());
+                blackoutStart = LocalDate.of(prevMonth.getYear(), prevMonth.getMonthValue(), startDay)
+                        .atTime(startLocalTime).atZone(effectiveZone);
+                blackoutEnd = LocalDate.of(dt.getYear(), dt.getMonthValue(), endDay)
+                        .atTime(endLocalTime).atZone(effectiveZone);
             }
             return !dt.isBefore(blackoutStart) && dt.isBefore(blackoutEnd);
         }
     }
 
-    private LocalDateTime getMonthlyNextEndTime(LocalDateTime currentDateTime) {
+    private ZonedDateTime getMonthlyNextEndTime(ZonedDateTime dt) {
         int startDay = startTime.getDayOfMonth();
         int endDay = endTime.getDayOfMonth();
         LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
                                               endTime.getMinute() != null ? endTime.getMinute() : 0);
-        LocalDateTime candidate;
+        ZonedDateTime candidate;
         if (startDay <= endDay) {
-            candidate = LocalDateTime.of(currentDateTime.getYear(), currentDateTime.getMonthValue(), endDay,
-                                         endLocalTime.getHour(), endLocalTime.getMinute());
-            if (!candidate.isAfter(currentDateTime)) {
+            candidate = LocalDate.of(dt.getYear(), dt.getMonthValue(), endDay)
+                    .atTime(endLocalTime).atZone(effectiveZone);
+            if (!candidate.isAfter(dt)) {
                 candidate = candidate.plusMonths(1);
             }
         } else {
-            if (currentDateTime.getDayOfMonth() >= startDay) {
-                candidate = LocalDateTime.of(currentDateTime.toLocalDate().plusMonths(1).getYear(),
-                                             currentDateTime.toLocalDate().plusMonths(1).getMonthValue(),
-                                             endDay,
-                                             endLocalTime.getHour(), endLocalTime.getMinute());
+            if (dt.getDayOfMonth() >= startDay) {
+                candidate = LocalDate.of(dt.toLocalDate().plusMonths(1).getYear(),
+                                         dt.toLocalDate().plusMonths(1).getMonthValue(), endDay)
+                        .atTime(endLocalTime).atZone(effectiveZone);
             } else {
-                candidate = LocalDateTime.of(currentDateTime.getYear(), currentDateTime.getMonthValue(), endDay,
-                                             endLocalTime.getHour(), endLocalTime.getMinute());
-                if (!candidate.isAfter(currentDateTime)) {
+                candidate = LocalDate.of(dt.getYear(), dt.getMonthValue(), endDay)
+                        .atTime(endLocalTime).atZone(effectiveZone);
+                if (!candidate.isAfter(dt)) {
                     candidate = candidate.plusMonths(1);
                 }
             }
@@ -345,7 +339,7 @@ public class BlackOut {
                 '}';
     }
 
-    enum Trigger {
+    public enum Trigger {
         ALL("all"), // default
         FIRST("first"),
         LAST("last");
@@ -358,7 +352,7 @@ public class BlackOut {
         private String value;
     }
 
-    enum Timezone {
+    public enum Timezone {
         UTC("utc"), // default
         LOCAL("local");
 
