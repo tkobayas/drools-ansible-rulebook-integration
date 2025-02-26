@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.MonthDay;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -73,63 +74,110 @@ public class BlackOut {
         return effectiveZone;
     }
 
+    /**
+     * Validates that both startTime and endTime are non-null, that numeric fields fall within allowed ranges,
+     * that the combination of fields in each TimeSpec conforms to one of the acceptable schedule types,
+     * and that startTime and endTime represent the same schedule type.
+     * In addition, for Annual schedules the combination of month and day_of_month must form a possible date
+     * (e.g. April 31 is rejected).
+     */
     public void validate() {
         if (startTime == null || endTime == null) {
-            throw new IllegalStateException("black_out start and end times must be specified");
+            throw new IllegalStateException("Both startTime and endTime must be provided.");
         }
-        // WIP
+        // Numeric ranges.
+        if (startTime.getMinute() != null && (startTime.getMinute() < 0 || startTime.getMinute() > 59))
+            throw new IllegalArgumentException("Start minute must be between 0 and 59.");
+        if (endTime.getMinute() != null && (endTime.getMinute() < 0 || endTime.getMinute() > 59))
+            throw new IllegalArgumentException("End minute must be between 0 and 59.");
+        if (startTime.getHour() == null || startTime.getHour() < 0 || startTime.getHour() > 23)
+            throw new IllegalArgumentException("Start hour must be between 0 and 23 and is required.");
+        if (endTime.getHour() == null || endTime.getHour() < 0 || endTime.getHour() > 23)
+            throw new IllegalArgumentException("End hour must be between 0 and 23 and is required.");
+        if (startTime.getMonth() != null && (startTime.getMonth() < 1 || startTime.getMonth() > 12))
+            throw new IllegalArgumentException("Start month must be between 1 and 12.");
+        if (endTime.getMonth() != null && (endTime.getMonth() < 1 || endTime.getMonth() > 12))
+            throw new IllegalArgumentException("End month must be between 1 and 12.");
+        if (startTime.getDayOfMonth() != null && (startTime.getDayOfMonth() < 1 || startTime.getDayOfMonth() > 31))
+            throw new IllegalArgumentException("Start day_of_month must be between 1 and 31.");
+        if (endTime.getDayOfMonth() != null && (endTime.getDayOfMonth() < 1 || endTime.getDayOfMonth() > 31))
+            throw new IllegalArgumentException("End day_of_month must be between 1 and 31.");
+        if (startTime.getDayOfWeek() != null && (startTime.getDayOfWeek() < 0 || startTime.getDayOfWeek() > 7))
+            throw new IllegalArgumentException("Start day_of_week must be between 0 and 7.");
+        if (endTime.getDayOfWeek() != null && (endTime.getDayOfWeek() < 0 || endTime.getDayOfWeek() > 7))
+            throw new IllegalArgumentException("End day_of_week must be between 0 and 7.");
+
+        // Determine schedule types.
+        TimeSpec.ScheduleType startType = startTime.getScheduleType();
+        TimeSpec.ScheduleType endType = endTime.getScheduleType();
+        if (startType == TimeSpec.ScheduleType.UNKNOWN || endType == TimeSpec.ScheduleType.UNKNOWN) {
+            throw new IllegalArgumentException("TimeSpec combination does not match any acceptable schedule type.");
+        }
+        if (startType != endType) {
+            throw new IllegalArgumentException("Start and end TimeSpecs must be of the same schedule type.");
+        }
+        // For Annual schedules, check that the day_of_month is valid for the given month.
+        if (startType == TimeSpec.ScheduleType.ANNUAL) {
+            // Use an arbitrary leap year (e.g. 2000) to allow February 29.
+            YearMonth ymStart = YearMonth.of(2000, startTime.getMonth());
+            if (startTime.getDayOfMonth() > ymStart.lengthOfMonth()) {
+                throw new IllegalArgumentException("Start date " + startTime.getMonth() + "/" + startTime.getDayOfMonth() + " is not a valid date.");
+            }
+            YearMonth ymEnd = YearMonth.of(2000, endTime.getMonth());
+            if (endTime.getDayOfMonth() > ymEnd.lengthOfMonth()) {
+                throw new IllegalArgumentException("End date " + endTime.getMonth() + "/" + endTime.getDayOfMonth() + " is not a valid date.");
+            }
+        }
     }
 
     /**
-     * Returns true if the given ZonedDateTime (which is assumed to be expressed in any zone)
-     * falls within the blackout period defined in the configured effectiveZone.
-     * The method first converts the argument to the effective zone.
+     * Returns true if the given ZonedDateTime (converted to effectiveZone) falls within the blackout period.
      */
     public boolean isBlackOutActive(ZonedDateTime dt) {
         ZonedDateTime effectiveDt = dt.withZoneSameInstant(effectiveZone);
-        if (startTime.getDayOfMonth() != null && startTime.getMonth() == null) {
-            return isInMonthlyInterval(effectiveDt);
-        } else if (startTime.getMonth() != null && startTime.getDayOfMonth() != null) {
-            return isInAnnualInterval(effectiveDt);
-        } else if (startTime.getDayOfWeek() != null) {
-            return isInWeeklyInterval(effectiveDt);
-        } else if (startTime.getHour() != null) {
-            return isInDailyInterval(effectiveDt);
-        } else {
-            throw new IllegalStateException("Insufficient time specification");
+        switch (startTime.getScheduleType()) {
+            case DAILY:
+                return isInDailyInterval(effectiveDt);
+            case WEEKLY:
+                return isInWeeklyInterval(effectiveDt);
+            case MONTHLY:
+                return isInMonthlyInterval(effectiveDt);
+            case ANNUAL:
+                return isInAnnualInterval(effectiveDt);
+            default:
+                throw new IllegalStateException("Unknown schedule type in TimeSpec.");
         }
     }
 
     /**
-     * Returns the next blackout end time (as a ZonedDateTime in the effectiveZone)
-     * that comes strictly after the provided dt.
-     * The dt is first converted to the effective zone.
+     * Returns the next blackout end time (as a ZonedDateTime in effectiveZone) that occurs strictly after dt.
      */
     public ZonedDateTime getBlackOutNextEndTime(ZonedDateTime dt) {
         ZonedDateTime effectiveDt = dt.withZoneSameInstant(effectiveZone);
-        if (startTime.getDayOfMonth() != null && startTime.getMonth() == null) {
-            return getMonthlyNextEndTime(effectiveDt);
-        } else if (startTime.getMonth() != null && startTime.getDayOfMonth() != null) {
-            return getAnnualNextEndTime(effectiveDt);
-        } else if (startTime.getDayOfWeek() != null) {
-            return getWeeklyNextEndTime(effectiveDt);
-        } else if (startTime.getHour() != null) {
-            return getDailyNextEndTime(effectiveDt);
-        } else {
-            throw new IllegalStateException("Insufficient time specification for blackout schedule");
+        switch (startTime.getScheduleType()) {
+            case DAILY:
+                return getDailyNextEndTime(effectiveDt);
+            case WEEKLY:
+                return getWeeklyNextEndTime(effectiveDt);
+            case MONTHLY:
+                return getMonthlyNextEndTime(effectiveDt);
+            case ANNUAL:
+                return getAnnualNextEndTime(effectiveDt);
+            default:
+                throw new IllegalStateException("Unknown schedule type in TimeSpec.");
         }
     }
 
-    // --- Daily schedule helpers ---
+    // --- Helper methods for computing blackout boundaries ---
+
+    // DAILY:
     private boolean isInDailyInterval(ZonedDateTime dt) {
         LocalTime time = dt.toLocalTime();
-        LocalTime start = LocalTime.of(startTime.getHour(),
-                                       startTime.getMinute() != null ? startTime.getMinute() : 0);
-        LocalTime end = LocalTime.of(endTime.getHour(),
-                                     endTime.getMinute() != null ? endTime.getMinute() : 0);
+        LocalTime start = LocalTime.of(startTime.getHour(), startTime.getMinute() != null ? startTime.getMinute() : 0);
+        LocalTime end = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
         if (!start.isAfter(end)) {
             return !time.isBefore(start) && time.isBefore(end);
-        } else { // spans midnight, e.g., 22:00 to 02:00
+        } else {
             return !time.isBefore(start) || time.isBefore(end);
         }
     }
@@ -141,14 +189,15 @@ public class BlackOut {
         return dt.toLocalTime().isBefore(end) ? candidate : today.plusDays(1).atTime(end).atZone(effectiveZone);
     }
 
-    // --- Weekly schedule helpers ---
+    // WEEKLY:
     private boolean isInWeeklyInterval(ZonedDateTime dt) {
-        DayOfWeek startDow = DayOfWeek.of(startTime.getDayOfWeek());
-        DayOfWeek endDow = DayOfWeek.of(endTime.getDayOfWeek());
-        LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
-                                                startTime.getMinute() != null ? startTime.getMinute() : 0);
-        LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
-                                              endTime.getMinute() != null ? endTime.getMinute() : 0);
+        // Our spec uses day_of_week values: 0 or 7 represent Sunday; internally we convert 0 to 7.
+        int sDOW = (startTime.getDayOfWeek() == null ? -1 : (startTime.getDayOfWeek() == 0 ? 7 : startTime.getDayOfWeek()));
+        int eDOW = (endTime.getDayOfWeek() == null ? -1 : (endTime.getDayOfWeek() == 0 ? 7 : endTime.getDayOfWeek()));
+        DayOfWeek startDow = DayOfWeek.of(sDOW);
+        DayOfWeek endDow = DayOfWeek.of(eDOW);
+        LocalTime startLocalTime = LocalTime.of(startTime.getHour(), startTime.getMinute() != null ? startTime.getMinute() : 0);
+        LocalTime endLocalTime = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
 
         LocalDate date = dt.toLocalDate();
         LocalDate startDate = date.with(TemporalAdjusters.previousOrSame(startDow));
@@ -175,12 +224,12 @@ public class BlackOut {
     }
 
     private ZonedDateTime getWeeklyNextEndTime(ZonedDateTime dt) {
-        DayOfWeek startDow = DayOfWeek.of(startTime.getDayOfWeek());
-        DayOfWeek endDow = DayOfWeek.of(endTime.getDayOfWeek());
-        LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
-                                                startTime.getMinute() != null ? startTime.getMinute() : 0);
-        LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
-                                              endTime.getMinute() != null ? endTime.getMinute() : 0);
+        int sDOW = (startTime.getDayOfWeek() == null ? -1 : (startTime.getDayOfWeek() == 0 ? 7 : startTime.getDayOfWeek()));
+        int eDOW = (endTime.getDayOfWeek() == null ? -1 : (endTime.getDayOfWeek() == 0 ? 7 : endTime.getDayOfWeek()));
+        DayOfWeek startDow = DayOfWeek.of(sDOW);
+        DayOfWeek endDow = DayOfWeek.of(eDOW);
+        LocalTime startLocalTime = LocalTime.of(startTime.getHour(), startTime.getMinute() != null ? startTime.getMinute() : 0);
+        LocalTime endLocalTime = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
 
         LocalDate baseDate = dt.toLocalDate();
         LocalDate candidateStartDate = baseDate.with(TemporalAdjusters.previousOrSame(startDow));
@@ -204,14 +253,12 @@ public class BlackOut {
         return candidateBlackoutEnd;
     }
 
-    // --- Annual schedule helpers ---
+    // ANNUAL:
     private boolean isInAnnualInterval(ZonedDateTime dt) {
         MonthDay startMD = MonthDay.of(startTime.getMonth(), startTime.getDayOfMonth());
         MonthDay endMD = MonthDay.of(endTime.getMonth(), endTime.getDayOfMonth());
-        LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
-                                                startTime.getMinute() != null ? startTime.getMinute() : 0);
-        LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
-                                              endTime.getMinute() != null ? endTime.getMinute() : 0);
+        LocalTime startLocalTime = LocalTime.of(startTime.getHour(), startTime.getMinute() != null ? startTime.getMinute() : 0);
+        LocalTime endLocalTime = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
         int year = dt.getYear();
 
         ZonedDateTime blackoutStart;
@@ -240,8 +287,7 @@ public class BlackOut {
     private ZonedDateTime getAnnualNextEndTime(ZonedDateTime dt) {
         MonthDay startMD = MonthDay.of(startTime.getMonth(), startTime.getDayOfMonth());
         MonthDay endMD = MonthDay.of(endTime.getMonth(), endTime.getDayOfMonth());
-        LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
-                                              endTime.getMinute() != null ? endTime.getMinute() : 0);
+        LocalTime endLocalTime = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
         int year = dt.getYear();
         ZonedDateTime candidateBlackoutEnd;
         if (startMD.compareTo(endMD) <= 0) {
@@ -266,14 +312,12 @@ public class BlackOut {
         return candidateBlackoutEnd;
     }
 
-    // --- Monthly schedule helpers ---
+    // MONTHLY:
     private boolean isInMonthlyInterval(ZonedDateTime dt) {
         int startDay = startTime.getDayOfMonth();
         int endDay = endTime.getDayOfMonth();
-        LocalTime startLocalTime = LocalTime.of(startTime.getHour(),
-                                                startTime.getMinute() != null ? startTime.getMinute() : 0);
-        LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
-                                              endTime.getMinute() != null ? endTime.getMinute() : 0);
+        LocalTime startLocalTime = LocalTime.of(startTime.getHour(), startTime.getMinute() != null ? startTime.getMinute() : 0);
+        LocalTime endLocalTime = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
 
         if (startDay <= endDay) {
             LocalDate periodStartDate = LocalDate.of(dt.getYear(), dt.getMonthValue(), startDay);
@@ -304,8 +348,7 @@ public class BlackOut {
     private ZonedDateTime getMonthlyNextEndTime(ZonedDateTime dt) {
         int startDay = startTime.getDayOfMonth();
         int endDay = endTime.getDayOfMonth();
-        LocalTime endLocalTime = LocalTime.of(endTime.getHour(),
-                                              endTime.getMinute() != null ? endTime.getMinute() : 0);
+        LocalTime endLocalTime = LocalTime.of(endTime.getHour(), endTime.getMinute() != null ? endTime.getMinute() : 0);
         ZonedDateTime candidate;
         if (startDay <= endDay) {
             candidate = LocalDate.of(dt.getYear(), dt.getMonthValue(), endDay)

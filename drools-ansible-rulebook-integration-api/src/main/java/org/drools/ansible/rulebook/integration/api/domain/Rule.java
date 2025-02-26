@@ -133,6 +133,10 @@ public class Rule {
         return blackOut;
     }
 
+    public void setBlackOut(BlackOut blackOut) {
+        this.blackOut = blackOut;
+    }
+
     public BlackOut getBlack_out() {
         return blackOut;
     }

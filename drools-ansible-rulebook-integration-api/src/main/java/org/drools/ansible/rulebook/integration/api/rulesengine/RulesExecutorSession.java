@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
@@ -50,9 +51,7 @@ public class RulesExecutorSession {
 
     private final RulesSetEventStructure rulesSetEventStructure;
 
-    private final Map<String, BlackOut> blackOuts = new HashMap<>();
-    private final Map<String, ZonedDateTime> blackOutEndTimes = new HashMap<>();
-    private final Map<String, Deque<Match>> blackOutMatches = new HashMap<>();
+    private final BlackOutManager blackOutManager;
 
     public RulesExecutorSession(RulesSet rulesSet, KieSession kieSession, RulesExecutionController rulesExecutionController, long id) {
         this.rulesSet = rulesSet;
@@ -61,31 +60,9 @@ public class RulesExecutorSession {
         this.id = id;
         this.sessionStatsCollector = new SessionStatsCollector(id);
         this.rulesSetEventStructure = new RulesSetEventStructure(rulesSet);
-        enlistBlackOuts();
+        this.blackOutManager = new BlackOutManager(rulesSet);
 
         initClock();
-    }
-
-    private void enlistBlackOuts() {
-        rulesSet.getRules().forEach(rule -> {
-            BlackOut blackOut = rule.getRule().getBlackOut();
-            if (blackOut != null) {
-                blackOuts.put(rule.getRule().getName(), blackOut);
-            }
-        });
-    }
-
-    public boolean blackOutExists(String ruleName) {
-        return blackOuts.containsKey(ruleName);
-    }
-
-    public boolean isBlackOutActive(String ruleName) {
-        if (!blackOuts.containsKey(ruleName)) {
-            return false;
-        }
-        BlackOut blackOut = blackOuts.get(ruleName);
-        ZonedDateTime currentDateTime = getCurrentDateTime();
-        return blackOut.isBlackOutActive(currentDateTime);
     }
 
     private ZonedDateTime getCurrentDateTime() {
@@ -93,47 +70,16 @@ public class RulesExecutorSession {
         return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneId.systemDefault());
     }
 
+    public boolean isBlackOutActive(String ruleName) {
+        return blackOutManager.isBlackOutActive(ruleName, getCurrentDateTime());
+    }
+
     public void queueBlackOutMatch(String ruleName, Match match) {
-        BlackOut blackOut = blackOuts.get(ruleName);
-        ZonedDateTime currentDateTime = getCurrentDateTime();
-        ZonedDateTime blackOutNextEndTime = blackOut.getBlackOutNextEndTime(currentDateTime);
-        blackOutEndTimes.put(ruleName, blackOutNextEndTime);
-        blackOutMatches.computeIfAbsent(ruleName, k -> new ArrayDeque<>()).add(match);
-        if (log.isDebugEnabled()) {
-            log.debug("Queueing a match for rule {} until black out ends {}", ruleName, blackOutNextEndTime);
-        }
+        blackOutManager.queueBlackOutMatch(ruleName, match, getCurrentDateTime());
     }
 
     public List<Match> getMatchesAfterBlackOut() {
-        List<Match> matches = new ArrayList<>();
-        ZonedDateTime currentDateTime = getCurrentDateTime();
-        List<String> processedRules = new ArrayList<>();
-        for (Map.Entry<String, ZonedDateTime> entry : blackOutEndTimes.entrySet()) {
-            String ruleName = entry.getKey();
-            ZonedDateTime blackOutEndTime = entry.getValue();
-            if (blackOutEndTime.isBefore(currentDateTime)) {
-                // Not checking isBlackOutActive(). Even if now is during the blackout, the queued matches of the previous blackout should be retrieved
-                Deque<Match> blackOutMatchesForRule = blackOutMatches.get(ruleName);
-                if (blackOutMatchesForRule != null) {
-                    BlackOut blackOut = blackOuts.get(ruleName);
-                    switch (blackOut.getTrigger()) {
-                        case ALL:
-                            matches.addAll(blackOutMatchesForRule);
-                            break;
-                        case FIRST:
-                            matches.add(blackOutMatchesForRule.pollFirst());
-                            break;
-                        case LAST:
-                            matches.add(blackOutMatchesForRule.pollLast());
-                            break;
-                    }
-                    blackOutMatches.remove(ruleName);
-                }
-                processedRules.add(ruleName);
-            }
-        }
-        processedRules.forEach(blackOutEndTimes::remove);
-        return matches;
+        return blackOutManager.getMatchesAfterBlackOut(getCurrentDateTime());
     }
 
     private void initClock() {

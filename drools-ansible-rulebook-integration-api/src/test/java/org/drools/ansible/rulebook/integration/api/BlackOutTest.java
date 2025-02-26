@@ -265,7 +265,7 @@ public class BlackOutTest {
         String json = String.format(COMMON_JSON_TEMPLATE, dailyBlackOut);
         RulesExecutor rulesExecutor = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.USE_PSEUDO_CLOCK), json);
 
-        // in the blackout period. Equivalent to 15:00:00 UTC
+        // Equivalent to 15:00:00 UTC
         ZonedDateTime testDateTime = LocalDateTime.of(2025, 7, 1, 11, 0).atZone(ZoneId.of("America/New_York"));
         advanceTimeTo(testDateTime, rulesExecutor);
 
@@ -276,14 +276,45 @@ public class BlackOutTest {
         assertThat(matches.get()).hasSize(1);
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void invalidTimeSpec() {
+        // day_of_month and day_of_week are mutually exclusive
+        String invalidTimeSpec =
+                """
+                {
+                   "trigger": "all",
+                   "timezone": "local",
+                   "start_time": {
+                      "minute": 0,
+                      "hour": 14,
+                      "day_of_month": 1,
+                      "day_of_week": 1,
+                      "month": 7
+                   },
+                   "end_time": {
+                      "minute": 0,
+                      "hour": 16,
+                      "day_of_month": 1,
+                      "day_of_week": 1,
+                      "month": 7
+                   }
+                }
+                """;
+        String json = String.format(COMMON_JSON_TEMPLATE, invalidTimeSpec);
+        RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.USE_PSEUDO_CLOCK), json);
+    }
+
     @Test
     public void triggerAll() throws ExecutionException, InterruptedException {
         List<Map<String, Map>> matchList = trigger("all");
 
         assertThat(matchList).hasSize(2);
 
+        // group 1 : i, j, k
         assertMatch((Map<String, Map<String, Map<String, Integer>>>) matchList.get(0).get("r1"),
                     1, 1, 2, 3);
+
+        // group 2 : i, j, k
         assertMatch((Map<String, Map<String, Map<String, Integer>>>) matchList.get(1).get("r1"),
                     2, 1, 2, 3);
     }
@@ -307,6 +338,7 @@ public class BlackOutTest {
 
         assertThat(matchList).hasSize(1);
 
+        // group 1 : i, j, k
         assertMatch((Map<String, Map<String, Map<String, Integer>>>) matchList.get(0).get("r1"),
                     1, 1, 2, 3);
     }
@@ -317,6 +349,7 @@ public class BlackOutTest {
 
         assertThat(matchList).hasSize(1);
 
+        // group 2 : i, j, k
         assertMatch((Map<String, Map<String, Map<String, Integer>>>) matchList.get(0).get("r1"),
                     2, 1, 2, 3);
     }
@@ -425,14 +458,14 @@ public class BlackOutTest {
         matchedRules = rulesExecutor.processEvents("{ \"data\": { \"group\": 3, \"k\": 3 } }").join();
         List<Map<String, Map>> matchListForGroup3 = RuleMatch.asList(matchedRules);
         assertThat(matchListForGroup3).hasSize(1);
-        System.out.println(matchListForGroup3);
 
         return matchListAfterBlackOut;
     }
 
+    // test multiple rules with different blackouts. Check if blackOuts/blackOutEndTimes/blackOutMatches are correctly managed
     @Test
-    public void daily_AllCondition() throws ExecutionException, InterruptedException {
-        String json =
+    public void multipleRules() throws ExecutionException, InterruptedException {
+        String jsonTemplate =
                 """
                 {
                    "rules":[
@@ -440,28 +473,14 @@ public class BlackOutTest {
                          "Rule":{
                             "name": "r1",
                             "condition":{
-                                "AllCondition": [
-                                    {
-                                        "EqualsExpression": {
-                                            "lhs": {
-                                                "Event": "i"
-                                            },
-                                            "rhs": {
-                                                "Integer": 1
-                                            }
-                                        }
+                                "EqualsExpression": {
+                                    "lhs": {
+                                        "Event": "data.i"
                                     },
-                                    {
-                                        "EqualsExpression": {
-                                            "lhs": {
-                                                "Event": "j"
-                                            },
-                                            "rhs": {
-                                                "Integer": 2
-                                            }
-                                        }
+                                    "rhs": {
+                                        "Integer": 1
                                     }
-                                ]
+                                }
                             },
                             "actions": [
                                {
@@ -484,36 +503,194 @@ public class BlackOutTest {
                                }
                             }
                          }
+                      },
+                      {
+                         "Rule":{
+                            "name": "r2",
+                            "condition":{
+                                "EqualsExpression": {
+                                    "lhs": {
+                                        "Event": "data.i"
+                                    },
+                                    "rhs": {
+                                        "Integer": 2
+                                    }
+                                }
+                            },
+                            "actions": [
+                               {
+                                  "Action": {
+                                     "action": "debug",
+                                     "action_args": {}
+                                  }
+                               }
+                            ],
+                            "black_out": {
+                               "trigger": "all",
+                               "timezone": "local",
+                               "start_time": {
+                                  "minute": 30,
+                                  "hour": 15
+                               },
+                               "end_time": {
+                                  "minute": 30,
+                                  "hour": 17
+                               }
+                            }
+                         }
                       }
-                   ]
+                   ],
+                   "default_events_ttl": "10 hours"
                 }
                 """;
-
+        String json = String.format(jsonTemplate);
         RulesExecutor rulesExecutor = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.USE_PSEUDO_CLOCK), json);
 
-        ZonedDateTime testDateTime = LocalDateTime.of(2025, 7, 1, 15, 0).atZone(ZoneId.systemDefault()); // in the blackout period
+        System.out.println("Advance time to 15:00");
+        ZonedDateTime testDateTime = LocalDateTime.of(2025, 7, 1, 15, 0).atZone(ZoneId.systemDefault()); // in the first blackout, before the second blackout
         advanceTimeTo(testDateTime, rulesExecutor);
 
-        List<Match> matchedRules = rulesExecutor.processEvents("{ \"i\":1 }").join();
-        assertThat(matchedRules).isEmpty();
+        List<Match> matches = rulesExecutor.processEvents("{ \"data\": { \"i\": 1 } }").join();
+        assertThat(matches).isEmpty();
 
-        rulesExecutor.advanceTime(10, TimeUnit.MINUTES); // still in the blackout period
+        matches = rulesExecutor.processEvents("{ \"data\": { \"i\": 2 } }").join();
+        assertThat(matches).hasSize(1);
+        assertThat(matches.get(0).getRule().getName()).isEqualTo("r2");
 
-        matchedRules = rulesExecutor.processEvents("{ \"j\":2 }").join();
-        assertThat(matchedRules).isEmpty();
+        System.out.println("Advance time to 16:00");
+        matches = rulesExecutor.advanceTime(1, TimeUnit.HOURS).get(); // 16:00 in the both blackouts
+        assertThat(matches).isEmpty();
 
-        CompletableFuture<List<Match>> matches = rulesExecutor.advanceTime(2, TimeUnit.HOURS); // after blackout
-        List<Map<String, Map>> list = RuleMatch.asList(matches.get());
-        assertThat(list).hasSize(1);
-        assertThat(list.get(0).get("r1")).hasSize(2);
+        matches = rulesExecutor.processEvents("{ \"data\": { \"i\": 2 } }").join(); // insert again
+        assertThat(matches).isEmpty();
+
+        System.out.println("Advance time to 17:00");
+        matches = rulesExecutor.advanceTime(1, TimeUnit.HOURS).get(); // 17:00 after the first blackout, in the second blackout
+        assertThat(matches).hasSize(1);
+        assertThat(matches.get(0).getRule().getName()).isEqualTo("r1");
+
+        System.out.println("Advance time to 18:00");
+        matches = rulesExecutor.advanceTime(1, TimeUnit.HOURS).get(); // 18:00 after the second blackout
+        assertThat(matches).hasSize(1);
+        assertThat(matches.get(0).getRule().getName()).isEqualTo("r2");
     }
 
     @Test
-    public void invalidDateTime() {
+    public void inheritBlackOut() {
+        String jsonTemplate =
+                """
+                {
+                   "rules":[
+                      {
+                         "Rule":{
+                            "name": "r1",
+                            "condition":{
+                                "EqualsExpression": {
+                                    "lhs": {
+                                        "Event": "data.i"
+                                    },
+                                    "rhs": {
+                                        "Integer": 1
+                                    }
+                                }
+                            },
+                            "actions": [
+                               {
+                                  "Action": {
+                                     "action": "debug",
+                                     "action_args": {}
+                                  }
+                               }
+                            ]
+                         }
+                      },
+                      {
+                         "Rule":{
+                            "name": "r2",
+                            "condition":{
+                                "EqualsExpression": {
+                                    "lhs": {
+                                        "Event": "data.i"
+                                    },
+                                    "rhs": {
+                                        "Integer": 2
+                                    }
+                                }
+                            },
+                            "black_out": {
+                               "trigger": "first",
+                               "timezone": "local",
+                               "start_time": {
+                                  "hour": 3,
+                                  "day_of_week": 4
+                               },
+                               "end_time": {
+                                  "hour": 5,
+                                  "day_of_week": 4
+                               }
+                            },
+                            "actions": [
+                               {
+                                  "Action": {
+                                     "action": "debug",
+                                     "action_args": {}
+                                  }
+                               }
+                            ]
+                         }
+                      }
+                   ],
+                   "default_events_ttl": "10 hours",
+                   "black_out": {
+                      "trigger": "all",
+                      "timezone": "local",
+                      "start_time": {
+                         "minute": 30,
+                         "hour": 14
+                      },
+                      "end_time": {
+                         "minute": 15,
+                         "hour": 16
+                      }
+                   }
+                }
+                """;
+        String json = String.format(jsonTemplate);
+        RulesExecutor rulesExecutor = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.USE_PSEUDO_CLOCK), json);
+
+        // r1 inherits the blackOut from the ruleset: daily 14:30-16:15
+        // r2 has its own blackOut: weekly Thursday 03:00-05:00
+
+        // 2025-07-02 15:00:00 is Wednesday, in the first blackout, before the second blackout
+        ZonedDateTime testDateTime = LocalDateTime.of(2025, 7, 2, 15, 0).atZone(ZoneId.systemDefault());
+        advanceTimeTo(testDateTime, rulesExecutor);
+
+        List<Match> matches = rulesExecutor.processEvents("{ \"data\": { \"i\": 1 } }").join();
+        assertThat(matches).isEmpty();
+
+        matches = rulesExecutor.processEvents("{ \"data\": { \"i\": 2 } }").join();
+        assertThat(matches).hasSize(1);
+        assertThat(matches.get(0).getRule().getName()).isEqualTo("r2");
+
+        System.out.println("Advance time to 17:00");
+        matches = rulesExecutor.advanceTime(2, TimeUnit.HOURS).join();
+        assertThat(matches).hasSize(1);
+        assertThat(matches.get(0).getRule().getName()).isEqualTo("r1");
+
+        System.out.println("Advance time to Thursday 4:00");
+        matches = rulesExecutor.advanceTime(11, TimeUnit.HOURS).join();
+        assertThat(matches).isEmpty();
+
+        matches = rulesExecutor.processEvents("{ \"data\": { \"i\": 2 } }").join();
+        assertThat(matches).isEmpty();
+
+        System.out.println("Advance time to Thursday 6:00");
+        matches = rulesExecutor.advanceTime(2, TimeUnit.HOURS).join();
+        assertThat(matches).hasSize(1);
+        assertThat(matches.get(0).getRule().getName()).isEqualTo("r2");
+
 
     }
 
-    // TODO: test multiple rules with different blackouts. Check if blackOuts/blackOutEndTimes/blackOutMatches are correctly managed
-
-    // TODO: test and investigate multithread access to blackOuts/blackOutEndTimes/blackOutMatches
+    // TODO: test for weekday 0/7
 }

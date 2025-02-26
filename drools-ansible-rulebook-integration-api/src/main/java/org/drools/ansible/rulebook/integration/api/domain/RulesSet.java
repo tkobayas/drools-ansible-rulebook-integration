@@ -3,6 +3,7 @@ package org.drools.ansible.rulebook.integration.api.domain;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
 import org.drools.ansible.rulebook.integration.api.RuleConfigurationOptions;
+import org.drools.ansible.rulebook.integration.api.domain.temporal.BlackOut;
 import org.drools.ansible.rulebook.integration.api.domain.temporal.TimeAmount;
 import org.drools.ansible.rulebook.integration.api.rulesengine.RulesExecutionController;
 import org.drools.model.Model;
@@ -33,6 +34,8 @@ public class RulesSet {
 
     private int enabledRulesNumber;
     private int disabledRulesNumber;
+
+    private BlackOut blackOut; // rulesSet-wide default blackout
 
     public String getName() {
         return name;
@@ -144,6 +147,14 @@ public class RulesSet {
         return matchMultipleRules;
     }
 
+    public BlackOut getBlack_out() {
+        return blackOut;
+    }
+
+    public void setBlack_out(BlackOut blackOut) {
+        this.blackOut = blackOut;
+    }
+
     public boolean requiresPseudoClock() {
         return rules.stream().map(RuleContainer::getRule).anyMatch(Rule::requiresPseudoClock);
     }
@@ -156,7 +167,15 @@ public class RulesSet {
         return clockPeriod != null || requiresAsyncExecution();
     }
 
-    public void validate() {
+    public void initializeBlackOut() {
+        // inherit blackOut from rulesSet to rules
+        rules.forEach(rule -> {
+            if (blackOut != null && rule.getRule().getBlackOut() == null) {
+                rule.getRule().setBlackOut(blackOut);
+            }
+        });
+
+        // validate blackOut
         rules.forEach(rule -> {
             if (rule.getRule().getBlackOut() != null) {
                 rule.getRule().getBlackOut().validate();

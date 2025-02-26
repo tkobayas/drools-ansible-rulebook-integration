@@ -49,7 +49,7 @@ public class RulesExecutorFactory {
     }
 
     public static RulesExecutor createRulesExecutor(RulesSet rulesSet) {
-        rulesSet.validate();
+        rulesSet.initializeBlackOut();
         RulesExecutor rulesExecutor = new RulesExecutor(createRulesExecutorSession(rulesSet), rulesSet.hasOption(ASYNC_EVALUATION));
         if (!rulesSet.hasOption(FULLY_MANUAL_PSEUDOCLOCK)) {
             if (rulesSet.getClockPeriod() != null) {

@@ -83,4 +83,38 @@ public class TimeSpec {
                 ", month=" + month +
                 '}';
     }
+
+    public enum ScheduleType {
+        DAILY,
+        WEEKLY,
+        MONTHLY,
+        ANNUAL,
+        UNKNOWN
+    }
+
+    /**
+     * Determines the schedule type based on which fields are set.
+     */
+    public ScheduleType getScheduleType() {
+        if (hour == null) {
+            return ScheduleType.UNKNOWN;
+        }
+        // Daily: month, dayOfWeek, and dayOfMonth are null.
+        if (month == null && dayOfWeek == null && dayOfMonth == null) {
+            return ScheduleType.DAILY;
+        }
+        // Weekly: month is null, dayOfWeek is non-null, and dayOfMonth is null.
+        if (month == null && dayOfWeek != null && dayOfMonth == null) {
+            return ScheduleType.WEEKLY;
+        }
+        // Monthly: month and dayOfWeek are null, and dayOfMonth is non-null.
+        if (month == null && dayOfWeek == null && dayOfMonth != null) {
+            return ScheduleType.MONTHLY;
+        }
+        // Annual: month and dayOfMonth are non-null and dayOfWeek is null.
+        if (month != null && dayOfWeek == null && dayOfMonth != null) {
+            return ScheduleType.ANNUAL;
+        }
+        return ScheduleType.UNKNOWN;
+    }
 }
