@@ -18,6 +18,7 @@
     <module>drools-ansible-rulebook-integration-benchmark</module>
     <module>drools-ansible-rulebook-integration-tests</module>
     <module>drools-ansible-rulebook-integration-main</module>
+    <module>drools-ansible-rulebook-integration-ha</module>
   </modules>
   
   <name>Drools :: Ansible Rulebook Integration</name>
