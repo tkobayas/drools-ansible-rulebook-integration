@@ -1,5 +1,6 @@
 package org.drools.ansible.rulebook.integration.api;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -76,5 +77,9 @@ public class RulesExecutorContainer {
             allowAsync();
         }
         return channel.port();
+    }
+    
+    public Collection<RulesExecutor> getAllExecutors() {
+        return rulesExecutors.values();
     }
 }
