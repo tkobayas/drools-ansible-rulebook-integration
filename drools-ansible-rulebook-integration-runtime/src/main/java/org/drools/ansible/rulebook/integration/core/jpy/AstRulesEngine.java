@@ -9,11 +9,14 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
+
+import java.time.Instant;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
+import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 
 public class AstRulesEngine implements Closeable {
 
@@ -78,22 +82,59 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processEvents(serializedFact).join();
         String result = matchesToJson(matches);
         
-        // In HA mode, create matching events for triggered rules
+        
+        // In HA mode, create matching events for triggered rules and add ME UUIDs to response
         if (haMode && haStateManager != null && haStateManager.isLeader() && !matches.isEmpty()) {
-            Map<String, Object> resultMap = new HashMap<>();
-            resultMap.put("matches", RuleMatch.asList(matches));
-            
-            // Create ME UUID for each match
-            for (Match match : matches) {
-                String ruleName = match.getRule().getName();
-                String rulesetName = match.getRule().getPackageName();
-                Map<String, Object> facts = new HashMap<>();
-                match.getObjects().forEach(obj -> facts.put(obj.getClass().getSimpleName(), obj));
+            try {
+                logger.debug("Original response before ME UUID addition: {}", result);
                 
-                String meUuid = haStateManager.addMatchingEvent(
-                    String.valueOf(sessionId), rulesetName, ruleName, facts
-                );
-                logger.debug("Created ME UUID {} for rule {}/{}", meUuid, rulesetName, ruleName);
+                // Parse the existing JSON result
+                List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
+                logger.debug("Parsed match list: {}", matchList);
+                
+                // Process each match and add ME UUID
+                for (int i = 0; i < matches.size() && i < matchList.size(); i++) {
+                    Match match = matches.get(i);
+                    Map<String, Object> matchJson = matchList.get(i);
+                    
+                    String ruleName = match.getRule().getName();
+                    String rulesetName = match.getRule().getPackageName();
+                    Map<String, Object> facts = new HashMap<>();
+                    match.getObjects().forEach(obj -> facts.put(obj.getClass().getSimpleName(), obj));
+                    
+                    // Create MatchingEvent object
+                    MatchingEvent me = new MatchingEvent();
+                    me.setMeUuid(UUID.randomUUID().toString());
+                    me.setSessionId(String.valueOf(sessionId));
+                    me.setRulesetName(rulesetName);
+                    me.setRuleName(ruleName);
+                    me.setMatchingFacts(facts);
+                    me.setStatus(MatchingEvent.MatchingEventStatus.PENDING);
+                    me.setCreatedAt(Instant.now().toString());
+                    
+                    String meUuid = haStateManager.addMatchingEvent(me);
+                    logger.debug("Created ME UUID {} for rule {}/{}", meUuid, rulesetName, ruleName);
+                    
+                    // Add meUuid to the rule object in JSON
+                    // Structure: [{"ruleName": {"m": {...}, "meUuid": "..."}}]
+                    if (matchJson.containsKey(ruleName)) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> ruleObject = (Map<String, Object>) matchJson.get(ruleName);
+                        ruleObject.put("meUuid", meUuid);
+                        logger.debug("Added meUuid to rule object for {}", ruleName);
+                    } else {
+                        logger.warn("Rule name {} not found in matchJson keys: {}", ruleName, matchJson.keySet());
+                    }
+                }
+                
+                String modifiedResult = toJson(matchList);
+                logger.debug("Modified response with ME UUIDs: {}", modifiedResult);
+                return modifiedResult;
+                
+            } catch (Exception e) {
+                logger.error("Failed to parse or modify assertEvent response for HA mode", e);
+                // Fall back to original response if JSON processing fails
+                return result;
             }
         }
         
@@ -254,7 +295,7 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("HA mode not configured");
         }
         
-        haStateManager.removeMatchingEvent(String.valueOf(sessionId), meUuid);
+        haStateManager.removeMatchingEvent(meUuid);
         logger.debug("Deleted matching event: {}", meUuid);
     }
     
