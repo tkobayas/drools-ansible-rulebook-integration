@@ -19,9 +19,6 @@ public class EventState {
     private String clockTime;
     private Map<String, Object> sessionStats;
     
-    // In-flight Matching Events with UUIDs
-    private List<MatchingEvent> matchingEvents;
-    
     // Metadata
     private int version;
     private boolean isCurrent;
@@ -82,13 +79,6 @@ public class EventState {
         this.sessionStats = sessionStats;
     }
     
-    public List<MatchingEvent> getMatchingEvents() {
-        return matchingEvents;
-    }
-    
-    public void setMatchingEvents(List<MatchingEvent> matchingEvents) {
-        this.matchingEvents = matchingEvents;
-    }
     
     public int getVersion() {
         return version;

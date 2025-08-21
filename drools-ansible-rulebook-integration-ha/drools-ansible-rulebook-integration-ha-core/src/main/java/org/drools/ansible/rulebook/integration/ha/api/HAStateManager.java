@@ -52,14 +52,10 @@ public interface HAStateManager {
     
     /**
      * Add a matching event to the current event state
-     * @param sessionId The ruleset session ID
-     * @param rulesetName The ruleset name
-     * @param ruleName The rule name
-     * @param matchingFacts The facts that matched
+     * @param matchingEvent The matching event to persist
      * @return UUID for the matching event
      */
-    String addMatchingEvent(String sessionId, String rulesetName, String ruleName, 
-                           Map<String, Object> matchingFacts);
+    String addMatchingEvent(MatchingEvent matchingEvent);
     
     /**
      * Persist or update action state
@@ -79,10 +75,9 @@ public interface HAStateManager {
     
     /**
      * Remove a matching event from event state and delete associated action states
-     * @param sessionId The ruleset session ID
      * @param meUuid The matching event UUID
      */
-    void removeMatchingEvent(String sessionId, String meUuid);
+    void removeMatchingEvent(String meUuid);
     
     /**
      * Get all pending matching events for a session
