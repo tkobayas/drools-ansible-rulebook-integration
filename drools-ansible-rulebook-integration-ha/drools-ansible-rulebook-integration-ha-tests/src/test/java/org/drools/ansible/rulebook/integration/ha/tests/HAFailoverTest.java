@@ -6,9 +6,11 @@ import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.junit.Test;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.*;
@@ -20,6 +22,20 @@ public class HAFailoverTest {
     
     private static final String SESSION_ID = "failover-session";
     
+    // Utility method to create a MatchingEvent with default values
+    private MatchingEvent createMatchingEvent(String sessionId, String rulesetName, 
+                                               String ruleName, Map<String, Object> matchingFacts) {
+        MatchingEvent me = new MatchingEvent();
+        me.setMeUuid(UUID.randomUUID().toString());
+        me.setSessionId(sessionId);
+        me.setRulesetName(rulesetName);
+        me.setRuleName(ruleName);
+        me.setMatchingFacts(matchingFacts);
+        me.setStatus(MatchingEvent.MatchingEventStatus.PENDING);
+        me.setCreatedAt(Instant.now().toString());
+        return me;
+    }
+    
     @Test
     public void testLeaderFailoverWithPendingActions() {
         // Shared database URL for simulating multiple nodes
@@ -30,8 +46,9 @@ public class HAFailoverTest {
         node1.setLeader("node-1");
         
         // Create matching events with actions in progress
-        String me1 = node1.addMatchingEvent(SESSION_ID, "rules", "alert", 
+        MatchingEvent me = createMatchingEvent(SESSION_ID, "rules", "alert", 
                                                Map.of("alert", "critical"));
+        String me1 = node1.addMatchingEvent(me);
         
         // Start action execution
         ActionState actionState = new ActionState();
@@ -72,7 +89,7 @@ public class HAFailoverTest {
         node2.persistActionState(SESSION_ID, me1, recoveredState);
         
         // Clean up
-        node2.removeMatchingEvent(SESSION_ID, me1);
+        node2.removeMatchingEvent(me1);
         node2.shutdown();
     }
     
@@ -83,7 +100,11 @@ public class HAFailoverTest {
         // Node 1 starts work
         HAStateManager node1 = createNode(dbUrl);
         node1.setLeader("node-1");
-        String me1 = node1.addMatchingEvent(SESSION_ID, "rules", "rule1", Map.of("data", "1"));
+        
+        MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "rules", "rule1", 
+                                                           Map.of("data", "1"));
+        String me1 = node1.addMatchingEvent(matchingEvent1);
+        
         node1.unsetLeader();
         
         // Node 2 takes over
@@ -93,7 +114,9 @@ public class HAFailoverTest {
         assertThat(pending2).hasSize(1);
         
         // Node 2 creates more work
-        String me2 = node2.addMatchingEvent(SESSION_ID, "rules", "rule2", Map.of("data", "2"));
+        MatchingEvent matchingEvent2 = createMatchingEvent(SESSION_ID, "rules", "rule2", 
+                                                           Map.of("data", "2"));
+        String me2 = node2.addMatchingEvent(matchingEvent2);
         node2.unsetLeader();
         
         // Node 3 takes over
@@ -124,8 +147,13 @@ public class HAFailoverTest {
         node2.setLeader("node-2");
         
         // Both try to create MEs
-        String me1 = node1.addMatchingEvent(SESSION_ID, "rules", "rule1", Map.of("from", "node1"));
-        String me2 = node2.addMatchingEvent(SESSION_ID, "rules", "rule2", Map.of("from", "node2"));
+        MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "rules", "rule1", 
+                                                           Map.of("from", "node1"));
+        String me1 = node1.addMatchingEvent(matchingEvent1);
+        
+        MatchingEvent matchingEvent2 = createMatchingEvent(SESSION_ID, "rules", "rule2", 
+                                                           Map.of("from", "node2"));
+        String me2 = node2.addMatchingEvent(matchingEvent2);
         
         // Resolve split brain - node2 wins
         node1.unsetLeader();
@@ -147,8 +175,9 @@ public class HAFailoverTest {
         node1.setLeader("node-1");
         
         // Create ME with failed action
-        String meUuid = node1.addMatchingEvent(SESSION_ID, "rules", "retry_rule", 
-                                                  Map.of("retry", true));
+        MatchingEvent me = createMatchingEvent(SESSION_ID, "rules", "retry_rule", 
+                                               Map.of("retry", true));
+        String meUuid = node1.addMatchingEvent(me);
         
         ActionState failedAction = new ActionState();
         failedAction.setMeUuid(meUuid);
@@ -179,7 +208,7 @@ public class HAFailoverTest {
         node2.persistActionState(SESSION_ID, meUuid, toRetry);
         
         // Clean up
-        node2.removeMatchingEvent(SESSION_ID, meUuid);
+        node2.removeMatchingEvent(meUuid);
         node1.shutdown();
         node2.shutdown();
     }

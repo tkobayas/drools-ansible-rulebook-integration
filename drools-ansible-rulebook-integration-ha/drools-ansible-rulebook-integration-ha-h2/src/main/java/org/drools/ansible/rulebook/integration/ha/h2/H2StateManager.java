@@ -141,9 +141,9 @@ public class H2StateManager implements HAStateManager {
             String sql = """
                 INSERT INTO eda_event_state 
                 (session_id, rulebook_hash, partial_matching_events, time_windows, 
-                 clock_time, session_stats, matching_events, version, is_current, 
+                 clock_time, session_stats, version, is_current, 
                  created_at, leader_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
                 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -154,11 +154,10 @@ public class H2StateManager implements HAStateManager {
                 ps.setTimestamp(5, eventState.getClockTime() != null ? 
                               Timestamp.from(Instant.parse(eventState.getClockTime())) : null);
                 ps.setString(6, toJson(eventState.getSessionStats()));
-                ps.setString(7, toJson(eventState.getMatchingEvents()));
-                ps.setInt(8, nextVersion);
-                ps.setBoolean(9, eventState.isCurrent());
-                ps.setTimestamp(10, Timestamp.from(Instant.parse(eventState.getCreatedAt())));
-                ps.setString(11, eventState.getLeaderId());
+                ps.setInt(7, nextVersion);
+                ps.setBoolean(8, eventState.isCurrent());
+                ps.setTimestamp(9, Timestamp.from(Instant.parse(eventState.getCreatedAt())));
+                ps.setString(10, eventState.getLeaderId());
                 
                 ps.executeUpdate();
             }
@@ -172,44 +171,50 @@ public class H2StateManager implements HAStateManager {
     }
     
     @Override
-    public String addMatchingEvent(String sessionId, String rulesetName, String ruleName,
-                                  Map<String, Object> matchingFacts) {
+    public String addMatchingEvent(MatchingEvent matchingEvent) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot add matching event - not the leader");
         }
         
-        String meUuid = UUID.randomUUID().toString();
-        
-        // Get current event state or create new one
-        EventState eventState = getEventState(sessionId);
-        if (eventState == null) {
-            eventState = new EventState();
-            eventState.setSessionId(sessionId);
-            eventState.setMatchingEvents(new ArrayList<>());
+        // Validate the matching event has required fields
+        if (matchingEvent.getMeUuid() == null || matchingEvent.getMeUuid().isEmpty()) {
+            throw new IllegalArgumentException("MatchingEvent must have a UUID");
+        }
+        if (matchingEvent.getSessionId() == null || matchingEvent.getSessionId().isEmpty()) {
+            throw new IllegalArgumentException("MatchingEvent must have a session ID");
         }
         
-        // Create matching event
-        MatchingEvent me = new MatchingEvent();
-        me.setMeUuid(meUuid);
-        me.setSessionId(sessionId);
-        me.setRulesetName(rulesetName);
-        me.setRuleName(ruleName);
-        me.setMatchingFacts(matchingFacts);
-        me.setStatus(MatchingEvent.MatchingEventStatus.PENDING);
-        
-        // Add to event state
-        if (eventState.getMatchingEvents() == null) {
-            eventState.setMatchingEvents(new ArrayList<>());
+        // Insert into matching_events table
+        try (Connection conn = dataSource.getConnection()) {
+            String sql = """
+                INSERT INTO eda_matching_events 
+                (me_uuid, session_id, ruleset_name, rule_name, matching_facts, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """;
+                
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, matchingEvent.getMeUuid());
+                ps.setString(2, matchingEvent.getSessionId());
+                ps.setString(3, matchingEvent.getRulesetName());
+                ps.setString(4, matchingEvent.getRuleName());
+                ps.setString(5, toJson(matchingEvent.getMatchingFacts()));
+                ps.setString(6, matchingEvent.getStatus() != null ? 
+                            matchingEvent.getStatus().toString() : "PENDING");
+                ps.setString(7, matchingEvent.getCreatedAt());
+                
+                ps.executeUpdate();
+            }
+            
+            conn.commit();
+            logger.debug("Added matching event with UUID: {} for rule: {}/{}", 
+                        matchingEvent.getMeUuid(), matchingEvent.getRulesetName(), 
+                        matchingEvent.getRuleName());
+        } catch (SQLException e) {
+            logger.error("Failed to add matching event", e);
+            throw new RuntimeException("Failed to add matching event", e);
         }
-        eventState.getMatchingEvents().add(me);
-        eventState.setCurrent(true);
         
-        // Persist updated state
-        persistEventState(sessionId, eventState);
-        
-        logger.debug("Added matching event with UUID: {} for rule: {}/{}", 
-                    meUuid, rulesetName, ruleName);
-        return meUuid;
+        return matchingEvent.getMeUuid();
     }
     
     @Override
@@ -303,33 +308,45 @@ public class H2StateManager implements HAStateManager {
     }
     
     @Override
-    public void removeMatchingEvent(String sessionId, String meUuid) {
+    public void removeMatchingEvent(String meUuid) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot remove matching event - not the leader");
         }
         
-        // Get current event state
-        EventState eventState = getEventState(sessionId);
-        if (eventState != null && eventState.getMatchingEvents() != null) {
-            // Remove the matching event
-            eventState.getMatchingEvents().removeIf(me -> meUuid.equals(me.getMeUuid()));
-            
-            // Persist updated state
-            persistEventState(sessionId, eventState);
-        }
-        
-        // Delete associated action state
         try (Connection conn = dataSource.getConnection()) {
-            String sql = "DELETE FROM eda_action_state WHERE session_id = ? AND me_uuid = ?";
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, sessionId);
-                ps.setString(2, meUuid);
+            // First get the session_id from the matching event
+            String sessionId = null;
+            String getSessionSql = "SELECT session_id FROM eda_matching_events WHERE me_uuid = ?";
+            try (PreparedStatement ps = conn.prepareStatement(getSessionSql)) {
+                ps.setString(1, meUuid);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        sessionId = rs.getString("session_id");
+                    }
+                }
+            }
+            
+            // Delete matching event
+            String deleteME = "DELETE FROM eda_matching_events WHERE me_uuid = ?";
+            try (PreparedStatement ps = conn.prepareStatement(deleteME)) {
+                ps.setString(1, meUuid);
                 ps.executeUpdate();
             }
+            
+            // Delete associated action state if we found the session_id
+            if (sessionId != null) {
+                String deleteAction = "DELETE FROM eda_action_state WHERE session_id = ? AND me_uuid = ?";
+                try (PreparedStatement ps = conn.prepareStatement(deleteAction)) {
+                    ps.setString(1, sessionId);
+                    ps.setString(2, meUuid);
+                    ps.executeUpdate();
+                }
+            }
+            
             conn.commit();
         } catch (SQLException e) {
-            logger.error("Failed to delete action state", e);
-            throw new RuntimeException("Failed to delete action state", e);
+            logger.error("Failed to remove matching event", e);
+            throw new RuntimeException("Failed to remove matching event", e);
         }
         
         logger.debug("Removed matching event: {}", meUuid);
@@ -337,13 +354,38 @@ public class H2StateManager implements HAStateManager {
     
     @Override
     public List<MatchingEvent> getPendingMatchingEvents(String sessionId) {
-        EventState eventState = getEventState(sessionId);
-        if (eventState != null && eventState.getMatchingEvents() != null) {
-            return eventState.getMatchingEvents().stream()
-                .filter(me -> me.getStatus() == MatchingEvent.MatchingEventStatus.PENDING)
-                .toList();
+        List<MatchingEvent> matchingEvents = new ArrayList<>();
+        
+        try (Connection conn = dataSource.getConnection()) {
+            String sql = """
+                SELECT * FROM eda_matching_events 
+                WHERE session_id = ? AND status = 'PENDING'
+                ORDER BY created_at
+                """;
+                
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, sessionId);
+                
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        MatchingEvent me = new MatchingEvent();
+                        me.setMeUuid(rs.getString("me_uuid"));
+                        me.setSessionId(rs.getString("session_id"));
+                        me.setRulesetName(rs.getString("ruleset_name"));
+                        me.setRuleName(rs.getString("rule_name"));
+                        me.setMatchingFacts(fromJson(rs.getString("matching_facts")));
+                        me.setStatus(MatchingEvent.MatchingEventStatus.valueOf(rs.getString("status")));
+                        me.setCreatedAt(rs.getString("created_at"));
+                        matchingEvents.add(me);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to get pending matching events", e);
+            throw new RuntimeException("Failed to get pending matching events", e);
         }
-        return new ArrayList<>();
+        
+        return matchingEvents;
     }
     
     @Override
@@ -401,21 +443,6 @@ public class H2StateManager implements HAStateManager {
         }
         
         event.setSessionStats(fromJson(rs.getString("session_stats")));
-        
-        // Deserialize matching events
-        String matchingEventsJson = rs.getString("matching_events");
-        if (matchingEventsJson != null && !matchingEventsJson.isEmpty()) {
-            try {
-                List<MatchingEvent> matchingEvents = objectMapper.readValue(
-                    matchingEventsJson,
-                    new TypeReference<List<MatchingEvent>>() {}
-                );
-                event.setMatchingEvents(matchingEvents);
-            } catch (JsonProcessingException e) {
-                logger.error("Failed to deserialize matching events", e);
-                event.setMatchingEvents(new ArrayList<>());
-            }
-        }
         
         event.setVersion(rs.getInt("version"));
         event.setCurrent(rs.getBoolean("is_current"));

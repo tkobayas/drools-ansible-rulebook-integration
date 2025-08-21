@@ -19,7 +19,7 @@ public class H2Schema {
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
             
-            // Create event state table (now contains matching events)
+            // Create event state table (without matching_events CLOB)
             String createEventStateTable = """
                 CREATE TABLE IF NOT EXISTS eda_event_state (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -29,7 +29,6 @@ public class H2Schema {
                     time_windows CLOB,
                     clock_time TIMESTAMP,
                     session_stats CLOB,
-                    matching_events CLOB,
                     version INT DEFAULT 1,
                     is_current BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -39,6 +38,21 @@ public class H2Schema {
                 """;
             stmt.execute(createEventStateTable);
             logger.debug("Created/verified eda_event_state table");
+            
+            // Create separate matching events table
+            String createMatchingEventsTable = """
+                CREATE TABLE IF NOT EXISTS eda_matching_events (
+                    me_uuid VARCHAR(36) PRIMARY KEY,
+                    session_id VARCHAR(255) NOT NULL,
+                    ruleset_name VARCHAR(255),
+                    rule_name VARCHAR(255),
+                    matching_facts CLOB,
+                    status VARCHAR(50),
+                    created_at VARCHAR(255)
+                )
+                """;
+            stmt.execute(createMatchingEventsTable);
+            logger.debug("Created/verified eda_matching_events table");
             
             // Create action state table
             String createActionStateTable = """
@@ -71,6 +85,12 @@ public class H2Schema {
                 """;
             stmt.execute(createActionStateIndex);
             
+            String createMatchingEventsIndex = """
+                CREATE INDEX IF NOT EXISTS idx_matching_events_session 
+                ON eda_matching_events(session_id)
+                """;
+            stmt.execute(createMatchingEventsIndex);
+            
             // Create session stats table
             String createSessionStatsTable = """
                 CREATE TABLE IF NOT EXISTS eda_session_stats (
@@ -94,6 +114,7 @@ public class H2Schema {
              Statement stmt = conn.createStatement()) {
             
             stmt.execute("DROP TABLE IF EXISTS eda_action_state");
+            stmt.execute("DROP TABLE IF EXISTS eda_matching_events");
             stmt.execute("DROP TABLE IF EXISTS eda_event_state");
             stmt.execute("DROP TABLE IF EXISTS eda_session_stats");
             
