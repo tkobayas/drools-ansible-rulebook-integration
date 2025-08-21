@@ -10,9 +10,11 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.*;
@@ -28,10 +30,10 @@ public class HAStateManagerTest {
     
     @Before
     public void setUp() {
-        // Configure H2 in-memory database for testing
+        // Configure H2 in-memory database for testing with unique name per test
         Map<String, Object> config = new HashMap<>();
         config.put("database_type", "H2");
-        config.put("db_url", "jdbc:h2:mem:test_ha;DB_CLOSE_DELAY=-1");
+        config.put("db_url", "jdbc:h2:mem:test_ha_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1");
         config.put("username", "sa");
         config.put("password", "");
         
@@ -43,6 +45,20 @@ public class HAStateManagerTest {
         if (stateManager != null) {
             stateManager.shutdown();
         }
+    }
+    
+    // Utility method to create a MatchingEvent with default values
+    private MatchingEvent createMatchingEvent(String sessionId, String rulesetName, 
+                                               String ruleName, Map<String, Object> matchingFacts) {
+        MatchingEvent me = new MatchingEvent();
+        me.setMeUuid(UUID.randomUUID().toString());
+        me.setSessionId(sessionId);
+        me.setRulesetName(rulesetName);
+        me.setRuleName(ruleName);
+        me.setMatchingFacts(matchingFacts);
+        me.setStatus(MatchingEvent.MatchingEventStatus.PENDING);
+        me.setCreatedAt(Instant.now().toString());
+        return me;
     }
     
     @Test
@@ -85,12 +101,12 @@ public class HAStateManagerTest {
             "alert", "high_temp"
         );
         
-        String meUuid = stateManager.addMatchingEvent(
-            SESSION_ID, "alertRules", "tempAlert", facts
-        );
+        MatchingEvent me = createMatchingEvent(SESSION_ID, "alertRules", "tempAlert", facts);
+        String meUuid = stateManager.addMatchingEvent(me);
         
         assertNotNull(meUuid);
         assertFalse(meUuid.isEmpty());
+        assertEquals(me.getMeUuid(), meUuid);
     }
     
     @Test
@@ -98,9 +114,9 @@ public class HAStateManagerTest {
         stateManager.setLeader(LEADER_ID);
         
         // First create a matching event
-        String meUuid = stateManager.addMatchingEvent(
-            SESSION_ID, "testRuleset", "testRule", Map.of("fact", "value")
-        );
+        MatchingEvent me = createMatchingEvent(SESSION_ID, "testRuleset", "testRule", 
+                                                Map.of("fact", "value"));
+        String meUuid = stateManager.addMatchingEvent(me);
         
         // Create and persist action state
         ActionState actionState = new ActionState();
@@ -129,12 +145,13 @@ public class HAStateManagerTest {
         stateManager.setLeader(LEADER_ID);
         
         // Create multiple matching events with different states
-        String me1 = stateManager.addMatchingEvent(
-            SESSION_ID, "rules1", "rule1", Map.of("event", "1")
-        );
-        String me2 = stateManager.addMatchingEvent(
-            SESSION_ID, "rules2", "rule2", Map.of("event", "2")
-        );
+        MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "rules1", "rule1", 
+                                                           Map.of("event", "1"));
+        String me1 = stateManager.addMatchingEvent(matchingEvent1);
+        
+        MatchingEvent matchingEvent2 = createMatchingEvent(SESSION_ID, "rules2", "rule2", 
+                                                           Map.of("event", "2"));
+        String me2 = stateManager.addMatchingEvent(matchingEvent2);
         
         // Add action state for first ME (in progress)
         ActionState as1 = new ActionState();
@@ -156,9 +173,9 @@ public class HAStateManagerTest {
         stateManager.setLeader(LEADER_ID);
         
         // Create ME and action state
-        String meUuid = stateManager.addMatchingEvent(
-            SESSION_ID, "rules", "rule", Map.of("data", "test")
-        );
+        MatchingEvent me = createMatchingEvent(SESSION_ID, "rules", "rule", 
+                                               Map.of("data", "test"));
+        String meUuid = stateManager.addMatchingEvent(me);
         
         ActionState actionState = new ActionState();
         actionState.setMeUuid(meUuid);
@@ -168,7 +185,7 @@ public class HAStateManagerTest {
         assertNotNull(stateManager.getActionState(SESSION_ID, meUuid));
         
         // Delete it
-        stateManager.removeMatchingEvent(SESSION_ID, meUuid);
+        stateManager.removeMatchingEvent(meUuid);
         
         // Verify it's gone
         assertNull(stateManager.getActionState(SESSION_ID, meUuid));
