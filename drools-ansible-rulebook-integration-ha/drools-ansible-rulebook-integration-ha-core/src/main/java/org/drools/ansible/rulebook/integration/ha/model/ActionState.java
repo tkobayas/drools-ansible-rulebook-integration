@@ -28,9 +28,8 @@ public class ActionState {
         private Map<String, Object> customData;
         
         public enum ActionStatus {
-            PENDING,
-            STARTED,
-            COMPLETED,
+            RUNNING,
+            SUCCESS,
             FAILED
         }
         
