@@ -668,6 +668,8 @@ public class H2StateManager implements HAStateManager {
             // For H2, use MERGE statement instead
             String h2Sql = """
                 MERGE INTO eda_ha_stats 
+                (session_id, current_leader, leader_switches, current_term_started_at,
+                 events_processed_in_term, actions_processed_in_term, updated_at)
                 KEY(session_id) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """;
                 
