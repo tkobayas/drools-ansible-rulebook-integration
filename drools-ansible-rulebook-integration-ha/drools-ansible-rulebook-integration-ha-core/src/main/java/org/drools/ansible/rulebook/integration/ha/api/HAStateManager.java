@@ -2,6 +2,7 @@ package org.drools.ansible.rulebook.integration.ha.api;
 
 import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
+import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 
 import java.util.List;
@@ -14,10 +15,30 @@ import java.util.Map;
 public interface HAStateManager {
     
     /**
+     * Initialize HA mode with UUID and database configuration
+     * @param uuid Unique identifier for this HA instance
+     * @param postgresParams Database connection parameters
+     * @param config HA configuration parameters
+     */
+    void initializeHA(String uuid, Map<String, Object> postgresParams, Map<String, Object> config);
+    
+    /**
      * Initialize the state manager with configuration
      * @param config Configuration map containing connection details
      */
     void initialize(HAConfiguration config);
+    
+    /**
+     * Enable leader mode and start writing states to database
+     * @param leaderName Name/identifier for this leader
+     */
+    void enableLeader(String leaderName);
+    
+    /**
+     * Disable leader mode and stop writing to database
+     * @param leaderName Name/identifier for this leader  
+     */
+    void disableLeader(String leaderName);
     
     /**
      * Set the current node as leader
@@ -97,6 +118,55 @@ public interface HAStateManager {
      * @param sessionId The ruleset session ID
      */
     void rollbackState(String sessionId);
+    
+    /**
+     * Add an action for a matching event
+     * @param sessionId The ruleset session ID
+     * @param matchingUuid The matching event UUID
+     * @param index The action index
+     * @param action The action data as JSON object
+     */
+    void addAction(String sessionId, String matchingUuid, int index, Map<String, Object> action);
+    
+    /**
+     * Update an existing action
+     * @param sessionId The ruleset session ID
+     * @param matchingUuid The matching event UUID
+     * @param index The action index
+     * @param action The updated action data as JSON object
+     */
+    void updateAction(String sessionId, String matchingUuid, int index, Map<String, Object> action);
+    
+    /**
+     * Check if an action exists
+     * @param sessionId The ruleset session ID
+     * @param matchingUuid The matching event UUID
+     * @param index The action index
+     * @return true if action exists, false otherwise
+     */
+    boolean actionExists(String sessionId, String matchingUuid, int index);
+    
+    /**
+     * Get an action by index
+     * @param sessionId The ruleset session ID
+     * @param matchingUuid The matching event UUID
+     * @param index The action index
+     * @return The action data as JSON object, empty map if not found
+     */
+    Map<String, Object> getAction(String sessionId, String matchingUuid, int index);
+    
+    /**
+     * Delete all actions and matching events for a matching UUID
+     * @param sessionId The ruleset session ID
+     * @param matchingUuid The matching event UUID
+     */
+    void deleteActions(String sessionId, String matchingUuid);
+    
+    /**
+     * Get current HA statistics
+     * @return HA statistics object
+     */
+    HAStats getHAStats();
     
     /**
      * Store session statistics
