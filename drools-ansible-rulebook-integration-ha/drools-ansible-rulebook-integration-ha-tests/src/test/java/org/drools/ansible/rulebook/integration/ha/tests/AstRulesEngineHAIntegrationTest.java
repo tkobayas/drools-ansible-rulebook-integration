@@ -73,18 +73,19 @@ public class AstRulesEngineHAIntegrationTest {
     
     @Test
     public void testHAConfiguration() {
-        // Configure HA mode
-        Map<String, Object> haConfig = new HashMap<>();
-        haConfig.put("database_type", "H2");
-        haConfig.put("db_url", "jdbc:h2:mem:test_engine_ha;DB_CLOSE_DELAY=-1");
-        haConfig.put("username", "sa");
-        haConfig.put("password", "");
+        // Initialize HA mode with new API
+        String uuid = "test-engine-ha";
+        Map<String, Object> postgresParams = new HashMap<>();
+        // Empty postgres params will fall back to H2
+        
+        Map<String, Object> config = new HashMap<>();
+        config.put("write_after", 1);
         
         // Should not throw exception
-        rulesEngine.configureHA(haConfig);
+        rulesEngine.initializeHA(uuid, postgresParams, config);
         
-        // Set as leader
-        rulesEngine.setLeader("engine-leader-1");
+        // Enable leader mode
+        rulesEngine.enableLeader("engine-leader-1");
         
         // Process an event that triggers a rule
         String event = """
@@ -128,8 +129,8 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("username", "sa");
         haConfig.put("password", "");
         
-        rulesEngine.configureHA(haConfig);
-        rulesEngine.setLeader("leader-1");
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        rulesEngine.enableLeader("leader-1");
         
         // Process an event that triggers a rule
         String event = """
@@ -144,7 +145,8 @@ public class AstRulesEngineHAIntegrationTest {
         
         // Verify that matching events were persisted to database
         // We can check this by accessing the HA state manager directly
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.create(haConfig);
+        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
+        haStateManagerForAssertion.initializeHA("test-assertion", new HashMap<>(), Map.of("write_after", 1));
         
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
@@ -168,8 +170,8 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("username", "sa");
         haConfig.put("password", "");
         
-        rulesEngine.configureHA(haConfig);
-        rulesEngine.setLeader("leader-1");
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        rulesEngine.enableLeader("leader-1");
         
         // First trigger a rule to create a matching event
         String event = """
@@ -183,7 +185,8 @@ public class AstRulesEngineHAIntegrationTest {
         assertNotNull(result);
         
         // Get the ME UUID from the database (in real usage, Python would extract from response)
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.create(haConfig);
+        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
+        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
 
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
@@ -196,22 +199,28 @@ public class AstRulesEngineHAIntegrationTest {
             actionState.setMeUuid(meUuid);
             ActionState.Action action = new ActionState.Action();
             action.setName("send_alert");
-            action.setStatus(ActionState.Action.ActionStatus.STARTED);
+            action.setStatus(ActionState.Action.ActionStatus.RUNNING);
             action.setReferenceId("job-456");
             actionState.getActions().add(action);
             
-            rulesEngine.setActionState(sessionId, meUuid, actionStateToMap(actionState));
+            // Use new action management APIs instead of old setActionState
+            Map<String, Object> actionData = new HashMap<>();
+            actionData.put("name", action.getName());
+            actionData.put("status", "running");
+            actionData.put("reference_id", action.getReferenceId());
             
-            // Get action state
-            Map<String, Object> retrieved = rulesEngine.getActionState(sessionId, meUuid);
-            assertNotNull(retrieved);
-            assertEquals(meUuid, retrieved.get("me_uuid"));
+            rulesEngine.addAction(sessionId, meUuid, 0, actionData);
             
-            // Delete ME when actions complete
-            rulesEngine.deleteMatchingEvent(sessionId, meUuid);
+            // Check action exists and get it
+            assertTrue(rulesEngine.actionExists(sessionId, meUuid, 0));
+            Map<String, Object> retrieved = rulesEngine.getAction(sessionId, meUuid, 0);
+            assertEquals("send_alert", retrieved.get("name"));
             
-            // Should be null after deletion
-            assertNull(rulesEngine.getActionState(sessionId, meUuid));
+            // Delete actions when complete
+            rulesEngine.deleteActions(sessionId, meUuid);
+            
+            // Should not exist after deletion
+            assertFalse(rulesEngine.actionExists(sessionId, meUuid, 0));
         } finally {
             haStateManagerForAssertion.shutdown();
         }
@@ -226,10 +235,10 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("username", "sa");
         haConfig.put("password", "");
         
-        rulesEngine.configureHA(haConfig);
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
         
         // Set as leader
-        rulesEngine.setLeader("leader-1");
+        rulesEngine.enableLeader("leader-1");
         
         // Process some events
         String event = """
@@ -241,10 +250,10 @@ public class AstRulesEngineHAIntegrationTest {
         rulesEngine.assertEvent(sessionId, event);
         
         // Simulate leader failure - unset leader
-        rulesEngine.unsetLeader();
+        rulesEngine.disableLeader("leader-1");
         
         // New leader takes over
-        rulesEngine.setLeader("leader-2");
+        rulesEngine.enableLeader("leader-2");
         
         // Verify we can still process events
         String event2 = """
@@ -257,7 +266,8 @@ public class AstRulesEngineHAIntegrationTest {
         assertNotNull(result2);
         
         // Check that both events created matching events
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.create(haConfig);
+        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
+        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
 
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
@@ -270,7 +280,7 @@ public class AstRulesEngineHAIntegrationTest {
     @Test(expected = IllegalStateException.class)
     public void testHAOperationsWithoutConfiguration() {
         // Try to set leader without configuring HA
-        rulesEngine.setLeader("leader-1");
+        rulesEngine.enableLeader("leader-1");
     }
     
     @Test
@@ -282,15 +292,16 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("username", "sa");
         haConfig.put("password", "");
         
-        rulesEngine.configureHA(haConfig);
-        rulesEngine.setLeader("leader-1");
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        rulesEngine.enableLeader("leader-1");
         
         // Process event in first session
         rulesEngine.assertEvent(sessionId, "{\"temperature\": 35}");
         
         // Verify the matching event was created for this session
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.create(haConfig);
-        haStateManagerForAssertion.setLeader("leader-1");
+        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
+        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        haStateManagerForAssertion.enableLeader("leader-1");
         
         try {
             List<MatchingEvent> sessionEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
@@ -313,8 +324,8 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("password", "");
         
         // First engine acts as leader
-        rulesEngine.configureHA(haConfig);
-        rulesEngine.setLeader("engine-1");
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        rulesEngine.enableLeader("engine-1");
         
         // Process an event
         String event = """
@@ -326,7 +337,7 @@ public class AstRulesEngineHAIntegrationTest {
         rulesEngine.assertEvent(sessionId, event);
         
         // Simulate engine-1 failure
-        rulesEngine.unsetLeader();
+        rulesEngine.disableLeader("leader-1");
         
         // Create second engine (simulating failover)
         AstRulesEngine engine2 = new AstRulesEngine();
@@ -360,12 +371,13 @@ public class AstRulesEngineHAIntegrationTest {
         
         try {
             // Engine-2 takes over as leader
-            engine2.configureHA(haConfig);
-            engine2.setLeader("engine-2");
+            engine2.initializeHA("test-uuid-engine2", new HashMap<>(), Map.of("write_after", 1));
+            engine2.enableLeader("engine-2");
             
             // Verify engine-2 can see pending MEs from engine-1
-            HAStateManager haStateManagerForAssertion = HAStateManagerFactory.create(haConfig);
-            haStateManagerForAssertion.setLeader("engine-2");
+            HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
+        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+            haStateManagerForAssertion.enableLeader("engine-2");
             
             try {
                 // Should see the ME created by engine-1
@@ -385,6 +397,87 @@ public class AstRulesEngineHAIntegrationTest {
         }
     }
     
+    @Test
+    public void testNewActionAPIs() {
+        // Initialize HA
+        rulesEngine.initializeHA("test-new-actions", new HashMap<>(), Map.of("write_after", 1));
+        rulesEngine.enableLeader("leader-1");
+        
+        // Trigger a rule to create matching event
+        String result = rulesEngine.assertEvent(sessionId, "{\"temperature\": 35}");
+        assertNotNull(result);
+        
+        // Extract ME UUID from result (in real usage, Python would do this)
+        List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
+        String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
+        
+        // Test addAction
+        Map<String, Object> action = new HashMap<>();
+        action.put("name", "send_alert");
+        action.put("status", "running");
+        action.put("reference_id", "job-123");
+        action.put("start_time", "2024-01-01T10:00:00Z");
+        
+        rulesEngine.addAction(sessionId, meUuid, 0, action);
+        
+        // Test actionExists
+        assertTrue(rulesEngine.actionExists(sessionId, meUuid, 0));
+        assertFalse(rulesEngine.actionExists(sessionId, meUuid, 1));
+        
+        // Test getAction
+        Map<String, Object> retrieved = rulesEngine.getAction(sessionId, meUuid, 0);
+        assertEquals("send_alert", retrieved.get("name"));
+        assertEquals("running", retrieved.get("status"));
+        assertEquals("job-123", retrieved.get("reference_id"));
+        
+        // Test updateAction
+        action.put("status", "success");
+        action.put("end_time", "2024-01-01T10:05:00Z");
+        rulesEngine.updateAction(sessionId, meUuid, 0, action);
+        
+        retrieved = rulesEngine.getAction(sessionId, meUuid, 0);
+        assertEquals("success", retrieved.get("status"));
+        assertEquals("2024-01-01T10:05:00Z", retrieved.get("end_time"));
+        
+        // Test deleteActions
+        rulesEngine.deleteActions(sessionId, meUuid);
+        assertFalse(rulesEngine.actionExists(sessionId, meUuid, 0));
+        assertTrue(rulesEngine.getAction(sessionId, meUuid, 0).isEmpty());
+    }
+    
+    @Test
+    public void testGetHAStats() {
+        // Initialize HA
+        rulesEngine.initializeHA("test-ha-stats", new HashMap<>(), Map.of("write_after", 1));
+        
+        // Check initial stats
+        Map<String, Object> stats = rulesEngine.getHAStats();
+        assertNotNull(stats);
+        assertNull(stats.get("current_leader"));
+        assertEquals(0, stats.get("leader_switches"));
+        assertEquals(0, stats.get("events_processed_in_term"));
+        assertEquals(0, stats.get("actions_processed_in_term"));
+        
+        // Enable leader
+        rulesEngine.enableLeader("test-leader");
+        
+        stats = rulesEngine.getHAStats();
+        assertEquals("test-leader", stats.get("current_leader"));
+        assertEquals(1, stats.get("leader_switches"));
+        assertNotNull(stats.get("current_term_started_at"));
+        
+        // Process an event and action
+        String result = rulesEngine.assertEvent(sessionId, "{\"temperature\": 35}");
+        List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
+        String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
+        
+        rulesEngine.addAction(sessionId, meUuid, 0, Map.of("name", "test", "status", "running"));
+        
+        stats = rulesEngine.getHAStats();
+        assertEquals(1, stats.get("events_processed_in_term"));
+        assertEquals(1, stats.get("actions_processed_in_term"));
+    }
+
     // Utility method to convert ActionState to Map for API compatibility
     private Map<String, Object> actionStateToMap(ActionState actionState) {
         Map<String, Object> map = new HashMap<>();
