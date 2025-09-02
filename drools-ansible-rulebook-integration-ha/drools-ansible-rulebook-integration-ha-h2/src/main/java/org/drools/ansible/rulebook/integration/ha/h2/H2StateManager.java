@@ -9,6 +9,7 @@ import org.drools.ansible.rulebook.integration.ha.api.HAConfiguration;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
+import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,9 +29,72 @@ public class H2StateManager implements HAStateManager {
     private ObjectMapper objectMapper;
     private String leaderId;
     private boolean isLeader = false;
+    private String haUuid;
+    private HAStats haStats;
     
     public H2StateManager() {
         this.objectMapper = new ObjectMapper();
+    }
+    
+    @Override
+    public void initializeHA(String uuid, Map<String, Object> postgresParams, Map<String, Object> config) {
+        logger.info("Initializing HA mode with UUID: {}", uuid);
+        
+        this.haUuid = uuid;
+        this.haStats = new HAStats();
+        
+        // Configure HikariCP connection pool from postgres params
+        HikariConfig hikariConfig = new HikariConfig();
+        
+        // Extract connection parameters
+        String host = (String) postgresParams.get("host");
+        Integer port = (Integer) postgresParams.get("port");
+        String dbname = (String) postgresParams.get("dbname");
+        String user = (String) postgresParams.get("user");
+        String password = (String) postgresParams.get("password");
+        String sslmode = (String) postgresParams.get("sslmode");
+        String applicationName = (String) postgresParams.get("application_name");
+        
+        // Build JDBC URL - default to H2 for testing if postgres params not provided
+        String jdbcUrl;
+        if (host != null && dbname != null) {
+            jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s", host, port != null ? port : 5432, dbname);
+            if (sslmode != null) {
+                jdbcUrl += "?sslmode=" + sslmode;
+            }
+            if (applicationName != null) {
+                jdbcUrl += (sslmode != null ? "&" : "?") + "ApplicationName=" + applicationName;
+            }
+        } else {
+            // Fallback to H2 for development/testing
+            jdbcUrl = "jdbc:h2:mem:eda_ha_" + uuid + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
+            logger.warn("Using H2 database for HA - not suitable for production");
+        }
+        
+        hikariConfig.setJdbcUrl(jdbcUrl);
+        hikariConfig.setUsername(user != null ? user : "sa");
+        hikariConfig.setPassword(password != null ? password : "");
+        
+        // Extract config parameters
+        Integer writeAfter = (Integer) config.get("write_after");
+        hikariConfig.setMaximumPoolSize(10); // Default pool size
+        hikariConfig.setConnectionTimeout(30000);
+        hikariConfig.setAutoCommit(false); // We'll manage transactions
+        
+        this.dataSource = new HikariDataSource(hikariConfig);
+        
+        // Create schema
+        try {
+            H2Schema.createSchema(dataSource);
+            logger.info("HA schema created successfully for UUID: {}", uuid);
+            
+            // Check for existing matching events and restore HA stats
+            restoreHAState();
+            
+        } catch (SQLException e) {
+            logger.error("Failed to create HA schema", e);
+            throw new RuntimeException("Failed to initialize HA mode", e);
+        }
     }
     
     @Override
@@ -65,16 +129,32 @@ public class H2StateManager implements HAStateManager {
     }
     
     @Override
-    public void setLeader(String leaderId) {
-        this.leaderId = leaderId;
+    public void enableLeader(String leaderName) {
+        this.leaderId = leaderName;
         this.isLeader = true;
-        logger.info("Node set as leader with ID: {}", leaderId);
+        
+        // Update HA stats when becoming leader
+        if (haStats != null) {
+            haStats.setCurrentLeader(leaderName);
+        }
+        
+        // Persist HA stats to database
+        persistHAStats();
+        
+        logger.info("Leader mode enabled for: {}", leaderName);
     }
     
     @Override
-    public void unsetLeader() {
+    public void disableLeader(String leaderName) {
         this.isLeader = false;
-        logger.info("Node unset as leader. Previous leader ID: {}", leaderId);
+        logger.info("Leader mode disabled for: {}", leaderName);
+        
+        // Update HA stats
+        if (haStats != null && leaderName.equals(haStats.getCurrentLeader())) {
+            haStats.setCurrentLeader(null);
+            persistHAStats();
+        }
+        
         this.leaderId = null;
     }
     
@@ -163,6 +243,13 @@ public class H2StateManager implements HAStateManager {
             }
             
             conn.commit();
+            
+            // Update HA stats
+            if (haStats != null) {
+                haStats.incrementEventsProcessed();
+                persistHAStats();
+            }
+            
             logger.debug("Persisted event state for session: {}", sessionId);
         } catch (SQLException e) {
             logger.error("Failed to persist event state", e);
@@ -421,6 +508,137 @@ public class H2StateManager implements HAStateManager {
     }
     
     @Override
+    public void addAction(String sessionId, String matchingUuid, int index, Map<String, Object> action) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot add action - not the leader");
+        }
+        
+        try (Connection conn = dataSource.getConnection()) {
+            // Get or create action state for this matching event
+            ActionState actionState = getActionState(sessionId, matchingUuid);
+            if (actionState == null) {
+                actionState = new ActionState();
+                actionState.setMeUuid(matchingUuid);
+                // Get ruleset and rule name from matching event
+                populateActionStateFromMatchingEvent(conn, actionState, matchingUuid);
+            }
+            
+            // Convert Map to Action object
+            ActionState.Action newAction = mapToAction(action, index);
+            
+            // Add or update action in the list
+            List<ActionState.Action> actions = actionState.getActions();
+            if (actions == null) {
+                actions = new ArrayList<>();
+                actionState.setActions(actions);
+            }
+            
+            // Find and replace if index exists, otherwise add
+            boolean found = false;
+            for (int i = 0; i < actions.size(); i++) {
+                if (actions.get(i).getIndex() == index) {
+                    actions.set(i, newAction);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                actions.add(newAction);
+            }
+            
+            // Persist the updated action state
+            persistActionState(sessionId, matchingUuid, actionState);
+            
+            // Update HA stats
+            if (haStats != null) {
+                haStats.incrementActionsProcessed();
+                persistHAStats();
+            }
+            
+        } catch (SQLException e) {
+            logger.error("Failed to add action", e);
+            throw new RuntimeException("Failed to add action", e);
+        }
+    }
+    
+    @Override
+    public void updateAction(String sessionId, String matchingUuid, int index, Map<String, Object> action) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot update action - not the leader");
+        }
+        
+        ActionState actionState = getActionState(sessionId, matchingUuid);
+        if (actionState == null) {
+            throw new IllegalArgumentException("No action state found for matching UUID: " + matchingUuid);
+        }
+        
+        List<ActionState.Action> actions = actionState.getActions();
+        if (actions == null || actions.isEmpty()) {
+            throw new IllegalArgumentException("No actions found for matching UUID: " + matchingUuid);
+        }
+        
+        // Find and update action by index
+        boolean found = false;
+        for (int i = 0; i < actions.size(); i++) {
+            if (actions.get(i).getIndex() == index) {
+                ActionState.Action updatedAction = mapToAction(action, index);
+                actions.set(i, updatedAction);
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            throw new IllegalArgumentException("Action with index " + index + " not found");
+        }
+        
+        // Persist the updated action state
+        persistActionState(sessionId, matchingUuid, actionState);
+    }
+    
+    @Override
+    public boolean actionExists(String sessionId, String matchingUuid, int index) {
+        ActionState actionState = getActionState(sessionId, matchingUuid);
+        if (actionState == null || actionState.getActions() == null) {
+            return false;
+        }
+        
+        return actionState.getActions().stream()
+                .anyMatch(action -> action.getIndex() == index);
+    }
+    
+    @Override
+    public Map<String, Object> getAction(String sessionId, String matchingUuid, int index) {
+        ActionState actionState = getActionState(sessionId, matchingUuid);
+        if (actionState == null || actionState.getActions() == null) {
+            return new HashMap<>();
+        }
+        
+        for (ActionState.Action action : actionState.getActions()) {
+            if (action.getIndex() == index) {
+                return actionToMap(action);
+            }
+        }
+        
+        return new HashMap<>();
+    }
+    
+    @Override
+    public void deleteActions(String sessionId, String matchingUuid) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot delete actions - not the leader");
+        }
+        
+        // Use existing removeMatchingEvent method which deletes both matching event and actions
+        removeMatchingEvent(matchingUuid);
+    }
+    
+    @Override
+    public HAStats getHAStats() {
+        return haStats != null ? haStats : new HAStats();
+    }
+    
+    @Override
     public void shutdown() {
         logger.info("Shutting down H2StateManager");
         if (dataSource != null && !dataSource.isClosed()) {
@@ -428,7 +646,142 @@ public class H2StateManager implements HAStateManager {
         }
     }
     
-    // Helper methods
+    // Helper methods for new API
+    
+    private void restoreHAState() {
+        // Initialize HA stats from database or create new
+        try (Connection conn = dataSource.getConnection()) {
+            String sql = "SELECT * FROM eda_ha_stats LIMIT 1";
+            try (PreparedStatement ps = conn.prepareStatement(sql);
+                 ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    // Restore existing HA stats
+                    haStats = new HAStats();
+                    haStats.setCurrentLeader(rs.getString("current_leader"));
+                    haStats.setLeaderSwitches(rs.getInt("leader_switches"));
+                    haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
+                    haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
+                    haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
+                    logger.info("Restored HA stats from database");
+                } else {
+                    // Create new HA stats
+                    haStats = new HAStats();
+                    persistHAStats();
+                    logger.info("Created new HA stats");
+                }
+            }
+        } catch (SQLException e) {
+            logger.warn("Failed to restore HA state, creating new", e);
+            haStats = new HAStats();
+        }
+    }
+    
+    private void persistHAStats() {
+        if (!isLeader || haStats == null) {
+            return;
+        }
+        
+        try (Connection conn = dataSource.getConnection()) {
+            String sql = """
+                INSERT INTO eda_ha_stats 
+                (session_id, current_leader, leader_switches, current_term_started_at,
+                 events_processed_in_term, actions_processed_in_term, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                current_leader = VALUES(current_leader),
+                leader_switches = VALUES(leader_switches),
+                current_term_started_at = VALUES(current_term_started_at),
+                events_processed_in_term = VALUES(events_processed_in_term),
+                actions_processed_in_term = VALUES(actions_processed_in_term),
+                updated_at = VALUES(updated_at)
+                """;
+            
+            // For H2, use MERGE statement instead
+            String h2Sql = """
+                MERGE INTO eda_ha_stats 
+                KEY(session_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """;
+                
+            try (PreparedStatement ps = conn.prepareStatement(h2Sql)) {
+                ps.setString(1, haUuid != null ? haUuid : "default");
+                ps.setString(2, haStats.getCurrentLeader());
+                ps.setInt(3, haStats.getLeaderSwitches());
+                ps.setString(4, haStats.getCurrentTermStartedAt());
+                ps.setInt(5, haStats.getEventsProcessedInTerm());
+                ps.setInt(6, haStats.getActionsProcessedInTerm());
+                ps.setTimestamp(7, Timestamp.from(Instant.now()));
+                
+                ps.executeUpdate();
+            }
+            
+            conn.commit();
+        } catch (SQLException e) {
+            logger.error("Failed to persist HA stats", e);
+        }
+    }
+    
+    private void populateActionStateFromMatchingEvent(Connection conn, ActionState actionState, String matchingUuid) throws SQLException {
+        String sql = "SELECT ruleset_name, rule_name FROM eda_matching_events WHERE me_uuid = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, matchingUuid);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    actionState.setRulesetName(rs.getString("ruleset_name"));
+                    actionState.setRuleName(rs.getString("rule_name"));
+                }
+            }
+        }
+    }
+    
+    private ActionState.Action mapToAction(Map<String, Object> actionMap, int index) {
+        ActionState.Action action = new ActionState.Action();
+        action.setIndex(index);
+        action.setName((String) actionMap.get("name"));
+        action.setReferenceId((String) actionMap.get("reference_id"));
+        action.setReferenceUrl((String) actionMap.get("reference_url"));
+        action.setStartedAt((String) actionMap.get("start_time"));
+        action.setEndedAt((String) actionMap.get("end_time"));
+        action.setCustomData((Map<String, Object>) actionMap.get("custom_data"));
+        
+        // Map status string to enum
+        String statusStr = (String) actionMap.get("status");
+        if (statusStr != null) {
+            switch (statusStr.toLowerCase()) {
+                case "running":
+                    action.setStatus(ActionState.Action.ActionStatus.RUNNING);
+                    break;
+                case "success":
+                    action.setStatus(ActionState.Action.ActionStatus.SUCCESS);
+                    break;
+                case "failed":
+                    action.setStatus(ActionState.Action.ActionStatus.FAILED);
+                    break;
+                default:
+                    action.setStatus(ActionState.Action.ActionStatus.RUNNING);
+            }
+        }
+        
+        return action;
+    }
+    
+    private Map<String, Object> actionToMap(ActionState.Action action) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("name", action.getName());
+        map.put("index", action.getIndex());
+        map.put("reference_id", action.getReferenceId());
+        map.put("reference_url", action.getReferenceUrl());
+        map.put("start_time", action.getStartedAt());
+        map.put("end_time", action.getEndedAt());
+        map.put("custom_data", action.getCustomData());
+        
+        if (action.getStatus() != null) {
+            map.put("status", action.getStatus().name().toLowerCase());
+        }
+        
+        return map;
+    }
+    
+    // Existing helper methods
     
     private EventState mapToEventState(ResultSet rs) throws SQLException {
         EventState event = new EventState();
