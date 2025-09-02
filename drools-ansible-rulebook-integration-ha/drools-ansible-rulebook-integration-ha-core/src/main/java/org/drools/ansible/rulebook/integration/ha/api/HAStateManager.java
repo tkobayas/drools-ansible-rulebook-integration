@@ -23,12 +23,6 @@ public interface HAStateManager {
     void initializeHA(String uuid, Map<String, Object> postgresParams, Map<String, Object> config);
     
     /**
-     * Initialize the state manager with configuration
-     * @param config Configuration map containing connection details
-     */
-    void initialize(HAConfiguration config);
-    
-    /**
      * Enable leader mode and start writing states to database
      * @param leaderName Name/identifier for this leader
      */
@@ -39,17 +33,6 @@ public interface HAStateManager {
      * @param leaderName Name/identifier for this leader  
      */
     void disableLeader(String leaderName);
-    
-    /**
-     * Set the current node as leader
-     * @param leaderId Unique identifier for this leader node
-     */
-    void setLeader(String leaderId);
-    
-    /**
-     * Unset leader status for this node
-     */
-    void unsetLeader();
     
     /**
      * Check if this node is currently the leader
