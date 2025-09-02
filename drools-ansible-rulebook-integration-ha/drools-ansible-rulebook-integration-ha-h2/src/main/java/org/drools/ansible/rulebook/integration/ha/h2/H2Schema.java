@@ -104,6 +104,23 @@ public class H2Schema {
             stmt.execute(createSessionStatsTable);
             logger.debug("Created/verified eda_session_stats table");
             
+            // Create HA stats table for tracking leader status and processing metrics
+            String createHAStatsTable = """
+                CREATE TABLE IF NOT EXISTS eda_ha_stats (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    session_id VARCHAR(255) NOT NULL,
+                    current_leader VARCHAR(255),
+                    leader_switches INT DEFAULT 0,
+                    current_term_started_at VARCHAR(255),
+                    events_processed_in_term INT DEFAULT 0,
+                    actions_processed_in_term INT DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(session_id)
+                )
+                """;
+            stmt.execute(createHAStatsTable);
+            logger.debug("Created/verified eda_ha_stats table");
+            
             conn.commit();
             logger.info("H2 schema creation completed successfully");
         }
@@ -117,6 +134,7 @@ public class H2Schema {
             stmt.execute("DROP TABLE IF EXISTS eda_matching_events");
             stmt.execute("DROP TABLE IF EXISTS eda_event_state");
             stmt.execute("DROP TABLE IF EXISTS eda_session_stats");
+            stmt.execute("DROP TABLE IF EXISTS eda_ha_stats");
             
             conn.commit();
             logger.info("H2 schema dropped successfully");
