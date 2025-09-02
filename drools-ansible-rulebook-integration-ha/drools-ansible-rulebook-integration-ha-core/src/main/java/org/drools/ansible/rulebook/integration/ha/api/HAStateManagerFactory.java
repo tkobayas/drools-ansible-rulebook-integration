@@ -12,56 +12,23 @@ public class HAStateManagerFactory {
     
     private static final Logger logger = LoggerFactory.getLogger(HAStateManagerFactory.class);
     
-    /**
-     * Create an HAStateManager instance based on configuration
-     * @param configMap Configuration map from Python/JPY
-     * @return HAStateManager instance
-     */
-    public static HAStateManager create(Map<String, Object> configMap) {
-        HAConfiguration config = HAConfiguration.fromMap(configMap);
-        return create(config);
-    }
     
     /**
-     * Create an HAStateManager instance based on configuration
-     * @param config HAConfiguration object
+     * Create an H2StateManager instance without initialization
+     * Used for new initializeHA API where initialization happens separately
      * @return HAStateManager instance
      */
-    public static HAStateManager create(HAConfiguration config) {
-        HAStateManager manager = null;
-        
+    public static HAStateManager createH2() {
         try {
-            switch (config.getDatabaseType()) {
-                case H2:
-                    // Use reflection to avoid compile-time dependency
-                    Class<?> h2Class = Class.forName(
-                        "org.drools.ansible.rulebook.integration.ha.h2.H2StateManager"
-                    );
-                    manager = (HAStateManager) h2Class.getDeclaredConstructor().newInstance();
-                    break;
-                    
-                case POSTGRESQL:
-                    // Use reflection to avoid compile-time dependency
-                    Class<?> pgClass = Class.forName(
-                        "org.drools.ansible.rulebook.integration.ha.postgres.PostgresStateManager"
-                    );
-                    manager = (HAStateManager) pgClass.getDeclaredConstructor().newInstance();
-                    break;
-                    
-                default:
-                    throw new IllegalArgumentException(
-                        "Unsupported database type: " + config.getDatabaseType()
-                    );
-            }
-            
-            manager.initialize(config);
-            logger.info("Created HAStateManager for database type: {}", config.getDatabaseType());
-            
+            Class<?> h2Class = Class.forName(
+                "org.drools.ansible.rulebook.integration.ha.h2.H2StateManager"
+            );
+            HAStateManager manager = (HAStateManager) h2Class.getDeclaredConstructor().newInstance();
+            logger.info("Created H2StateManager instance without initialization");
+            return manager;
         } catch (Exception e) {
-            logger.error("Failed to create HAStateManager", e);
-            throw new RuntimeException("Failed to create HAStateManager: " + e.getMessage(), e);
+            logger.error("Failed to create H2StateManager", e);
+            throw new RuntimeException("Failed to create H2StateManager: " + e.getMessage(), e);
         }
-        
-        return manager;
     }
 }

@@ -8,6 +8,7 @@ import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.ActionState;
+import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 
 import java.time.Instant;
@@ -190,113 +191,134 @@ public class AstRulesEngine implements Closeable {
     // ========== High Availability APIs ==========
     
     /**
-     * Configure HA mode with database connection parameters
-     * Called by Python: self._api.configure_ha(...)
+     * Initialize HA mode with UUID and database configuration
+     * Called by Python: self._api.initializeHA(uuid, postgres_params, config)
      */
-    public void configureHA(Map<String, Object> config) {
-        logger.info("Configuring HA mode with config: {}", config);
+    public void initializeHA(String uuid, Map<String, Object> postgresParams, Map<String, Object> config) {
+        logger.info("Initializing HA mode with UUID: {}", uuid);
         
         try {
-            this.haStateManager = HAStateManagerFactory.create(config);
+            this.haStateManager = HAStateManagerFactory.createH2();
+            this.haStateManager.initializeHA(uuid, postgresParams, config);
             this.haMode = true;
             
-            // Check for pending matching events on startup
-            if (haStateManager.isLeader()) {
-                recoverPendingMatchingEvents();
-            }
-            
-            logger.info("HA mode configured successfully");
+            logger.info("HA mode initialized successfully");
         } catch (Exception e) {
-            logger.error("Failed to configure HA mode", e);
-            throw new RuntimeException("Failed to configure HA mode: " + e.getMessage(), e);
+            logger.error("Failed to initialize HA mode", e);
+            throw new RuntimeException("Failed to initialize HA mode: " + e.getMessage(), e);
         }
     }
     
     /**
-     * Set this node as the leader
-     * Called by Python: self._api.set_leader(...)
+     * Enable leader mode and start writing states to database
+     * Called by Python: self._api.enableLeader(leader_name)
      */
-    public void setLeader(String leaderId) {
+    public void enableLeader(String leaderName) {
         if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not configured");
+            throw new IllegalStateException("HA mode not initialized");
         }
         
-        logger.info("Setting node as leader with ID: {}", leaderId);
-        haStateManager.setLeader(leaderId);
+        logger.info("Enabling leader mode for: {}", leaderName);
+        haStateManager.enableLeader(leaderName);
         
         // Recover pending actions when becoming leader
         recoverPendingMatchingEvents();
     }
     
     /**
-     * Unset leader status
-     * Called by Python: self._api.unset_leader(...)
+     * Disable leader mode and stop writing to database
+     * Called by Python: self._api.disableLeader(leader_name)
      */
-    public void unsetLeader() {
+    public void disableLeader(String leaderName) {
         if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not configured");
+            throw new IllegalStateException("HA mode not initialized");
         }
         
-        logger.info("Unsetting leader status");
-        haStateManager.unsetLeader();
+        logger.info("Disabling leader mode for: {}", leaderName);
+        haStateManager.disableLeader(leaderName);
     }
     
     /**
-     * Get action state for a matching event
-     * Called by Python: self._api.get_action_state(ruleset_session, me_uuid)
+     * Add an action for a matching event
+     * Called by Python: self._api.addAction(session, matching_uuid, index, action)
      */
-    public Map<String, Object> getActionState(long sessionId, String meUuid) {
+    public void addAction(long sessionId, String matchingUuid, int index, Map<String, Object> action) {
         if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not configured");
+            throw new IllegalStateException("HA mode not initialized");
         }
         
-        ActionState actionState = haStateManager.getActionState(String.valueOf(sessionId), meUuid);
-        if (actionState == null) {
-            return null;
+        haStateManager.addAction(String.valueOf(sessionId), matchingUuid, index, action);
+        logger.debug("Added action at index {} for ME UUID: {}", index, matchingUuid);
+    }
+    
+    /**
+     * Update an existing action
+     * Called by Python: self._api.updateAction(session, matching_uuid, index, action)
+     */
+    public void updateAction(long sessionId, String matchingUuid, int index, Map<String, Object> action) {
+        if (!haMode || haStateManager == null) {
+            throw new IllegalStateException("HA mode not initialized");
         }
         
-        // Convert to Map for Python/JPY
+        haStateManager.updateAction(String.valueOf(sessionId), matchingUuid, index, action);
+        logger.debug("Updated action at index {} for ME UUID: {}", index, matchingUuid);
+    }
+    
+    /**
+     * Check if an action exists
+     * Called by Python: self._api.actionExists(session, matching_uuid, index)
+     */
+    public boolean actionExists(long sessionId, String matchingUuid, int index) {
+        if (!haMode || haStateManager == null) {
+            throw new IllegalStateException("HA mode not initialized");
+        }
+        
+        return haStateManager.actionExists(String.valueOf(sessionId), matchingUuid, index);
+    }
+    
+    /**
+     * Get an action by index
+     * Called by Python: self._api.getAction(session, matching_uuid, index)
+     */
+    public Map<String, Object> getAction(long sessionId, String matchingUuid, int index) {
+        if (!haMode || haStateManager == null) {
+            throw new IllegalStateException("HA mode not initialized");
+        }
+        
+        return haStateManager.getAction(String.valueOf(sessionId), matchingUuid, index);
+    }
+    
+    /**
+     * Delete all actions and matching events for a matching UUID
+     * Called by Python: self._api.deleteActions(session, matching_uuid)
+     */
+    public void deleteActions(long sessionId, String matchingUuid) {
+        if (!haMode || haStateManager == null) {
+            throw new IllegalStateException("HA mode not initialized");
+        }
+        
+        haStateManager.deleteActions(String.valueOf(sessionId), matchingUuid);
+        logger.debug("Deleted all actions for ME UUID: {}", matchingUuid);
+    }
+    
+    /**
+     * Get current HA statistics
+     * Called by Python: self._api.getHAStats()
+     */
+    public Map<String, Object> getHAStats() {
+        if (!haMode || haStateManager == null) {
+            throw new IllegalStateException("HA mode not initialized");
+        }
+        
+        HAStats stats = haStateManager.getHAStats();
         Map<String, Object> result = new HashMap<>();
-        result.put("me_uuid", actionState.getMeUuid());
-        result.put("actions", actionState.getActions());
+        result.put("current_leader", stats.getCurrentLeader());
+        result.put("leader_switches", stats.getLeaderSwitches());
+        result.put("current_term_started_at", stats.getCurrentTermStartedAt());
+        result.put("events_processed_in_term", stats.getEventsProcessedInTerm());
+        result.put("actions_processed_in_term", stats.getActionsProcessedInTerm());
+        
         return result;
-    }
-    
-    /**
-     * Set/update action state for a matching event
-     * Called by Python: self._api.set_action_state(ruleset_session, me_uuid, action_state)
-     */
-    public void setActionState(long sessionId, String meUuid, Map<String, Object> actionStateMap) {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not configured");
-        }
-        
-        ActionState actionState = new ActionState();
-        actionState.setMeUuid(meUuid);
-        
-        // Parse action state from Python
-        if (actionStateMap.containsKey("actions")) {
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> actions = (List<Map<String, Object>>) actionStateMap.get("actions");
-            // Convert to ActionState.Action objects
-            // This would need proper mapping implementation
-        }
-        
-        haStateManager.persistActionState(String.valueOf(sessionId), meUuid, actionState);
-        logger.debug("Updated action state for ME UUID: {}", meUuid);
-    }
-    
-    /**
-     * Delete matching event and associated action state
-     * Called by Python: self._api.delete_me(ruleset_session, me_uuid)
-     */
-    public void deleteMatchingEvent(long sessionId, String meUuid) {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not configured");
-        }
-        
-        haStateManager.removeMatchingEvent(meUuid);
-        logger.debug("Deleted matching event: {}", meUuid);
     }
     
     /**
