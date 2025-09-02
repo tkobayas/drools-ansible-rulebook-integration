@@ -5,6 +5,7 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
+import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.junit.After;
 import org.junit.Before;
@@ -30,14 +31,16 @@ public class HAStateManagerTest {
     
     @Before
     public void setUp() {
-        // Configure H2 in-memory database for testing with unique name per test
-        Map<String, Object> config = new HashMap<>();
-        config.put("database_type", "H2");
-        config.put("db_url", "jdbc:h2:mem:test_ha_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1");
-        config.put("username", "sa");
-        config.put("password", "");
+        // Use new initializeHA API
+        String uuid = "test-ha-" + System.nanoTime();
+        Map<String, Object> postgresParams = new HashMap<>();
+        // Use H2 for testing (falls back when postgres params are empty)
         
-        stateManager = HAStateManagerFactory.create(config);
+        Map<String, Object> config = new HashMap<>();
+        config.put("write_after", 1);
+        
+        stateManager = HAStateManagerFactory.createH2();
+        stateManager.initializeHA(uuid, postgresParams, config);
     }
     
     @After
@@ -66,18 +69,18 @@ public class HAStateManagerTest {
         // Initially not a leader
         assertFalse(stateManager.isLeader());
         
-        // Set as leader
-        stateManager.setLeader(LEADER_ID);
+        // Enable leader mode
+        stateManager.enableLeader(LEADER_ID);
         assertTrue(stateManager.isLeader());
         
-        // Unset leader
-        stateManager.unsetLeader();
+        // Disable leader mode
+        stateManager.disableLeader(LEADER_ID);
         assertFalse(stateManager.isLeader());
     }
     
     @Test
     public void testEventStatePersistence() {
-        stateManager.setLeader(LEADER_ID);
+        stateManager.enableLeader(LEADER_ID);
         
         // Create and persist event state
         EventState event = new EventState();
@@ -93,7 +96,7 @@ public class HAStateManagerTest {
     
     @Test
     public void testMatchingEventCreation() {
-        stateManager.setLeader(LEADER_ID);
+        stateManager.enableLeader(LEADER_ID);
         
         // Create matching event when rule triggers
         Map<String, Object> facts = Map.of(
@@ -111,7 +114,7 @@ public class HAStateManagerTest {
     
     @Test
     public void testActionStatePersistence() {
-        stateManager.setLeader(LEADER_ID);
+        stateManager.enableLeader(LEADER_ID);
         
         // First create a matching event
         MatchingEvent me = createMatchingEvent(SESSION_ID, "testRuleset", "testRule", 
@@ -127,7 +130,7 @@ public class HAStateManagerTest {
         ActionState.Action action = new ActionState.Action();
         action.setName("send_alert");
         action.setIndex(0);
-        action.setStatus(ActionState.Action.ActionStatus.PENDING);
+        action.setStatus(ActionState.Action.ActionStatus.RUNNING);
         actionState.getActions().add(action);
         
         stateManager.persistActionState(SESSION_ID, meUuid, actionState);
@@ -142,7 +145,7 @@ public class HAStateManagerTest {
     
     @Test
     public void testPendingMatchingEventsRecovery() {
-        stateManager.setLeader(LEADER_ID);
+        stateManager.enableLeader(LEADER_ID);
         
         // Create multiple matching events with different states
         MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "rules1", "rule1", 
@@ -157,7 +160,7 @@ public class HAStateManagerTest {
         ActionState as1 = new ActionState();
         as1.setMeUuid(me1);
         ActionState.Action action1 = new ActionState.Action();
-        action1.setStatus(ActionState.Action.ActionStatus.STARTED);
+        action1.setStatus(ActionState.Action.ActionStatus.RUNNING);
         as1.getActions().add(action1);
         stateManager.persistActionState(SESSION_ID, me1, as1);
         
@@ -170,7 +173,7 @@ public class HAStateManagerTest {
     
     @Test
     public void testMatchingEventDeletion() {
-        stateManager.setLeader(LEADER_ID);
+        stateManager.enableLeader(LEADER_ID);
         
         // Create ME and action state
         MatchingEvent me = createMatchingEvent(SESSION_ID, "rules", "rule", 
@@ -197,7 +200,7 @@ public class HAStateManagerTest {
     
     @Test
     public void testTwoVersionStateProtocol() {
-        stateManager.setLeader(LEADER_ID);
+        stateManager.enableLeader(LEADER_ID);
         
         // Create initial state
         EventState event1 = new EventState();
@@ -234,7 +237,7 @@ public class HAStateManagerTest {
     
     @Test
     public void testSessionStatsPersistence() {
-        stateManager.setLeader(LEADER_ID);
+        stateManager.enableLeader(LEADER_ID);
         
         Map<String, Object> stats = new HashMap<>();
         stats.put("eventsProcessed", 100);
@@ -245,5 +248,78 @@ public class HAStateManagerTest {
         
         // Stats persistence doesn't return anything but should not throw
         assertTrue(true);
+    }
+    
+    @Test
+    public void testHAStats() {
+        // Test initial HA stats
+        HAStats stats = stateManager.getHAStats();
+        assertNotNull(stats);
+        assertNull(stats.getCurrentLeader());
+        assertEquals(0, stats.getLeaderSwitches());
+        assertEquals(0, stats.getEventsProcessedInTerm());
+        assertEquals(0, stats.getActionsProcessedInTerm());
+        
+        // Enable leader and verify stats update
+        stateManager.enableLeader(LEADER_ID);
+        stats = stateManager.getHAStats();
+        assertEquals(LEADER_ID, stats.getCurrentLeader());
+        assertEquals(1, stats.getLeaderSwitches());
+        assertNotNull(stats.getCurrentTermStartedAt());
+        
+        // Process some events/actions and verify counters
+        EventState event = new EventState();
+        event.setSessionId(SESSION_ID);
+        stateManager.persistEventState(SESSION_ID, event);
+        
+        MatchingEvent me = createMatchingEvent(SESSION_ID, "test", "rule", Map.of("test", "data"));
+        String meUuid = stateManager.addMatchingEvent(me);
+        stateManager.addAction(SESSION_ID, meUuid, 0, Map.of("name", "test_action", "status", "running"));
+        
+        // Check updated stats
+        stats = stateManager.getHAStats();
+        assertEquals(1, stats.getEventsProcessedInTerm());
+        assertEquals(1, stats.getActionsProcessedInTerm());
+    }
+    
+    @Test
+    public void testNewActionManagementAPIs() {
+        stateManager.enableLeader(LEADER_ID);
+        
+        // Create matching event
+        MatchingEvent me = createMatchingEvent(SESSION_ID, "test", "rule", Map.of("test", "data"));
+        String meUuid = stateManager.addMatchingEvent(me);
+        
+        // Test addAction
+        Map<String, Object> action1 = new HashMap<>();
+        action1.put("name", "action1");
+        action1.put("status", "running");
+        action1.put("reference_id", "ref1");
+        
+        stateManager.addAction(SESSION_ID, meUuid, 0, action1);
+        
+        // Test actionExists
+        assertTrue(stateManager.actionExists(SESSION_ID, meUuid, 0));
+        assertFalse(stateManager.actionExists(SESSION_ID, meUuid, 1));
+        
+        // Test getAction
+        Map<String, Object> retrievedAction = stateManager.getAction(SESSION_ID, meUuid, 0);
+        assertEquals("action1", retrievedAction.get("name"));
+        assertEquals("running", retrievedAction.get("status"));
+        assertEquals("ref1", retrievedAction.get("reference_id"));
+        
+        // Test updateAction
+        action1.put("status", "success");
+        action1.put("end_time", Instant.now().toString());
+        stateManager.updateAction(SESSION_ID, meUuid, 0, action1);
+        
+        retrievedAction = stateManager.getAction(SESSION_ID, meUuid, 0);
+        assertEquals("success", retrievedAction.get("status"));
+        assertNotNull(retrievedAction.get("end_time"));
+        
+        // Test deleteActions
+        stateManager.deleteActions(SESSION_ID, meUuid);
+        assertFalse(stateManager.actionExists(SESSION_ID, meUuid, 0));
+        assertTrue(stateManager.getAction(SESSION_ID, meUuid, 0).isEmpty());
     }
 }

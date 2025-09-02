@@ -5,7 +5,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import org.drools.ansible.rulebook.integration.ha.api.HAConfiguration;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
@@ -97,36 +96,6 @@ public class H2StateManager implements HAStateManager {
         }
     }
     
-    @Override
-    public void initialize(HAConfiguration config) {
-        logger.info("Initializing H2StateManager with config: {}", config.getDbUrl());
-        
-        // Configure HikariCP connection pool
-        HikariConfig hikariConfig = new HikariConfig();
-        
-        // Default to in-memory H2 if no URL provided
-        String jdbcUrl = config.getDbUrl() != null 
-            ? config.getDbUrl() 
-            : "jdbc:h2:mem:eda_ha;DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
-            
-        hikariConfig.setJdbcUrl(jdbcUrl);
-        hikariConfig.setUsername(config.getUsername() != null ? config.getUsername() : "sa");
-        hikariConfig.setPassword(config.getPassword() != null ? config.getPassword() : "");
-        hikariConfig.setMaximumPoolSize(config.getConnectionPoolSize());
-        hikariConfig.setConnectionTimeout(config.getConnectionTimeout());
-        hikariConfig.setAutoCommit(false); // We'll manage transactions
-        
-        this.dataSource = new HikariDataSource(hikariConfig);
-        
-        // Create schema
-        try {
-            H2Schema.createSchema(dataSource);
-            logger.info("H2 schema created successfully");
-        } catch (SQLException e) {
-            logger.error("Failed to create H2 schema", e);
-            throw new RuntimeException("Failed to initialize H2StateManager", e);
-        }
-    }
     
     @Override
     public void enableLeader(String leaderName) {
@@ -845,19 +814,19 @@ public class H2StateManager implements HAStateManager {
         boolean hasFailed = false;
         
         for (ActionState.Action action : actionState.getActions()) {
-            if (action.getStatus() == ActionState.Action.ActionStatus.STARTED) {
+            if (action.getStatus() == ActionState.Action.ActionStatus.RUNNING) {
                 hasStarted = true;
                 allCompleted = false;
             } else if (action.getStatus() == ActionState.Action.ActionStatus.FAILED) {
                 hasFailed = true;
                 allCompleted = false;
-            } else if (action.getStatus() != ActionState.Action.ActionStatus.COMPLETED) {
+            } else if (action.getStatus() != ActionState.Action.ActionStatus.SUCCESS) {
                 allCompleted = false;
             }
         }
         
         if (hasFailed) return "FAILED";
-        if (allCompleted) return "COMPLETED";
+        if (allCompleted) return "SUCCESS";
         if (hasStarted) return "IN_PROGRESS";
         return "PENDING";
     }

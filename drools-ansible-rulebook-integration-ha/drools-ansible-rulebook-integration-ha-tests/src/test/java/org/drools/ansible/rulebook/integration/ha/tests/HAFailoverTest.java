@@ -43,7 +43,7 @@ public class HAFailoverTest {
         
         // Node 1 becomes leader
         HAStateManager node1 = createNode(dbUrl);
-        node1.setLeader("node-1");
+        node1.enableLeader("node-1");
         
         // Create matching events with actions in progress
         MatchingEvent me = createMatchingEvent(SESSION_ID, "rules", "alert", 
@@ -55,19 +55,19 @@ public class HAFailoverTest {
         actionState.setMeUuid(me1);
         ActionState.Action action = new ActionState.Action();
         action.setName("send_notification");
-        action.setStatus(ActionState.Action.ActionStatus.STARTED);
+        action.setStatus(ActionState.Action.ActionStatus.RUNNING);
         action.setReferenceId("job-123");
         actionState.getActions().add(action);
         
         node1.persistActionState(SESSION_ID, me1, actionState);
         
         // Simulate node 1 failure
-        node1.unsetLeader();
+        node1.disableLeader("node-1");
         node1.shutdown();
         
         // Node 2 takes over
         HAStateManager node2 = createNode(dbUrl);
-        node2.setLeader("node-2");
+        node2.enableLeader("node-2");
         
         // Node 2 should see pending actions
         List<MatchingEvent> pending = node2.getPendingMatchingEvents(SESSION_ID);
@@ -81,11 +81,11 @@ public class HAFailoverTest {
         assertNotNull(recoveredState);
         assertEquals(1, recoveredState.getActions().size());
         assertEquals("job-123", recoveredState.getActions().get(0).getReferenceId());
-        assertEquals(ActionState.Action.ActionStatus.STARTED, 
+        assertEquals(ActionState.Action.ActionStatus.RUNNING, 
                     recoveredState.getActions().get(0).getStatus());
         
         // Node 2 can complete the action
-        recoveredState.getActions().get(0).setStatus(ActionState.Action.ActionStatus.COMPLETED);
+        recoveredState.getActions().get(0).setStatus(ActionState.Action.ActionStatus.SUCCESS);
         node2.persistActionState(SESSION_ID, me1, recoveredState);
         
         // Clean up
@@ -99,17 +99,17 @@ public class HAFailoverTest {
         
         // Node 1 starts work
         HAStateManager node1 = createNode(dbUrl);
-        node1.setLeader("node-1");
+        node1.enableLeader("node-1");
         
         MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "rules", "rule1", 
                                                            Map.of("data", "1"));
         String me1 = node1.addMatchingEvent(matchingEvent1);
         
-        node1.unsetLeader();
+        node1.disableLeader("node-1");
         
         // Node 2 takes over
         HAStateManager node2 = createNode(dbUrl);
-        node2.setLeader("node-2");
+        node2.enableLeader("node-2");
         List<MatchingEvent> pending2 = node2.getPendingMatchingEvents(SESSION_ID);
         assertThat(pending2).hasSize(1);
         
@@ -117,11 +117,11 @@ public class HAFailoverTest {
         MatchingEvent matchingEvent2 = createMatchingEvent(SESSION_ID, "rules", "rule2", 
                                                            Map.of("data", "2"));
         String me2 = node2.addMatchingEvent(matchingEvent2);
-        node2.unsetLeader();
+        node2.disableLeader("node-1");
         
         // Node 3 takes over
         HAStateManager node3 = createNode(dbUrl);
-        node3.setLeader("node-3");
+        node3.enableLeader("node-3");
         List<MatchingEvent> pending3 = node3.getPendingMatchingEvents(SESSION_ID);
         
         // Should see both MEs
@@ -143,8 +143,8 @@ public class HAFailoverTest {
         HAStateManager node1 = createNode(dbUrl);
         HAStateManager node2 = createNode(dbUrl);
         
-        node1.setLeader("node-1");
-        node2.setLeader("node-2");
+        node1.enableLeader("node-1");
+        node2.enableLeader("node-2");
         
         // Both try to create MEs
         MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "rules", "rule1", 
@@ -156,7 +156,7 @@ public class HAFailoverTest {
         String me2 = node2.addMatchingEvent(matchingEvent2);
         
         // Resolve split brain - node2 wins
-        node1.unsetLeader();
+        node1.disableLeader("node-1");
         
         // Node2 should see both MEs
         List<MatchingEvent> allEvents = node2.getPendingMatchingEvents(SESSION_ID);
@@ -172,7 +172,7 @@ public class HAFailoverTest {
         String dbUrl = "jdbc:h2:mem:action_retry;DB_CLOSE_DELAY=-1";
         
         HAStateManager node1 = createNode(dbUrl);
-        node1.setLeader("node-1");
+        node1.enableLeader("node-1");
         
         // Create ME with failed action
         MatchingEvent me = createMatchingEvent(SESSION_ID, "rules", "retry_rule", 
@@ -188,23 +188,23 @@ public class HAFailoverTest {
         failedAction.getActions().add(action);
         
         node1.persistActionState(SESSION_ID, meUuid, failedAction);
-        node1.unsetLeader();
+        node1.disableLeader("node-1");
         
         // New leader retries
         HAStateManager node2 = createNode(dbUrl);
-        node2.setLeader("node-2");
+        node2.enableLeader("node-2");
         
         ActionState toRetry = node2.getActionState(SESSION_ID, meUuid);
         assertEquals(ActionState.Action.ActionStatus.FAILED, 
                     toRetry.getActions().get(0).getStatus());
         
         // Retry the action
-        toRetry.getActions().get(0).setStatus(ActionState.Action.ActionStatus.STARTED);
+        toRetry.getActions().get(0).setStatus(ActionState.Action.ActionStatus.RUNNING);
         toRetry.getActions().get(0).setReferenceId("retry-job-2");
         node2.persistActionState(SESSION_ID, meUuid, toRetry);
         
         // Eventually succeed
-        toRetry.getActions().get(0).setStatus(ActionState.Action.ActionStatus.COMPLETED);
+        toRetry.getActions().get(0).setStatus(ActionState.Action.ActionStatus.SUCCESS);
         node2.persistActionState(SESSION_ID, meUuid, toRetry);
         
         // Clean up
@@ -219,6 +219,8 @@ public class HAFailoverTest {
         config.put("db_url", dbUrl);
         config.put("username", "sa");
         config.put("password", "");
-        return HAStateManagerFactory.create(config);
+        HAStateManager manager = HAStateManagerFactory.createH2();
+        manager.initializeHA("test-failover-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        return manager;
     }
 }
