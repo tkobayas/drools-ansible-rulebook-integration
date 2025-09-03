@@ -24,6 +24,7 @@ public class AstRulesEngineHAIntegrationTest {
     
     private AstRulesEngine rulesEngine;
     private long sessionId;
+    private static final String SHARED_DB_URL = "jdbc:h2:mem:ast_integration_test;DB_CLOSE_DELAY=-1";
     
     @Before
     public void setUp() {
@@ -71,6 +72,28 @@ public class AstRulesEngineHAIntegrationTest {
         }
     }
     
+    // Helper method to create HAStateManager with shared database
+    private HAStateManager createSharedHAStateManager(String uuid) {
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        HAStateManager manager = HAStateManagerFactory.createH2();
+        manager.initializeHA(uuid, new HashMap<>(), config);
+        return manager;
+    }
+    
+    // Get unique database URL for current test
+    private String getCurrentTestDatabaseUrl() {
+        // Get the current test method name from the stack trace
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement element : stackTrace) {
+            if (element.getClassName().equals(this.getClass().getName()) && element.getMethodName().startsWith("test")) {
+                return "jdbc:h2:mem:" + element.getMethodName() + ";DB_CLOSE_DELAY=-1";
+            }
+        }
+        return SHARED_DB_URL; // fallback
+    }
+    
     @Test
     public void testHAConfiguration() {
         // Initialize HA mode with new API
@@ -79,6 +102,7 @@ public class AstRulesEngineHAIntegrationTest {
         // Empty postgres params will fall back to H2
         
         Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
         config.put("write_after", 1);
         
         // Should not throw exception
@@ -123,13 +147,10 @@ public class AstRulesEngineHAIntegrationTest {
     @Test
     public void testMatchingEventPersistence() {
         // Configure HA
-        Map<String, Object> haConfig = new HashMap<>();
-        haConfig.put("database_type", "H2");
-        haConfig.put("db_url", "jdbc:h2:mem:test_me_persistence;DB_CLOSE_DELAY=-1");
-        haConfig.put("username", "sa");
-        haConfig.put("password", "");
-        
-        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), config);
         rulesEngine.enableLeader("leader-1");
         
         // Process an event that triggers a rule
@@ -145,8 +166,7 @@ public class AstRulesEngineHAIntegrationTest {
         
         // Verify that matching events were persisted to database
         // We can check this by accessing the HA state manager directly
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
-        haStateManagerForAssertion.initializeHA("test-assertion", new HashMap<>(), Map.of("write_after", 1));
+        HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion");
         
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
@@ -170,7 +190,10 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("username", "sa");
         haConfig.put("password", "");
         
-        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), config);
         rulesEngine.enableLeader("leader-1");
         
         // First trigger a rule to create a matching event
@@ -185,8 +208,7 @@ public class AstRulesEngineHAIntegrationTest {
         assertNotNull(result);
         
         // Get the ME UUID from the database (in real usage, Python would extract from response)
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
-        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion-" + System.nanoTime());
 
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
@@ -235,7 +257,10 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("username", "sa");
         haConfig.put("password", "");
         
-        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), config);
         
         // Set as leader
         rulesEngine.enableLeader("leader-1");
@@ -266,8 +291,7 @@ public class AstRulesEngineHAIntegrationTest {
         assertNotNull(result2);
         
         // Check that both events created matching events
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
-        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion-" + System.nanoTime());
 
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
@@ -292,15 +316,17 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("username", "sa");
         haConfig.put("password", "");
         
-        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), config);
         rulesEngine.enableLeader("leader-1");
         
         // Process event in first session
         rulesEngine.assertEvent(sessionId, "{\"temperature\": 35}");
         
         // Verify the matching event was created for this session
-        HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
-        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion-" + System.nanoTime());
         haStateManagerForAssertion.enableLeader("leader-1");
         
         try {
@@ -324,7 +350,10 @@ public class AstRulesEngineHAIntegrationTest {
         haConfig.put("password", "");
         
         // First engine acts as leader
-        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        rulesEngine.initializeHA("test-uuid-" + System.nanoTime(), new HashMap<>(), config);
         rulesEngine.enableLeader("engine-1");
         
         // Process an event
@@ -371,12 +400,14 @@ public class AstRulesEngineHAIntegrationTest {
         
         try {
             // Engine-2 takes over as leader
-            engine2.initializeHA("test-uuid-engine2", new HashMap<>(), Map.of("write_after", 1));
+            Map<String, Object> config2 = new HashMap<>();
+            config2.put("db_url", getCurrentTestDatabaseUrl());
+            config2.put("write_after", 1);
+            engine2.initializeHA("test-uuid-engine2", new HashMap<>(), config2);
             engine2.enableLeader("engine-2");
             
             // Verify engine-2 can see pending MEs from engine-1
-            HAStateManager haStateManagerForAssertion = HAStateManagerFactory.createH2();
-        haStateManagerForAssertion.initializeHA("test-assertion-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+            HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion-" + System.nanoTime());
             haStateManagerForAssertion.enableLeader("engine-2");
             
             try {
@@ -400,7 +431,10 @@ public class AstRulesEngineHAIntegrationTest {
     @Test
     public void testNewActionAPIs() {
         // Initialize HA
-        rulesEngine.initializeHA("test-new-actions", new HashMap<>(), Map.of("write_after", 1));
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        rulesEngine.initializeHA("test-new-actions", new HashMap<>(), config);
         rulesEngine.enableLeader("leader-1");
         
         // Trigger a rule to create matching event
@@ -448,7 +482,10 @@ public class AstRulesEngineHAIntegrationTest {
     @Test
     public void testGetHAStats() {
         // Initialize HA
-        rulesEngine.initializeHA("test-ha-stats", new HashMap<>(), Map.of("write_after", 1));
+        Map<String, Object> config = new HashMap<>();
+        config.put("db_url", getCurrentTestDatabaseUrl());
+        config.put("write_after", 1);
+        rulesEngine.initializeHA("test-ha-stats", new HashMap<>(), config);
         
         // Check initial stats
         Map<String, Object> stats = rulesEngine.getHAStats();

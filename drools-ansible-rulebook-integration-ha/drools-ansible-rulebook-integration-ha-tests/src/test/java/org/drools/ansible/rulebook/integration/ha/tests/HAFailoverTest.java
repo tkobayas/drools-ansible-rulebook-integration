@@ -219,8 +219,9 @@ public class HAFailoverTest {
         config.put("db_url", dbUrl);
         config.put("username", "sa");
         config.put("password", "");
+        config.put("write_after", 1);
         HAStateManager manager = HAStateManagerFactory.createH2();
-        manager.initializeHA("test-failover-" + System.nanoTime(), new HashMap<>(), Map.of("write_after", 1));
+        manager.initializeHA("test-failover-" + System.nanoTime(), new HashMap<>(), config);
         return manager;
     }
 }
