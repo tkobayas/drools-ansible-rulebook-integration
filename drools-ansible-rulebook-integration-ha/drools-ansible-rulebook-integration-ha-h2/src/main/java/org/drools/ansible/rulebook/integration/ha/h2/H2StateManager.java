@@ -65,8 +65,14 @@ public class H2StateManager implements HAStateManager {
                 jdbcUrl += (sslmode != null ? "&" : "?") + "ApplicationName=" + applicationName;
             }
         } else {
-            // Fallback to H2 for development/testing
-            jdbcUrl = "jdbc:h2:mem:eda_ha_" + uuid + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
+            // Check if custom H2 URL is provided in config
+            String customH2Url = (String) config.get("db_url");
+            if (customH2Url != null) {
+                jdbcUrl = customH2Url;
+            } else {
+                // Fallback to H2 for development/testing
+                jdbcUrl = "jdbc:h2:mem:eda_ha_" + uuid + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
+            }
             logger.warn("Using H2 database for HA - not suitable for production");
         }
         

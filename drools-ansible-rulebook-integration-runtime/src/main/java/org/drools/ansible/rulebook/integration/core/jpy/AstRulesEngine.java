@@ -8,6 +8,7 @@ import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.ActionState;
+import org.drools.ansible.rulebook.integration.ha.model.EventState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 
@@ -83,6 +84,17 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processEvents(serializedFact).join();
         String result = matchesToJson(matches);
         
+        // In HA mode, persist event state for statistics tracking
+        if (haMode && haStateManager != null && haStateManager.isLeader()) {
+            try {
+                EventState eventState = new EventState();
+                eventState.setSessionId(String.valueOf(sessionId));
+                eventState.setSessionStats(Map.of("eventsProcessed", 1));
+                haStateManager.persistEventState(String.valueOf(sessionId), eventState);
+            } catch (Exception e) {
+                logger.warn("Failed to persist event state for HA statistics", e);
+            }
+        }
         
         // In HA mode, create matching events for triggered rules and add ME UUIDs to response
         if (haMode && haStateManager != null && haStateManager.isLeader() && !matches.isEmpty()) {
