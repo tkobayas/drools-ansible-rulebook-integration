@@ -144,8 +144,7 @@ public class H2StateManager implements HAStateManager {
     @Override
     public void persistEventState(String sessionId, EventState eventState) {
         if (!isLeader) {
-            logger.debug("Not leader - skipping event state persistence");
-            return;
+            throw new IllegalStateException("Cannot persist event state - not leader");
         }
         
         try (Connection conn = dataSource.getConnection()) {
@@ -193,8 +192,7 @@ public class H2StateManager implements HAStateManager {
     @Override
     public String addMatchingEvent(MatchingEvent matchingEvent) {
         if (!isLeader) {
-            logger.debug("Not leader - skipping matching event creation");
-            return null;
+            throw new IllegalStateException("Cannot add matching event - not leader");
         }
         
         String meUuid = UUID.randomUUID().toString();
@@ -315,8 +313,7 @@ public class H2StateManager implements HAStateManager {
     @Override
     public void addAction(String sessionId, String matchingUuid, int index, Map<String, Object> action) {
         if (!isLeader) {
-            logger.debug("Not leader - skipping action addition");
-            return;
+            throw new IllegalStateException("Cannot add action - not leader");
         }
         
         String actionId = UUID.randomUUID().toString();

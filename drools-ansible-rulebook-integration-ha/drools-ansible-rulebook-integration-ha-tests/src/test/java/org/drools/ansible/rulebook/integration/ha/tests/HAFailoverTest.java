@@ -2,8 +2,8 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
-import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.Test;
 
 import java.time.Instant;
@@ -26,13 +26,18 @@ public class HAFailoverTest {
     private MatchingEvent createMatchingEvent(String sessionId, String rulesetName, 
                                                String ruleName, Map<String, Object> matchingFacts) {
         MatchingEvent me = new MatchingEvent();
-        me.setMeUuid(UUID.randomUUID().toString());
         me.setSessionId(sessionId);
-        me.setRulesetName(rulesetName);
+        me.setRuleSetName(rulesetName);
         me.setRuleName(ruleName);
-        me.setMatchingFacts(matchingFacts);
-        me.setStatus(MatchingEvent.MatchingEventStatus.PENDING);
-        me.setCreatedAt(Instant.now().toString());
+        
+        // Serialize matching facts to JSON
+        try {
+            String eventDataJson = new ObjectMapper().writeValueAsString(matchingFacts);
+            me.setEventData(eventDataJson);
+        } catch (Exception e) {
+            me.setEventData("{}");
+        }
+        
         return me;
     }
     
@@ -51,15 +56,13 @@ public class HAFailoverTest {
         String me1 = node1.addMatchingEvent(me);
         
         // Start action execution
-        ActionState actionState = new ActionState();
-        actionState.setMeUuid(me1);
-        ActionState.Action action = new ActionState.Action();
-        action.setName("send_notification");
-        action.setStatus(ActionState.Action.ActionStatus.RUNNING);
-        action.setReferenceId("job-123");
-        actionState.getActions().add(action);
+        Map<String, Object> actionData = Map.of(
+            "name", "send_notification",
+            "status", "running",
+            "reference_id", "job-123"
+        );
         
-        node1.persistActionState(SESSION_ID, me1, actionState);
+        node1.addAction(SESSION_ID, me1, 0, actionData);
         
         // Simulate node 1 failure
         node1.disableLeader("node-1");
@@ -76,20 +79,22 @@ public class HAFailoverTest {
         MatchingEvent recovered = pending.get(0);
         assertEquals(me1, recovered.getMeUuid());
         
-        // Check action state was preserved
-        ActionState recoveredState = node2.getActionState(SESSION_ID, me1);
-        assertNotNull(recoveredState);
-        assertEquals(1, recoveredState.getActions().size());
-        assertEquals("job-123", recoveredState.getActions().get(0).getReferenceId());
-        assertEquals(ActionState.Action.ActionStatus.RUNNING, 
-                    recoveredState.getActions().get(0).getStatus());
+        // Check action was preserved
+        assertTrue(node2.actionExists(SESSION_ID, me1, 0));
+        Map<String, Object> recoveredAction = node2.getAction(SESSION_ID, me1, 0);
+        assertEquals("job-123", recoveredAction.get("reference_id"));
+        assertEquals("running", recoveredAction.get("status"));
         
         // Node 2 can complete the action
-        recoveredState.getActions().get(0).setStatus(ActionState.Action.ActionStatus.SUCCESS);
-        node2.persistActionState(SESSION_ID, me1, recoveredState);
+        Map<String, Object> completedAction = Map.of(
+            "name", "send_notification",
+            "status", "success",
+            "reference_id", "job-123"
+        );
+        node2.updateAction(SESSION_ID, me1, 0, completedAction);
         
         // Clean up
-        node2.removeMatchingEvent(me1);
+        node2.deleteActions(SESSION_ID, me1);
         node2.shutdown();
     }
     
@@ -179,36 +184,40 @@ public class HAFailoverTest {
                                                Map.of("retry", true));
         String meUuid = node1.addMatchingEvent(me);
         
-        ActionState failedAction = new ActionState();
-        failedAction.setMeUuid(meUuid);
-        ActionState.Action action = new ActionState.Action();
-        action.setName("flaky_action");
-        action.setStatus(ActionState.Action.ActionStatus.FAILED);
-        action.setReferenceId("failed-job-1");
-        failedAction.getActions().add(action);
+        Map<String, Object> failedActionData = Map.of(
+            "name", "flaky_action",
+            "status", "failed",
+            "reference_id", "failed-job-1"
+        );
         
-        node1.persistActionState(SESSION_ID, meUuid, failedAction);
+        node1.addAction(SESSION_ID, meUuid, 0, failedActionData);
         node1.disableLeader("node-1");
         
         // New leader retries
         HAStateManager node2 = createNode(dbUrl);
         node2.enableLeader("node-2");
         
-        ActionState toRetry = node2.getActionState(SESSION_ID, meUuid);
-        assertEquals(ActionState.Action.ActionStatus.FAILED, 
-                    toRetry.getActions().get(0).getStatus());
+        Map<String, Object> failedAction = node2.getAction(SESSION_ID, meUuid, 0);
+        assertEquals("failed", failedAction.get("status"));
         
         // Retry the action
-        toRetry.getActions().get(0).setStatus(ActionState.Action.ActionStatus.RUNNING);
-        toRetry.getActions().get(0).setReferenceId("retry-job-2");
-        node2.persistActionState(SESSION_ID, meUuid, toRetry);
+        Map<String, Object> retryAction = Map.of(
+            "name", "flaky_action", 
+            "status", "running",
+            "reference_id", "retry-job-2"
+        );
+        node2.updateAction(SESSION_ID, meUuid, 0, retryAction);
         
         // Eventually succeed
-        toRetry.getActions().get(0).setStatus(ActionState.Action.ActionStatus.SUCCESS);
-        node2.persistActionState(SESSION_ID, meUuid, toRetry);
+        Map<String, Object> successAction = Map.of(
+            "name", "flaky_action",
+            "status", "success", 
+            "reference_id", "retry-job-2"
+        );
+        node2.updateAction(SESSION_ID, meUuid, 0, successAction);
         
         // Clean up
-        node2.removeMatchingEvent(meUuid);
+        node2.deleteActions(SESSION_ID, meUuid);
         node1.shutdown();
         node2.shutdown();
     }

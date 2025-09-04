@@ -174,7 +174,7 @@ public class AstRulesEngineHAIntegrationTest {
             
             MatchingEvent me = pendingEvents.get(0);
             assertEquals("temperature_alert", me.getRuleName());
-            assertEquals(MatchingEvent.MatchingEventStatus.PENDING, me.getStatus());
+            // MatchingEvents no longer have status - they exist until deleted
             assertNotNull(me.getMeUuid());
         } finally {
             haStateManagerForAssertion.shutdown();
@@ -217,19 +217,11 @@ public class AstRulesEngineHAIntegrationTest {
             String meUuid = pendingEvents.get(0).getMeUuid();
             
             // Set action state
-            ActionState actionState = new ActionState();
-            actionState.setMeUuid(meUuid);
-            ActionState.Action action = new ActionState.Action();
-            action.setName("send_alert");
-            action.setStatus(ActionState.Action.ActionStatus.RUNNING);
-            action.setReferenceId("job-456");
-            actionState.getActions().add(action);
-            
-            // Use new action management APIs instead of old setActionState
+            // Use new action management APIs
             Map<String, Object> actionData = new HashMap<>();
-            actionData.put("name", action.getName());
+            actionData.put("name", "send_alert");
             actionData.put("status", "running");
-            actionData.put("reference_id", action.getReferenceId());
+            actionData.put("reference_id", "job-456");
             
             rulesEngine.addAction(sessionId, meUuid, 0, actionData);
             
@@ -417,9 +409,9 @@ public class AstRulesEngineHAIntegrationTest {
                 
                 MatchingEvent recoveredEvent = allPendingEvents.get(0);
                 assertEquals("temperature_alert", recoveredEvent.getRuleName());
-                assertNotNull(recoveredEvent.getMatchingFacts());
-                // Facts are stored as internal Drools objects, not original JSON
-                assertThat(recoveredEvent.getMatchingFacts()).isNotEmpty();
+                assertNotNull(recoveredEvent.getEventData());
+                // Event data is stored as JSON
+                assertThat(recoveredEvent.getEventData()).isNotEmpty();
             } finally {
                 haStateManagerForAssertion.shutdown();
             }
@@ -516,10 +508,5 @@ public class AstRulesEngineHAIntegrationTest {
     }
 
     // Utility method to convert ActionState to Map for API compatibility
-    private Map<String, Object> actionStateToMap(ActionState actionState) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("me_uuid", actionState.getMeUuid());
-        map.put("actions", actionState.getActions());
-        return map;
-    }
+    // Helper method removed - ActionState no longer has getActions()
 }
