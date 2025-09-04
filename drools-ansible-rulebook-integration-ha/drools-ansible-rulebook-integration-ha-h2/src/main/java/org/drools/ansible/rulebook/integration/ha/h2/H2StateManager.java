@@ -112,7 +112,7 @@ public class H2StateManager implements HAStateManager {
 
     @Override
     public EventState getEventState(String sessionId) {
-        String sql = "SELECT * FROM eda_event_state WHERE session_id = ? AND is_current = true";
+        String sql = "SELECT * FROM EventState WHERE session_id = ? AND is_current = true";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -151,9 +151,9 @@ public class H2StateManager implements HAStateManager {
 
             // Insert new version
             String sql = """
-                    INSERT INTO eda_event_state (session_id, rulebook_hash, session_stats, version, is_current, leader_id)
+                    INSERT INTO EventState (session_id, rulebook_hash, session_stats, version, is_current, leader_id)
                     VALUES (?, ?, ?, 
-                        COALESCE((SELECT MAX(version) FROM eda_event_state WHERE session_id = ?), 0) + 1,
+                        COALESCE((SELECT MAX(version) FROM EventState WHERE session_id = ?), 0) + 1,
                         false, ?)
                     """;
 
@@ -260,7 +260,7 @@ public class H2StateManager implements HAStateManager {
             conn.setAutoCommit(false);
 
             // Mark current version as not current
-            String sql1 = "UPDATE eda_event_state SET is_current = false WHERE session_id = ? AND is_current = true";
+            String sql1 = "UPDATE EventState SET is_current = false WHERE session_id = ? AND is_current = true";
             try (PreparedStatement ps1 = conn.prepareStatement(sql1)) {
                 ps1.setString(1, sessionId);
                 ps1.executeUpdate();
@@ -268,9 +268,9 @@ public class H2StateManager implements HAStateManager {
 
             // Mark latest version as current
             String sql2 = """
-                    UPDATE eda_event_state 
+                    UPDATE EventState 
                     SET is_current = true 
-                    WHERE session_id = ? AND version = (SELECT MAX(version) FROM eda_event_state WHERE session_id = ?)
+                    WHERE session_id = ? AND version = (SELECT MAX(version) FROM EventState WHERE session_id = ?)
                     """;
             try (PreparedStatement ps2 = conn.prepareStatement(sql2)) {
                 ps2.setString(1, sessionId);
@@ -292,7 +292,7 @@ public class H2StateManager implements HAStateManager {
         }
 
         // TODO: Revisit this logic. We keep just 2 versions of EventState. `rollback` is not a right name
-        String sql = "DELETE FROM eda_event_state WHERE session_id = ? AND is_current = false";
+        String sql = "DELETE FROM EventState WHERE session_id = ? AND is_current = false";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -463,7 +463,7 @@ public class H2StateManager implements HAStateManager {
     // Private helper methods
 
     private void loadOrCreateHAStats() throws SQLException {
-        String sql = "SELECT * FROM eda_ha_stats WHERE session_id = ?";
+        String sql = "SELECT * FROM HAStats WHERE session_id = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -494,7 +494,7 @@ public class H2StateManager implements HAStateManager {
 
         // For H2, use MERGE statement
         String h2Sql = """
-                MERGE INTO eda_ha_stats 
+                MERGE INTO HAStats 
                 (session_id, current_leader, leader_switches, current_term_started_at,
                  events_processed_in_term, actions_processed_in_term, updated_at)
                 KEY(session_id) VALUES (?, ?, ?, ?, ?, ?, ?)
