@@ -257,64 +257,64 @@ public class AstRulesEngine implements Closeable {
     
     /**
      * Add an action for a matching event
-     * Called by Python: self._api.addAction(session, matching_uuid, index, action)
+     * Called by Python: self._api.addActionState(session, matching_uuid, index, action)
      */
-    public void addAction(long sessionId, String matchingUuid, int index, Map<String, Object> action) {
+    public void addActionState(long sessionId, String matchingUuid, int index, String action) {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        haStateManager.addAction(String.valueOf(sessionId), matchingUuid, index, action);
+        haStateManager.addActionState(String.valueOf(sessionId), matchingUuid, index, action);
         logger.debug("Added action at index {} for ME UUID: {}", index, matchingUuid);
     }
     
     /**
      * Update an existing action
-     * Called by Python: self._api.updateAction(session, matching_uuid, index, action)
+     * Called by Python: self._api.updateActionState(session, matching_uuid, index, action)
      */
-    public void updateAction(long sessionId, String matchingUuid, int index, Map<String, Object> action) {
+    public void updateActionState(long sessionId, String matchingUuid, int index, String action) {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        haStateManager.updateAction(String.valueOf(sessionId), matchingUuid, index, action);
+        haStateManager.updateActionState(String.valueOf(sessionId), matchingUuid, index, action);
         logger.debug("Updated action at index {} for ME UUID: {}", index, matchingUuid);
     }
     
     /**
      * Check if an action exists
-     * Called by Python: self._api.actionExists(session, matching_uuid, index)
+     * Called by Python: self._api.actionStateExists(session, matching_uuid, index)
      */
-    public boolean actionExists(long sessionId, String matchingUuid, int index) {
+    public boolean actionStateExists(long sessionId, String matchingUuid, int index) {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        return haStateManager.actionExists(String.valueOf(sessionId), matchingUuid, index);
+        return haStateManager.actionStateExists(String.valueOf(sessionId), matchingUuid, index);
     }
     
     /**
      * Get an action by index
-     * Called by Python: self._api.getAction(session, matching_uuid, index)
+     * Called by Python: self._api.getActionState(session, matching_uuid, index)
      */
-    public Map<String, Object> getAction(long sessionId, String matchingUuid, int index) {
+    public String getActionState(long sessionId, String matchingUuid, int index) {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        return haStateManager.getAction(String.valueOf(sessionId), matchingUuid, index);
+        return haStateManager.getActionState(String.valueOf(sessionId), matchingUuid, index);
     }
     
     /**
      * Delete all actions and matching events for a matching UUID
-     * Called by Python: self._api.deleteActions(session, matching_uuid)
+     * Called by Python: self._api.deleteActionStates(session, matching_uuid)
      */
-    public void deleteActions(long sessionId, String matchingUuid) {
+    public void deleteActionStates(long sessionId, String matchingUuid) {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        haStateManager.deleteActions(String.valueOf(sessionId), matchingUuid);
+        haStateManager.deleteActionStates(String.valueOf(sessionId), matchingUuid);
         logger.debug("Deleted all actions for ME UUID: {}", matchingUuid);
     }
     
