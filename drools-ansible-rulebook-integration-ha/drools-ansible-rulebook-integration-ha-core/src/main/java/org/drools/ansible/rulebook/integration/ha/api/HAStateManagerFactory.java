@@ -10,14 +10,18 @@ public class HAStateManagerFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(HAStateManagerFactory.class);
 
+    private HAStateManagerFactory() {
+    }
+
     /**
-     * Create an H2StateManager instance without initialization
+     * Create an HAStateManager instance without initialization
      * Used for new initializeHA API where initialization happens separately
      *
      * @return HAStateManager instance
      */
-    public static HAStateManager createH2() {
+    public static HAStateManager create() {
         try {
+            // TODO: At the moment, only H2 is supported. Extend to support portgres.
             Class<?> h2Class = Class.forName(
                     "org.drools.ansible.rulebook.integration.ha.h2.H2StateManager"
             );
@@ -25,7 +29,6 @@ public class HAStateManagerFactory {
             logger.info("Created H2StateManager instance without initialization");
             return manager;
         } catch (Exception e) {
-            logger.error("Failed to create H2StateManager", e);
             throw new RuntimeException("Failed to create H2StateManager: " + e.getMessage(), e);
         }
     }

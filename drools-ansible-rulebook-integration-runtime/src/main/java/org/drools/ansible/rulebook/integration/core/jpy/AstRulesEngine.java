@@ -1,8 +1,22 @@
 package org.drools.ansible.rulebook.integration.core.jpy;
 
-import org.drools.ansible.rulebook.integration.api.*;
+import java.io.Closeable;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
+import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
+import org.drools.ansible.rulebook.integration.api.RuleFormat;
+import org.drools.ansible.rulebook.integration.api.RuleNotation;
+import org.drools.ansible.rulebook.integration.api.RulesExecutor;
+import org.drools.ansible.rulebook.integration.api.RulesExecutorContainer;
+import org.drools.ansible.rulebook.integration.api.RulesExecutorFactory;
 import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
 import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
+import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.api.io.Response;
 import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
@@ -10,25 +24,12 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
-
-import java.time.Instant;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
-import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 
 public class AstRulesEngine implements Closeable {
 
@@ -82,57 +83,66 @@ public class AstRulesEngine implements Closeable {
 
     public String assertEvent(long sessionId, String serializedFact) {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processEvents(serializedFact).join();
-        String result = matchesToJson(matches);
-        
-        // In HA mode, persist event state for statistics tracking
+
         if (haMode && haStateManager != null && haStateManager.isLeader()) {
-            try {
-                EventState eventState = new EventState();
-                eventState.setSessionId(String.valueOf(sessionId));
-                eventState.setSessionStats(Map.of("eventsProcessed", 1));
-                haStateManager.persistEventState(String.valueOf(sessionId), eventState);
-            } catch (Exception e) {
-                logger.warn("Failed to persist event state for HA statistics", e);
-            }
+            return processHA(sessionId, matches);
+        } else {
+            return matchesToJson(matches);
         }
-        
+    }
+
+    private String processHA(long sessionId, List<Match> matches) {
+        String result = matchesToJson(matches);
+
+        // In HA mode, persist event state for statistics tracking
+        try {
+            // TODO: Populate full EventState with partial matches, time windows, clock time, etc.
+            EventState eventState = new EventState();
+            eventState.setSessionId(String.valueOf(sessionId));
+            eventState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
+            haStateManager.persistEventState(String.valueOf(sessionId), eventState);
+        } catch (Exception e) {
+            logger.warn("Failed to persist event state for HA statistics", e);
+        }
+
         // In HA mode, create matching events for triggered rules and add ME UUIDs to response
-        if (haMode && haStateManager != null && haStateManager.isLeader() && !matches.isEmpty()) {
+        if (!matches.isEmpty()) {
             try {
                 logger.debug("Original response before ME UUID addition: {}", result);
-                
+
                 // Parse the existing JSON result
+                // TODO: This part can be optimized to avoid double serialization
                 List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
                 logger.debug("Parsed match list: {}", matchList);
-                
+
                 // Process each match and add ME UUID
                 for (int i = 0; i < matches.size() && i < matchList.size(); i++) {
                     Match match = matches.get(i);
                     Map<String, Object> matchJson = matchList.get(i);
-                    
+
                     String ruleName = match.getRule().getName();
                     String rulesetName = match.getRule().getPackageName();
                     Map<String, Object> facts = new HashMap<>();
                     match.getObjects().forEach(obj -> facts.put(obj.getClass().getSimpleName(), obj));
-                    
+
                     // Create MatchingEvent object
                     MatchingEvent me = new MatchingEvent();
                     me.setSessionId(String.valueOf(sessionId));
                     me.setRuleSetName(rulesetName);
                     me.setRuleName(ruleName);
-                    
+
                     // Serialize facts as JSON
                     try {
-                        String eventDataJson = new ObjectMapper().writeValueAsString(facts);
+                        String eventDataJson = toJson(facts);
                         me.setEventData(eventDataJson);
                     } catch (Exception e) {
                         logger.warn("Failed to serialize matching facts to JSON", e);
                         me.setEventData("{}");
                     }
-                    
+
                     String meUuid = haStateManager.addMatchingEvent(me);
                     logger.debug("Created ME UUID {} for rule {}/{}", meUuid, rulesetName, ruleName);
-                    
+
                     // Add meUuid to the rule object in JSON
                     // Structure: [{"ruleName": {"m": {...}, "meUuid": "..."}}]
                     if (matchJson.containsKey(ruleName)) {
@@ -144,18 +154,15 @@ public class AstRulesEngine implements Closeable {
                         logger.warn("Rule name {} not found in matchJson keys: {}", ruleName, matchJson.keySet());
                     }
                 }
-                
-                String modifiedResult = toJson(matchList);
-                logger.debug("Modified response with ME UUIDs: {}", modifiedResult);
-                return modifiedResult;
-                
+
+                result = toJson(matchList);
+                logger.debug("Modified response with ME UUIDs: {}", result);
             } catch (Exception e) {
                 logger.error("Failed to parse or modify assertEvent response for HA mode", e);
                 // Fall back to original response if JSON processing fails
-                return result;
             }
         }
-        
+
         return result;
     }
 
@@ -215,7 +222,7 @@ public class AstRulesEngine implements Closeable {
         logger.info("Initializing HA mode with UUID: {}", uuid);
         
         try {
-            this.haStateManager = HAStateManagerFactory.createH2();
+            this.haStateManager = HAStateManagerFactory.create();
             this.haStateManager.initializeHA(uuid, postgresParams, config);
             this.haMode = true;
             
@@ -384,8 +391,7 @@ public class AstRulesEngine implements Closeable {
         // Parse event data JSON back to object for compatibility
         try {
             if (matchingEvent.getEventData() != null) {
-                ObjectMapper mapper = new ObjectMapper();
-                Object eventData = mapper.readValue(matchingEvent.getEventData(), Object.class);
+                Map<String, Object> eventData = readValueAsMapOfStringAndObject(matchingEvent.getEventData());
                 recoveryData.put("matching_facts", eventData);
             }
         } catch (Exception e) {

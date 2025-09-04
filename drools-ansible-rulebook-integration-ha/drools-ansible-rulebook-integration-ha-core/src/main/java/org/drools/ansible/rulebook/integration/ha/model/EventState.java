@@ -3,6 +3,8 @@ package org.drools.ansible.rulebook.integration.ha.model;
 import java.time.Instant;
 import java.util.Map;
 
+import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
+
 /**
  * Represents the state of events in the HA system.
  * Contains both regular event processing state and in-flight matching events.
@@ -16,7 +18,7 @@ public class EventState {
     private Map<String, Object> partialMatchingEvents;
     private Map<String, Object> timeWindows;
     private String clockTime;
-    private Map<String, Object> sessionStats;
+    private SessionStats sessionStats;
 
     // Metadata
     private int version;
@@ -70,11 +72,11 @@ public class EventState {
         this.clockTime = clockTime;
     }
 
-    public Map<String, Object> getSessionStats() {
+    public SessionStats getSessionStats() {
         return sessionStats;
     }
 
-    public void setSessionStats(Map<String, Object> sessionStats) {
+    public void setSessionStats(SessionStats sessionStats) {
         this.sessionStats = sessionStats;
     }
 

@@ -1,11 +1,10 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
@@ -16,6 +15,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -28,7 +28,6 @@ import static org.junit.Assert.assertTrue;
 public class HAStateManagerTest {
 
     private HAStateManager stateManager;
-    private ObjectMapper objectMapper = new ObjectMapper();
     private static final String SESSION_ID = "test-session-1";
     private static final String LEADER_ID = "test-leader-1";
 
@@ -42,7 +41,7 @@ public class HAStateManagerTest {
         Map<String, Object> config = new HashMap<>();
         config.put("write_after", 1);
 
-        stateManager = HAStateManagerFactory.createH2();
+        stateManager = HAStateManagerFactory.create();
         stateManager.initializeHA(uuid, postgresParams, config);
     }
 
@@ -63,7 +62,7 @@ public class HAStateManagerTest {
 
         // Serialize matching facts to JSON
         try {
-            String eventDataJson = objectMapper.writeValueAsString(matchingFacts);
+            String eventDataJson = toJson(matchingFacts);
             me.setEventData(eventDataJson);
         } catch (Exception e) {
             me.setEventData("{}");
@@ -94,7 +93,7 @@ public class HAStateManagerTest {
         EventState event = new EventState();
         event.setSessionId(SESSION_ID);
         event.setRulebookHash("abc123");
-        event.setSessionStats(Map.of("temperature", 30, "humidity", 65));
+        event.setSessionStats(dummySessionStats());
 
         stateManager.persistEventState(SESSION_ID, event);
 
@@ -206,7 +205,7 @@ public class HAStateManagerTest {
         // Create initial state
         EventState event1 = new EventState();
         event1.setSessionId(SESSION_ID);
-        event1.setSessionStats(Map.of("version", 1));
+        event1.setSessionStats(dummySessionStats());
         stateManager.persistEventState(SESSION_ID, event1);
 
         // Commit state
@@ -215,7 +214,7 @@ public class HAStateManagerTest {
         // Create new state
         EventState event2 = new EventState();
         event2.setSessionId(SESSION_ID);
-        event2.setSessionStats(Map.of("version", 2));
+        event2.setSessionStats(dummySessionStats());
         stateManager.persistEventState(SESSION_ID, event2);
 
         // Rollback should restore previous state
@@ -236,19 +235,30 @@ public class HAStateManagerTest {
         stateManager.persistEventState(SESSION_ID, event);
     }
 
-    @Test
-    public void testSessionStatsPersistence() {
-        stateManager.enableLeader(LEADER_ID);
-
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("eventsProcessed", 100);
-        stats.put("rulesTriggered", 25);
-        stats.put("actionsExecuted", 20);
-
-        stateManager.persistSessionStats(SESSION_ID, stats);
-
-        // Stats persistence doesn't return anything but should not throw
-        assertTrue(true);
+    private static SessionStats dummySessionStats() {
+        return new SessionStats(
+                "2024-06-01T10:00:00Z", // start
+                "2024-06-01T12:00:00Z", // end
+                "2024-06-01T12:00:00Z", // lastClockTime
+                5,                      // clockAdvanceCount
+                10,                     // numberOfRules
+                2,                      // numberOfDisabledRules
+                7,                      // rulesTriggered
+                100,                    // eventsProcessed
+                80,                     // eventsMatched
+                20,                     // eventsSuppressed
+                15,                     // permanentStorageCount
+                2048,                   // permanentStorageSize
+                3,                      // asyncResponses
+                1024,                   // bytesSentOnAsync
+                123456L,                // sessionId
+                "MyRuleSet",            // ruleSetName
+                "RuleA",                // lastRuleFired
+                "2024-06-01T11:59:00Z", // lastRuleFiredAt
+                "2024-06-01T11:58:00Z", // lastEventReceivedAt
+                500000L,                // baseLevelMemory
+                800000L                 // peakMemory
+        );
     }
 
     @Test

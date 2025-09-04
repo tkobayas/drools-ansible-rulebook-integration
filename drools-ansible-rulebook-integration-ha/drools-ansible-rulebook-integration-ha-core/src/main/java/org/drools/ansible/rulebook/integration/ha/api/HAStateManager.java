@@ -3,6 +3,7 @@ package org.drools.ansible.rulebook.integration.ha.api;
 import java.util.List;
 import java.util.Map;
 
+import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -143,14 +144,6 @@ public interface HAStateManager {
      * @return HA statistics object
      */
     HAStats getHAStats();
-
-    /**
-     * Store session statistics
-     *
-     * @param sessionId The ruleset session ID
-     * @param stats     Statistics map
-     */
-    void persistSessionStats(String sessionId, Map<String, Object> stats);
 
     /**
      * Cleanup resources and close connections
