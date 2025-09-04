@@ -7,22 +7,22 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsSessionStats;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 
 /**
  * H2 implementation of HAStateManager with simplified domain model
@@ -32,14 +32,12 @@ public class H2StateManager implements HAStateManager {
     private static final Logger logger = LoggerFactory.getLogger(H2StateManager.class);
 
     private HikariDataSource dataSource;
-    private ObjectMapper objectMapper;
     private String leaderId;
     private boolean isLeader = false;
     private String haUuid;
     private HAStats haStats;
 
     public H2StateManager() {
-        this.objectMapper = new ObjectMapper();
     }
 
     @Override
@@ -129,14 +127,8 @@ public class H2StateManager implements HAStateManager {
 
                 String sessionStatsJson = rs.getString("session_stats");
                 if (sessionStatsJson != null) {
-                    try {
-                        Map<String, Object> sessionStats = objectMapper.readValue(
-                                sessionStatsJson, new TypeReference<Map<String, Object>>() {
-                                });
-                        eventState.setSessionStats(sessionStats);
-                    } catch (JsonProcessingException e) {
-                        logger.warn("Failed to parse session stats JSON", e);
-                    }
+                    SessionStats sessionStats = readValueAsSessionStats(sessionStatsJson);
+                    eventState.setSessionStats(sessionStats);
                 }
 
                 return eventState;
@@ -171,7 +163,7 @@ public class H2StateManager implements HAStateManager {
 
                 String sessionStatsJson = null;
                 if (eventState.getSessionStats() != null) {
-                    sessionStatsJson = objectMapper.writeValueAsString(eventState.getSessionStats());
+                    sessionStatsJson = toJson(eventState.getSessionStats());
                 }
                 ps.setString(3, sessionStatsJson);
                 ps.setString(4, sessionId);
@@ -189,7 +181,7 @@ public class H2StateManager implements HAStateManager {
             }
 
             logger.debug("Persisted event state for session: {}", sessionId);
-        } catch (SQLException | JsonProcessingException e) {
+        } catch (SQLException e) {
             logger.error("Failed to persist event state", e);
             throw new RuntimeException("Failed to persist event state", e);
         }
@@ -263,6 +255,7 @@ public class H2StateManager implements HAStateManager {
             return;
         }
 
+        // TODO: Revisit this logic. We keep just 2 versions of EventState. `commit` is not a right name
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
@@ -298,6 +291,7 @@ public class H2StateManager implements HAStateManager {
             return;
         }
 
+        // TODO: Revisit this logic. We keep just 2 versions of EventState. `rollback` is not a right name
         String sql = "DELETE FROM eda_event_state WHERE session_id = ? AND is_current = false";
 
         try (Connection conn = dataSource.getConnection();
@@ -456,26 +450,6 @@ public class H2StateManager implements HAStateManager {
     @Override
     public HAStats getHAStats() {
         return haStats;
-    }
-
-    @Override
-    public void persistSessionStats(String sessionId, Map<String, Object> stats) {
-        String sql = """
-                INSERT INTO eda_session_stats (session_id, stats_data)
-                VALUES (?, ?)
-                ON DUPLICATE KEY UPDATE stats_data = VALUES(stats_data)
-                """;
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, sessionId);
-            ps.setString(2, objectMapper.writeValueAsString(stats));
-
-            ps.executeUpdate();
-        } catch (SQLException | JsonProcessingException e) {
-            logger.error("Failed to persist session stats", e);
-        }
     }
 
     @Override

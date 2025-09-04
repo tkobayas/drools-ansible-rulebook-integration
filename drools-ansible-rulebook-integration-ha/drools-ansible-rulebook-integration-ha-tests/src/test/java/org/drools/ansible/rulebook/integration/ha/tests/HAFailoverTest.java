@@ -4,13 +4,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -31,7 +31,7 @@ public class HAFailoverTest {
 
         // Serialize matching facts to JSON
         try {
-            String eventDataJson = new ObjectMapper().writeValueAsString(matchingFacts);
+            String eventDataJson = toJson(matchingFacts);
             me.setEventData(eventDataJson);
         } catch (Exception e) {
             me.setEventData("{}");
@@ -207,7 +207,7 @@ public class HAFailoverTest {
         config.put("username", "sa");
         config.put("password", "");
         config.put("write_after", 1);
-        HAStateManager manager = HAStateManagerFactory.createH2();
+        HAStateManager manager = HAStateManagerFactory.create();
         manager.initializeHA("test-failover-" + System.nanoTime(), new HashMap<>(), config);
         return manager;
     }

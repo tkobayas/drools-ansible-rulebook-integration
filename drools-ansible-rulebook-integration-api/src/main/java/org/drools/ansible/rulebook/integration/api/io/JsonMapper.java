@@ -10,11 +10,14 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 
 public class JsonMapper {
 
     private static final TypeReference<List<Map<String, Object>>> LIST_OF_MAP_OF_STRING_AND_OBJECT = new TypeReference<List<Map<String, Object>>>(){};
     private static final TypeReference<Map<String, Object>> MAP_OF_STRING_AND_OBJECT = new TypeReference<Map<String, Object>>(){};
+    private static final TypeReference<SessionStats> SESSIONSTATS = new TypeReference<SessionStats>(){};
+
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final JavaType JACKSON_RAW_LIST = OBJECT_MAPPER.getTypeFactory().constructRawCollectionLikeType(List.class);
 
@@ -71,6 +74,14 @@ public class JsonMapper {
     public static Object readValueAsRawObject(String json) {
         try {
             return OBJECT_MAPPER.readValue(json, Object.class);
+        } catch (JacksonException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public static SessionStats readValueAsSessionStats(String json) {
+        try {
+            return OBJECT_MAPPER.readValue(json, SESSIONSTATS);
         } catch (JacksonException e) {
             throw new UncheckedIOException(e);
         }
