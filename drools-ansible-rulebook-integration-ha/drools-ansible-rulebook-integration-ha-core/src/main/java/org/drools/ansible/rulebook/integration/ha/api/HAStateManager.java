@@ -95,9 +95,9 @@ public interface HAStateManager {
      * @param sessionId    The ruleset session ID
      * @param matchingUuid The matching event UUID
      * @param index        The action index
-     * @param action       The action data as JSON object
+     * @param action       The action data as JSON string
      */
-    void addAction(String sessionId, String matchingUuid, int index, Map<String, Object> action);
+    void addActionState(String sessionId, String matchingUuid, int index, String action);
 
     /**
      * Update an existing action
@@ -105,9 +105,9 @@ public interface HAStateManager {
      * @param sessionId    The ruleset session ID
      * @param matchingUuid The matching event UUID
      * @param index        The action index
-     * @param action       The updated action data as JSON object
+     * @param action       The updated action data as JSON string
      */
-    void updateAction(String sessionId, String matchingUuid, int index, Map<String, Object> action);
+    void updateActionState(String sessionId, String matchingUuid, int index, String action);
 
     /**
      * Check if an action exists
@@ -117,7 +117,7 @@ public interface HAStateManager {
      * @param index        The action index
      * @return true if action exists, false otherwise
      */
-    boolean actionExists(String sessionId, String matchingUuid, int index);
+    boolean actionStateExists(String sessionId, String matchingUuid, int index);
 
     /**
      * Get an action by index
@@ -125,9 +125,9 @@ public interface HAStateManager {
      * @param sessionId    The ruleset session ID
      * @param matchingUuid The matching event UUID
      * @param index        The action index
-     * @return The action data as JSON object, empty map if not found
+     * @return The action data as JSON string, empty string if not found
      */
-    Map<String, Object> getAction(String sessionId, String matchingUuid, int index);
+    String getActionState(String sessionId, String matchingUuid, int index);
 
     /**
      * Delete all actions and matching events for a matching UUID
@@ -135,7 +135,7 @@ public interface HAStateManager {
      * @param sessionId    The ruleset session ID
      * @param matchingUuid The matching event UUID
      */
-    void deleteActions(String sessionId, String matchingUuid);
+    void deleteActionStates(String sessionId, String matchingUuid);
 
     /**
      * Get current HA statistics

@@ -313,7 +313,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void addAction(String sessionId, String matchingUuid, int index, Map<String, Object> action) {
+    public void addActionState(String sessionId, String matchingUuid, int index, String action) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot add action - not leader");
         }
@@ -331,7 +331,7 @@ public class H2StateManager implements HAStateManager {
             ps.setString(1, actionId);
             ps.setString(2, matchingUuid);
             ps.setInt(3, index);
-            ps.setString(4, objectMapper.writeValueAsString(action));
+            ps.setString(4, action);
 
             ps.executeUpdate();
 
@@ -342,14 +342,14 @@ public class H2StateManager implements HAStateManager {
             }
 
             logger.debug("Added action for ME UUID: {}, index: {}", matchingUuid, index);
-        } catch (SQLException | JsonProcessingException e) {
+        } catch (SQLException e) {
             logger.error("Failed to add action", e);
             throw new RuntimeException("Failed to add action", e);
         }
     }
 
     @Override
-    public void updateAction(String sessionId, String matchingUuid, int index, Map<String, Object> action) {
+    public void updateActionState(String sessionId, String matchingUuid, int index, String action) {
         if (!isLeader) {
             logger.debug("Not leader - skipping action update");
             return;
@@ -360,7 +360,7 @@ public class H2StateManager implements HAStateManager {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, objectMapper.writeValueAsString(action));
+            ps.setString(1, action);
             ps.setString(2, matchingUuid);
             ps.setInt(3, index);
 
@@ -370,14 +370,14 @@ public class H2StateManager implements HAStateManager {
             } else {
                 logger.warn("No action found to update for ME UUID: {}, index: {}", matchingUuid, index);
             }
-        } catch (SQLException | JsonProcessingException e) {
+        } catch (SQLException e) {
             logger.error("Failed to update action", e);
             throw new RuntimeException("Failed to update action", e);
         }
     }
 
     @Override
-    public boolean actionExists(String sessionId, String matchingUuid, int index) {
+    public boolean actionStateExists(String sessionId, String matchingUuid, int index) {
         String sql = "SELECT COUNT(*) FROM ActionState WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
@@ -398,7 +398,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public Map<String, Object> getAction(String sessionId, String matchingUuid, int index) {
+    public String getActionState(String sessionId, String matchingUuid, int index) {
         String sql = "SELECT action_data FROM ActionState WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
@@ -411,19 +411,18 @@ public class H2StateManager implements HAStateManager {
             if (rs.next()) {
                 String actionData = rs.getString("action_data");
                 if (actionData != null) {
-                    return objectMapper.readValue(actionData, new TypeReference<Map<String, Object>>() {
-                    });
+                    return actionData;
                 }
             }
-        } catch (SQLException | JsonProcessingException e) {
+        } catch (SQLException e) {
             logger.error("Failed to get action", e);
         }
 
-        return new HashMap<>();
+        return "";
     }
 
     @Override
-    public void deleteActions(String sessionId, String matchingUuid) {
+    public void deleteActionStates(String sessionId, String matchingUuid) {
         if (!isLeader) {
             logger.debug("Not leader - skipping action deletion");
             return;
