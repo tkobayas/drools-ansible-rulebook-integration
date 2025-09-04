@@ -221,23 +221,20 @@ public class AstRulesEngineHAIntegrationTest {
 
             // Set action state
             // Use new action management APIs
-            Map<String, Object> actionData = new HashMap<>();
-            actionData.put("name", "send_alert");
-            actionData.put("status", "running");
-            actionData.put("reference_id", "job-456");
+            String actionData = "{\"name\":\"send_alert\",\"status\":\"running\",\"reference_id\":\"job-456\"}";
 
-            rulesEngine.addAction(sessionId, meUuid, 0, actionData);
+            rulesEngine.addActionState(sessionId, meUuid, 0, actionData);
 
             // Check action exists and get it
-            assertTrue(rulesEngine.actionExists(sessionId, meUuid, 0));
-            Map<String, Object> retrieved = rulesEngine.getAction(sessionId, meUuid, 0);
-            assertEquals("send_alert", retrieved.get("name"));
+            assertTrue(rulesEngine.actionStateExists(sessionId, meUuid, 0));
+            String retrieved = rulesEngine.getActionState(sessionId, meUuid, 0);
+            assertEquals(actionData, retrieved);
 
             // Delete actions when complete
-            rulesEngine.deleteActions(sessionId, meUuid);
+            rulesEngine.deleteActionStates(sessionId, meUuid);
 
             // Should not exist after deletion
-            assertFalse(rulesEngine.actionExists(sessionId, meUuid, 0));
+            assertFalse(rulesEngine.actionStateExists(sessionId, meUuid, 0));
         } finally {
             haStateManagerForAssertion.shutdown();
         }
@@ -441,37 +438,29 @@ public class AstRulesEngineHAIntegrationTest {
         String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
 
         // Test addAction
-        Map<String, Object> action = new HashMap<>();
-        action.put("name", "send_alert");
-        action.put("status", "running");
-        action.put("reference_id", "job-123");
-        action.put("start_time", "2024-01-01T10:00:00Z");
+        String action = "{\"name\":\"send_alert\",\"status\":\"running\",\"reference_id\":\"job-123\",\"start_time\":\"2024-01-01T10:00:00Z\"}";
 
-        rulesEngine.addAction(sessionId, meUuid, 0, action);
+        rulesEngine.addActionState(sessionId, meUuid, 0, action);
 
         // Test actionExists
-        assertTrue(rulesEngine.actionExists(sessionId, meUuid, 0));
-        assertFalse(rulesEngine.actionExists(sessionId, meUuid, 1));
+        assertTrue(rulesEngine.actionStateExists(sessionId, meUuid, 0));
+        assertFalse(rulesEngine.actionStateExists(sessionId, meUuid, 1));
 
         // Test getAction
-        Map<String, Object> retrieved = rulesEngine.getAction(sessionId, meUuid, 0);
-        assertEquals("send_alert", retrieved.get("name"));
-        assertEquals("running", retrieved.get("status"));
-        assertEquals("job-123", retrieved.get("reference_id"));
+        String retrieved = rulesEngine.getActionState(sessionId, meUuid, 0);
+        assertEquals(action, retrieved);
 
         // Test updateAction
-        action.put("status", "success");
-        action.put("end_time", "2024-01-01T10:05:00Z");
-        rulesEngine.updateAction(sessionId, meUuid, 0, action);
+        String updatedAction = "{\"name\":\"send_alert\",\"status\":\"success\",\"reference_id\":\"job-123\",\"start_time\":\"2024-01-01T10:00:00Z\",\"end_time\":\"2024-01-01T10:05:00Z\"}";
+        rulesEngine.updateActionState(sessionId, meUuid, 0, updatedAction);
 
-        retrieved = rulesEngine.getAction(sessionId, meUuid, 0);
-        assertEquals("success", retrieved.get("status"));
-        assertEquals("2024-01-01T10:05:00Z", retrieved.get("end_time"));
+        retrieved = rulesEngine.getActionState(sessionId, meUuid, 0);
+        assertEquals(updatedAction, retrieved);
 
         // Test deleteActions
-        rulesEngine.deleteActions(sessionId, meUuid);
-        assertFalse(rulesEngine.actionExists(sessionId, meUuid, 0));
-        assertTrue(rulesEngine.getAction(sessionId, meUuid, 0).isEmpty());
+        rulesEngine.deleteActionStates(sessionId, meUuid);
+        assertFalse(rulesEngine.actionStateExists(sessionId, meUuid, 0));
+        assertTrue(rulesEngine.getActionState(sessionId, meUuid, 0).isEmpty());
     }
 
     @Test
@@ -503,7 +492,7 @@ public class AstRulesEngineHAIntegrationTest {
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
         String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
 
-        rulesEngine.addAction(sessionId, meUuid, 0, Map.of("name", "test", "status", "running"));
+        rulesEngine.addActionState(sessionId, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
 
         stats = rulesEngine.getHAStats();
         assertEquals(1, stats.get("events_processed_in_term"));

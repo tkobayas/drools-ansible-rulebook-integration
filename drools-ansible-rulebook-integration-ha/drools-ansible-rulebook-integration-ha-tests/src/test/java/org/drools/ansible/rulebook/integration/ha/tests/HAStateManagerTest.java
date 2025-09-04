@@ -130,34 +130,24 @@ public class HAStateManagerTest {
         String meUuid = stateManager.addMatchingEvent(me);
 
         // Add an action
-        Map<String, Object> actionData = Map.of(
-                "name", "send_alert",
-                "status", "running",
-                "start_time", "2024-01-01T10:00:00Z"
-        );
-        stateManager.addAction(SESSION_ID, meUuid, 0, actionData);
+        String actionData = "{\"name\":\"send_alert\",\"status\":\"running\",\"start_time\":\"2024-01-01T10:00:00Z\"}";
+        stateManager.addActionState(SESSION_ID, meUuid, 0, actionData);
 
         // Verify action exists
-        assertTrue(stateManager.actionExists(SESSION_ID, meUuid, 0));
-        assertFalse(stateManager.actionExists(SESSION_ID, meUuid, 1));
+        assertTrue(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
+        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 1));
 
         // Get action and verify
-        Map<String, Object> retrieved = stateManager.getAction(SESSION_ID, meUuid, 0);
-        assertEquals("send_alert", retrieved.get("name"));
-        assertEquals("running", retrieved.get("status"));
+        String retrieved = stateManager.getActionState(SESSION_ID, meUuid, 0);
+        assertEquals(actionData, retrieved);
 
         // Update action
-        Map<String, Object> updatedData = Map.of(
-                "name", "send_alert",
-                "status", "success",
-                "end_time", "2024-01-01T10:01:00Z"
-        );
-        stateManager.updateAction(SESSION_ID, meUuid, 0, updatedData);
+        String updatedData = "{\"name\":\"send_alert\",\"status\":\"success\",\"end_time\":\"2024-01-01T10:01:00Z\"}";
+        stateManager.updateActionState(SESSION_ID, meUuid, 0, updatedData);
 
         // Verify update
-        retrieved = stateManager.getAction(SESSION_ID, meUuid, 0);
-        assertEquals("success", retrieved.get("status"));
-        assertEquals("2024-01-01T10:01:00Z", retrieved.get("end_time"));
+        retrieved = stateManager.getActionState(SESSION_ID, meUuid, 0);
+        assertEquals(updatedData, retrieved);
     }
 
     @Test
@@ -174,7 +164,7 @@ public class HAStateManagerTest {
         String me2 = stateManager.addMatchingEvent(matchingEvent2);
 
         // Add action for first ME (in progress)
-        stateManager.addAction(SESSION_ID, me1, 0, Map.of("status", "running"));
+        stateManager.addActionState(SESSION_ID, me1, 0, "{\"status\":\"running\"}");
 
         // Get pending events (should include both)
         List<MatchingEvent> pending = stateManager.getPendingMatchingEvents(SESSION_ID);
@@ -193,16 +183,16 @@ public class HAStateManagerTest {
         String meUuid = stateManager.addMatchingEvent(me);
 
         // Add an action
-        stateManager.addAction(SESSION_ID, meUuid, 0, Map.of("name", "test_action"));
+        stateManager.addActionState(SESSION_ID, meUuid, 0, "{\"name\":\"test_action\"}");
 
         // Verify action exists
-        assertTrue(stateManager.actionExists(SESSION_ID, meUuid, 0));
+        assertTrue(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
 
         // Delete matching event and all its actions
-        stateManager.deleteActions(SESSION_ID, meUuid);
+        stateManager.deleteActionStates(SESSION_ID, meUuid);
 
         // Verify action is gone
-        assertFalse(stateManager.actionExists(SESSION_ID, meUuid, 0));
+        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
 
         // Should not appear in pending events
         List<MatchingEvent> pending = stateManager.getPendingMatchingEvents(SESSION_ID);
@@ -285,7 +275,7 @@ public class HAStateManagerTest {
 
         MatchingEvent me = createMatchingEvent(SESSION_ID, "test", "rule", Map.of("test", "data"));
         String meUuid = stateManager.addMatchingEvent(me);
-        stateManager.addAction(SESSION_ID, meUuid, 0, Map.of("name", "test_action", "status", "running"));
+        stateManager.addActionState(SESSION_ID, meUuid, 0, "{\"name\":\"test_action\",\"status\":\"running\"}");
 
         // Check updated stats
         stats = stateManager.getHAStats();
@@ -302,35 +292,28 @@ public class HAStateManagerTest {
         String meUuid = stateManager.addMatchingEvent(me);
 
         // Test addAction
-        Map<String, Object> action1 = new HashMap<>();
-        action1.put("name", "action1");
-        action1.put("status", "running");
-        action1.put("reference_id", "ref1");
+        String action1 = "{\"name\":\"action1\",\"status\":\"running\",\"reference_id\":\"ref1\"}";
 
-        stateManager.addAction(SESSION_ID, meUuid, 0, action1);
+        stateManager.addActionState(SESSION_ID, meUuid, 0, action1);
 
         // Test actionExists
-        assertTrue(stateManager.actionExists(SESSION_ID, meUuid, 0));
-        assertFalse(stateManager.actionExists(SESSION_ID, meUuid, 1));
+        assertTrue(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
+        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 1));
 
         // Test getAction
-        Map<String, Object> retrievedAction = stateManager.getAction(SESSION_ID, meUuid, 0);
-        assertEquals("action1", retrievedAction.get("name"));
-        assertEquals("running", retrievedAction.get("status"));
-        assertEquals("ref1", retrievedAction.get("reference_id"));
+        String retrievedAction = stateManager.getActionState(SESSION_ID, meUuid, 0);
+        assertEquals(action1, retrievedAction);
 
         // Test updateAction
-        action1.put("status", "success");
-        action1.put("end_time", Instant.now().toString());
-        stateManager.updateAction(SESSION_ID, meUuid, 0, action1);
+        String updatedAction1 = "{\"name\":\"action1\",\"status\":\"success\",\"reference_id\":\"ref1\",\"end_time\":\"2024-01-01T10:05:00Z\"}";
+        stateManager.updateActionState(SESSION_ID, meUuid, 0, updatedAction1);
 
-        retrievedAction = stateManager.getAction(SESSION_ID, meUuid, 0);
-        assertEquals("success", retrievedAction.get("status"));
-        assertNotNull(retrievedAction.get("end_time"));
+        retrievedAction = stateManager.getActionState(SESSION_ID, meUuid, 0);
+        assertEquals(updatedAction1, retrievedAction);
 
         // Test deleteActions
-        stateManager.deleteActions(SESSION_ID, meUuid);
-        assertFalse(stateManager.actionExists(SESSION_ID, meUuid, 0));
-        assertTrue(stateManager.getAction(SESSION_ID, meUuid, 0).isEmpty());
+        stateManager.deleteActionStates(SESSION_ID, meUuid);
+        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
+        assertTrue(stateManager.getActionState(SESSION_ID, meUuid, 0).isEmpty());
     }
 }

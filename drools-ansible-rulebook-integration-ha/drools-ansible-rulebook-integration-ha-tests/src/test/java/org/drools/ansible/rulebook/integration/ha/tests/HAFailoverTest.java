@@ -55,13 +55,9 @@ public class HAFailoverTest {
         String me1 = node1.addMatchingEvent(me);
 
         // Start action execution
-        Map<String, Object> actionData = Map.of(
-                "name", "send_notification",
-                "status", "running",
-                "reference_id", "job-123"
-        );
+        String actionData = "{\"name\":\"send_notification\",\"status\":\"running\",\"reference_id\":\"job-123\"}";
 
-        node1.addAction(SESSION_ID, me1, 0, actionData);
+        node1.addActionState(SESSION_ID, me1, 0, actionData);
 
         // Simulate node 1 failure
         node1.disableLeader("node-1");
@@ -79,21 +75,16 @@ public class HAFailoverTest {
         assertEquals(me1, recovered.getMeUuid());
 
         // Check action was preserved
-        assertTrue(node2.actionExists(SESSION_ID, me1, 0));
-        Map<String, Object> recoveredAction = node2.getAction(SESSION_ID, me1, 0);
-        assertEquals("job-123", recoveredAction.get("reference_id"));
-        assertEquals("running", recoveredAction.get("status"));
+        assertTrue(node2.actionStateExists(SESSION_ID, me1, 0));
+        String recoveredAction = node2.getActionState(SESSION_ID, me1, 0);
+        assertEquals(actionData, recoveredAction);
 
         // Node 2 can complete the action
-        Map<String, Object> completedAction = Map.of(
-                "name", "send_notification",
-                "status", "success",
-                "reference_id", "job-123"
-        );
-        node2.updateAction(SESSION_ID, me1, 0, completedAction);
+        String completedAction = "{\"name\":\"send_notification\",\"status\":\"success\",\"reference_id\":\"job-123\"}";
+        node2.updateActionState(SESSION_ID, me1, 0, completedAction);
 
         // Clean up
-        node2.deleteActions(SESSION_ID, me1);
+        node2.deleteActionStates(SESSION_ID, me1);
         node2.shutdown();
     }
 
@@ -183,40 +174,28 @@ public class HAFailoverTest {
                                                Map.of("retry", true));
         String meUuid = node1.addMatchingEvent(me);
 
-        Map<String, Object> failedActionData = Map.of(
-                "name", "flaky_action",
-                "status", "failed",
-                "reference_id", "failed-job-1"
-        );
+        String failedActionData = "{\"name\":\"flaky_action\",\"status\":\"failed\",\"reference_id\":\"failed-job-1\"}";
 
-        node1.addAction(SESSION_ID, meUuid, 0, failedActionData);
+        node1.addActionState(SESSION_ID, meUuid, 0, failedActionData);
         node1.disableLeader("node-1");
 
         // New leader retries
         HAStateManager node2 = createNode(dbUrl);
         node2.enableLeader("node-2");
 
-        Map<String, Object> failedAction = node2.getAction(SESSION_ID, meUuid, 0);
-        assertEquals("failed", failedAction.get("status"));
+        String failedAction = node2.getActionState(SESSION_ID, meUuid, 0);
+        assertEquals(failedActionData, failedAction);
 
         // Retry the action
-        Map<String, Object> retryAction = Map.of(
-                "name", "flaky_action",
-                "status", "running",
-                "reference_id", "retry-job-2"
-        );
-        node2.updateAction(SESSION_ID, meUuid, 0, retryAction);
+        String retryAction = "{\"name\":\"flaky_action\",\"status\":\"running\",\"reference_id\":\"retry-job-2\"}";
+        node2.updateActionState(SESSION_ID, meUuid, 0, retryAction);
 
         // Eventually succeed
-        Map<String, Object> successAction = Map.of(
-                "name", "flaky_action",
-                "status", "success",
-                "reference_id", "retry-job-2"
-        );
-        node2.updateAction(SESSION_ID, meUuid, 0, successAction);
+        String successAction = "{\"name\":\"flaky_action\",\"status\":\"success\",\"reference_id\":\"retry-job-2\"}";
+        node2.updateActionState(SESSION_ID, meUuid, 0, successAction);
 
         // Clean up
-        node2.deleteActions(SESSION_ID, meUuid);
+        node2.deleteActionStates(SESSION_ID, meUuid);
         node1.shutdown();
         node2.shutdown();
     }
