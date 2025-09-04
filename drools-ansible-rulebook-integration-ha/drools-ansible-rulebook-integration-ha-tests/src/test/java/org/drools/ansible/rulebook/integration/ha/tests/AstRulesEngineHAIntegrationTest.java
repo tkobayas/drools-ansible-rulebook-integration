@@ -80,7 +80,7 @@ public class AstRulesEngineHAIntegrationTest {
         Map<String, Object> config = new HashMap<>();
         config.put("db_url", getCurrentTestDatabaseUrl());
         config.put("write_after", 1);
-        HAStateManager manager = HAStateManagerFactory.createH2();
+        HAStateManager manager = HAStateManagerFactory.create();
         manager.initializeHA(uuid, new HashMap<>(), config);
         return manager;
     }
