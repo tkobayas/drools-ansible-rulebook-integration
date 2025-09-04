@@ -1,8 +1,5 @@
 package org.drools.ansible.rulebook.integration.ha.model;
 
-import java.time.Instant;
-import java.util.Map;
-
 /**
  * Represents a matching event with its associated metadata
  */
@@ -10,24 +7,11 @@ public class MatchingEvent {
     
     private String meUuid;
     private String sessionId;
-    private String rulesetName;
+    private String ruleSetName;
     private String ruleName;
-    private Map<String, Object> matchingFacts;
-    private EventState eventState;
-    private ActionState actionState;
-    private String createdAt;
-    private MatchingEventStatus status;
-    
-    public enum MatchingEventStatus {
-        PENDING,
-        IN_PROGRESS,
-        COMPLETED,
-        FAILED
-    }
+    private String eventData;  // JSON string representation of matching facts
     
     public MatchingEvent() {
-        this.createdAt = Instant.now().toString();
-        this.status = MatchingEventStatus.PENDING;
     }
     
     public String getMeUuid() {
@@ -46,12 +30,12 @@ public class MatchingEvent {
         this.sessionId = sessionId;
     }
     
-    public String getRulesetName() {
-        return rulesetName;
+    public String getRuleSetName() {
+        return ruleSetName;
     }
     
-    public void setRulesetName(String rulesetName) {
-        this.rulesetName = rulesetName;
+    public void setRuleSetName(String ruleSetName) {
+        this.ruleSetName = ruleSetName;
     }
     
     public String getRuleName() {
@@ -62,43 +46,11 @@ public class MatchingEvent {
         this.ruleName = ruleName;
     }
     
-    public Map<String, Object> getMatchingFacts() {
-        return matchingFacts;
+    public String getEventData() {
+        return eventData;
     }
     
-    public void setMatchingFacts(Map<String, Object> matchingFacts) {
-        this.matchingFacts = matchingFacts;
-    }
-    
-    public EventState getEventState() {
-        return eventState;
-    }
-    
-    public void setEventState(EventState eventState) {
-        this.eventState = eventState;
-    }
-    
-    public ActionState getActionState() {
-        return actionState;
-    }
-    
-    public void setActionState(ActionState actionState) {
-        this.actionState = actionState;
-    }
-    
-    public String getCreatedAt() {
-        return createdAt;
-    }
-    
-    public void setCreatedAt(String createdAt) {
-        this.createdAt = createdAt;
-    }
-    
-    public MatchingEventStatus getStatus() {
-        return status;
-    }
-    
-    public void setStatus(MatchingEventStatus status) {
-        this.status = status;
+    public void setEventData(String eventData) {
+        this.eventData = eventData;
     }
 }

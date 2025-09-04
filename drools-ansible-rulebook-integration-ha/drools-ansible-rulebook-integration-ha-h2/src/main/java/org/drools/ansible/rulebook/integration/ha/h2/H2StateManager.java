@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
-import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -18,7 +17,7 @@ import java.time.Instant;
 import java.util.*;
 
 /**
- * H2 implementation with new model where EventState contains MatchingEvents
+ * H2 implementation of HAStateManager with simplified domain model
  */
 public class H2StateManager implements HAStateManager {
     
@@ -42,95 +41,63 @@ public class H2StateManager implements HAStateManager {
         this.haUuid = uuid;
         this.haStats = new HAStats();
         
-        // Configure HikariCP connection pool from postgres params
+        // Configure HikariCP connection pool
         HikariConfig hikariConfig = new HikariConfig();
         
-        // Extract connection parameters
-        String host = (String) postgresParams.get("host");
-        Integer port = (Integer) postgresParams.get("port");
-        String dbname = (String) postgresParams.get("dbname");
-        String user = (String) postgresParams.get("user");
-        String password = (String) postgresParams.get("password");
-        String sslmode = (String) postgresParams.get("sslmode");
-        String applicationName = (String) postgresParams.get("application_name");
-        
-        // Build JDBC URL - default to H2 for testing if postgres params not provided
+        // Check if custom H2 URL is provided in config
+        String customH2Url = (String) config.get("db_url");
         String jdbcUrl;
-        if (host != null && dbname != null) {
-            jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s", host, port != null ? port : 5432, dbname);
-            if (sslmode != null) {
-                jdbcUrl += "?sslmode=" + sslmode;
-            }
-            if (applicationName != null) {
-                jdbcUrl += (sslmode != null ? "&" : "?") + "ApplicationName=" + applicationName;
-            }
+        
+        if (customH2Url != null) {
+            jdbcUrl = customH2Url;
         } else {
-            // Check if custom H2 URL is provided in config
-            String customH2Url = (String) config.get("db_url");
-            if (customH2Url != null) {
-                jdbcUrl = customH2Url;
-            } else {
-                // Fallback to H2 for development/testing
-                jdbcUrl = "jdbc:h2:mem:eda_ha_" + uuid + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
-            }
-            logger.warn("Using H2 database for HA - not suitable for production");
+            // Fallback to H2 for development/testing
+            jdbcUrl = "jdbc:h2:mem:eda_ha_" + uuid + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
         }
         
-        hikariConfig.setJdbcUrl(jdbcUrl);
-        hikariConfig.setUsername(user != null ? user : "sa");
-        hikariConfig.setPassword(password != null ? password : "");
+        logger.warn("Using H2 database for HA - not suitable for production");
         
-        // Extract config parameters
-        Integer writeAfter = (Integer) config.get("write_after");
-        hikariConfig.setMaximumPoolSize(10); // Default pool size
-        hikariConfig.setConnectionTimeout(30000);
-        hikariConfig.setAutoCommit(false); // We'll manage transactions
+        hikariConfig.setJdbcUrl(jdbcUrl);
+        hikariConfig.setUsername("sa");
+        hikariConfig.setPassword("");
+        hikariConfig.setMaximumPoolSize(10);
         
         this.dataSource = new HikariDataSource(hikariConfig);
         
-        // Create schema
         try {
             H2Schema.createSchema(dataSource);
             logger.info("HA schema created successfully for UUID: {}", uuid);
             
-            // Check for existing matching events and restore HA stats
-            restoreHAState();
+            // Initialize or load HA stats
+            loadOrCreateHAStats();
             
         } catch (SQLException e) {
-            logger.error("Failed to create HA schema", e);
-            throw new RuntimeException("Failed to initialize HA mode", e);
+            logger.error("Failed to initialize HA schema", e);
+            throw new RuntimeException("Failed to initialize HA schema", e);
         }
     }
-    
     
     @Override
     public void enableLeader(String leaderName) {
         this.leaderId = leaderName;
         this.isLeader = true;
         
-        // Update HA stats when becoming leader
         if (haStats != null) {
             haStats.setCurrentLeader(leaderName);
+            persistHAStats();
         }
-        
-        // Persist HA stats to database
-        persistHAStats();
         
         logger.info("Leader mode enabled for: {}", leaderName);
     }
     
     @Override
     public void disableLeader(String leaderName) {
-        this.isLeader = false;
-        logger.info("Leader mode disabled for: {}", leaderName);
-        
-        // Update HA stats
-        if (haStats != null && leaderName.equals(haStats.getCurrentLeader())) {
-            haStats.setCurrentLeader(null);
-            persistHAStats();
+        if (leaderId != null && leaderId.equals(leaderName)) {
+            this.isLeader = false;
+            this.leaderId = null;
         }
         
-        this.leaderId = null;
+        logger.info("Leader mode disabled for: {}", leaderName);
     }
     
     @Override
@@ -140,21 +107,35 @@ public class H2StateManager implements HAStateManager {
     
     @Override
     public EventState getEventState(String sessionId) {
-        try (Connection conn = dataSource.getConnection()) {
-            String sql = "SELECT * FROM eda_event_state WHERE session_id = ? AND is_current = true";
+        String sql = "SELECT * FROM eda_event_state WHERE session_id = ? AND is_current = true";
+        
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
             
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, sessionId);
+            ps.setString(1, sessionId);
+            ResultSet rs = ps.executeQuery();
+            
+            if (rs.next()) {
+                EventState eventState = new EventState();
+                eventState.setSessionId(rs.getString("session_id"));
+                eventState.setRulebookHash(rs.getString("rulebook_hash"));
                 
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return mapToEventState(rs);
+                String sessionStatsJson = rs.getString("session_stats");
+                if (sessionStatsJson != null) {
+                    try {
+                        Map<String, Object> sessionStats = objectMapper.readValue(
+                            sessionStatsJson, new TypeReference<Map<String, Object>>() {});
+                        eventState.setSessionStats(sessionStats);
+                    } catch (JsonProcessingException e) {
+                        logger.warn("Failed to parse session stats JSON", e);
                     }
                 }
+                
+                return eventState;
             }
+            
         } catch (SQLException e) {
             logger.error("Failed to get event state", e);
-            throw new RuntimeException("Failed to get event state", e);
         }
         
         return null;
@@ -163,56 +144,32 @@ public class H2StateManager implements HAStateManager {
     @Override
     public void persistEventState(String sessionId, EventState eventState) {
         if (!isLeader) {
-            throw new IllegalStateException("Cannot persist event state - not the leader");
+            logger.debug("Not leader - skipping event state persistence");
+            return;
         }
         
-        eventState.setSessionId(sessionId);
-        eventState.setLeaderId(leaderId);
-        
         try (Connection conn = dataSource.getConnection()) {
-            // Get next version number
-            int nextVersion = 1;
-            String getMaxVersionSql = "SELECT MAX(version) FROM eda_event_state WHERE session_id = ?";
-            try (PreparedStatement ps = conn.prepareStatement(getMaxVersionSql)) {
-                ps.setString(1, sessionId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        int maxVersion = rs.getInt(1);
-                        if (!rs.wasNull()) {
-                            nextVersion = maxVersion + 1;
-                        }
-                    }
-                }
-            }
-            
-            // Mark previous version as not current
-            String updatePrevious = "UPDATE eda_event_state SET is_current = false WHERE session_id = ?";
-            try (PreparedStatement ps = conn.prepareStatement(updatePrevious)) {
-                ps.setString(1, sessionId);
-                ps.executeUpdate();
-            }
+            conn.setAutoCommit(false);
             
             // Insert new version
             String sql = """
-                INSERT INTO eda_event_state 
-                (session_id, rulebook_hash, partial_matching_events, time_windows, 
-                 clock_time, session_stats, version, is_current, 
-                 created_at, leader_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO eda_event_state (session_id, rulebook_hash, session_stats, version, is_current, leader_id)
+                VALUES (?, ?, ?, 
+                    COALESCE((SELECT MAX(version) FROM eda_event_state WHERE session_id = ?), 0) + 1,
+                    false, ?)
                 """;
-                
+            
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, eventState.getSessionId());
+                ps.setString(1, sessionId);
                 ps.setString(2, eventState.getRulebookHash());
-                ps.setString(3, toJson(eventState.getPartialMatchingEvents()));
-                ps.setString(4, toJson(eventState.getTimeWindows()));
-                ps.setTimestamp(5, eventState.getClockTime() != null ? 
-                              Timestamp.from(Instant.parse(eventState.getClockTime())) : null);
-                ps.setString(6, toJson(eventState.getSessionStats()));
-                ps.setInt(7, nextVersion);
-                ps.setBoolean(8, eventState.isCurrent());
-                ps.setTimestamp(9, Timestamp.from(Instant.parse(eventState.getCreatedAt())));
-                ps.setString(10, eventState.getLeaderId());
+                
+                String sessionStatsJson = null;
+                if (eventState.getSessionStats() != null) {
+                    sessionStatsJson = objectMapper.writeValueAsString(eventState.getSessionStats());
+                }
+                ps.setString(3, sessionStatsJson);
+                ps.setString(4, sessionId);
+                ps.setString(5, leaderId);
                 
                 ps.executeUpdate();
             }
@@ -226,7 +183,8 @@ public class H2StateManager implements HAStateManager {
             }
             
             logger.debug("Persisted event state for session: {}", sessionId);
-        } catch (SQLException e) {
+            
+        } catch (SQLException | JsonProcessingException e) {
             logger.error("Failed to persist event state", e);
             throw new RuntimeException("Failed to persist event state", e);
         }
@@ -235,294 +193,148 @@ public class H2StateManager implements HAStateManager {
     @Override
     public String addMatchingEvent(MatchingEvent matchingEvent) {
         if (!isLeader) {
-            throw new IllegalStateException("Cannot add matching event - not the leader");
+            logger.debug("Not leader - skipping matching event creation");
+            return null;
         }
         
-        // Validate the matching event has required fields
-        if (matchingEvent.getMeUuid() == null || matchingEvent.getMeUuid().isEmpty()) {
-            throw new IllegalArgumentException("MatchingEvent must have a UUID");
-        }
-        if (matchingEvent.getSessionId() == null || matchingEvent.getSessionId().isEmpty()) {
-            throw new IllegalArgumentException("MatchingEvent must have a session ID");
-        }
+        String meUuid = UUID.randomUUID().toString();
+        matchingEvent.setMeUuid(meUuid);
         
-        // Insert into matching_events table
-        try (Connection conn = dataSource.getConnection()) {
-            String sql = """
-                INSERT INTO eda_matching_events 
-                (me_uuid, session_id, ruleset_name, rule_name, matching_facts, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """;
-                
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, matchingEvent.getMeUuid());
-                ps.setString(2, matchingEvent.getSessionId());
-                ps.setString(3, matchingEvent.getRulesetName());
-                ps.setString(4, matchingEvent.getRuleName());
-                ps.setString(5, toJson(matchingEvent.getMatchingFacts()));
-                ps.setString(6, matchingEvent.getStatus() != null ? 
-                            matchingEvent.getStatus().toString() : "PENDING");
-                ps.setString(7, matchingEvent.getCreatedAt());
-                
-                ps.executeUpdate();
-            }
+        String sql = """
+            INSERT INTO MatchingEvent (me_uuid, session_id, rule_set_name, rule_name, event_data)
+            VALUES (?, ?, ?, ?, ?)
+            """;
+        
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
             
-            conn.commit();
+            ps.setString(1, meUuid);
+            ps.setString(2, matchingEvent.getSessionId());
+            ps.setString(3, matchingEvent.getRuleSetName());
+            ps.setString(4, matchingEvent.getRuleName());
+            ps.setString(5, matchingEvent.getEventData());
+            
+            ps.executeUpdate();
+            
             logger.debug("Added matching event with UUID: {} for rule: {}/{}", 
-                        matchingEvent.getMeUuid(), matchingEvent.getRulesetName(), 
-                        matchingEvent.getRuleName());
+                meUuid, matchingEvent.getRuleSetName(), matchingEvent.getRuleName());
+            
+            return meUuid;
+            
         } catch (SQLException e) {
             logger.error("Failed to add matching event", e);
             throw new RuntimeException("Failed to add matching event", e);
         }
-        
-        return matchingEvent.getMeUuid();
-    }
-    
-    @Override
-    public void persistActionState(String sessionId, String meUuid, ActionState actionState) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot persist action state - not the leader");
-        }
-        
-        actionState.setMeUuid(meUuid);
-        
-        try (Connection conn = dataSource.getConnection()) {
-            // Check if exists
-            String checkSql = "SELECT version FROM eda_action_state WHERE session_id = ? AND me_uuid = ?";
-            boolean exists = false;
-            int currentVersion = 0;
-            
-            try (PreparedStatement ps = conn.prepareStatement(checkSql)) {
-                ps.setString(1, sessionId);
-                ps.setString(2, meUuid);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        exists = true;
-                        currentVersion = rs.getInt("version");
-                    }
-                }
-            }
-            
-            String sql;
-            if (exists) {
-                sql = """
-                    UPDATE eda_action_state 
-                    SET ruleset_name = ?, rule_name = ?, action_data = ?, 
-                        status = ?, version = ?, updated_at = ?
-                    WHERE session_id = ? AND me_uuid = ?
-                    """;
-            } else {
-                sql = """
-                    INSERT INTO eda_action_state 
-                    (ruleset_name, rule_name, action_data, status, version, 
-                     updated_at, session_id, me_uuid)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """;
-            }
-            
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, actionState.getRulesetName());
-                ps.setString(2, actionState.getRuleName());
-                ps.setString(3, toJson(actionState.getActions()));
-                ps.setString(4, determineStatus(actionState));
-                ps.setInt(5, exists ? currentVersion + 1 : 1);
-                ps.setTimestamp(6, Timestamp.from(Instant.parse(actionState.getUpdatedAt())));
-                ps.setString(7, sessionId);
-                ps.setString(8, meUuid);
-                
-                ps.executeUpdate();
-            }
-            
-            conn.commit();
-            logger.debug("Persisted action state for ME UUID: {}", meUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to persist action state", e);
-            throw new RuntimeException("Failed to persist action state", e);
-        }
-    }
-    
-    @Override
-    public ActionState getActionState(String sessionId, String meUuid) {
-        try (Connection conn = dataSource.getConnection()) {
-            String sql = """
-                SELECT * FROM eda_action_state 
-                WHERE session_id = ? AND me_uuid = ?
-                ORDER BY version DESC
-                LIMIT 1
-                """;
-                
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, sessionId);
-                ps.setString(2, meUuid);
-                
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return mapToActionState(rs);
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            logger.error("Failed to get action state", e);
-            throw new RuntimeException("Failed to get action state", e);
-        }
-        return null;
-    }
-    
-    @Override
-    public void removeMatchingEvent(String meUuid) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot remove matching event - not the leader");
-        }
-        
-        try (Connection conn = dataSource.getConnection()) {
-            // First get the session_id from the matching event
-            String sessionId = null;
-            String getSessionSql = "SELECT session_id FROM eda_matching_events WHERE me_uuid = ?";
-            try (PreparedStatement ps = conn.prepareStatement(getSessionSql)) {
-                ps.setString(1, meUuid);
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        sessionId = rs.getString("session_id");
-                    }
-                }
-            }
-            
-            // Delete matching event
-            String deleteME = "DELETE FROM eda_matching_events WHERE me_uuid = ?";
-            try (PreparedStatement ps = conn.prepareStatement(deleteME)) {
-                ps.setString(1, meUuid);
-                ps.executeUpdate();
-            }
-            
-            // Delete associated action state if we found the session_id
-            if (sessionId != null) {
-                String deleteAction = "DELETE FROM eda_action_state WHERE session_id = ? AND me_uuid = ?";
-                try (PreparedStatement ps = conn.prepareStatement(deleteAction)) {
-                    ps.setString(1, sessionId);
-                    ps.setString(2, meUuid);
-                    ps.executeUpdate();
-                }
-            }
-            
-            conn.commit();
-        } catch (SQLException e) {
-            logger.error("Failed to remove matching event", e);
-            throw new RuntimeException("Failed to remove matching event", e);
-        }
-        
-        logger.debug("Removed matching event: {}", meUuid);
     }
     
     @Override
     public List<MatchingEvent> getPendingMatchingEvents(String sessionId) {
-        List<MatchingEvent> matchingEvents = new ArrayList<>();
+        String sql = "SELECT * FROM MatchingEvent WHERE session_id = ?";
+        List<MatchingEvent> events = new ArrayList<>();
         
-        try (Connection conn = dataSource.getConnection()) {
-            String sql = """
-                SELECT * FROM eda_matching_events 
-                WHERE session_id = ? AND status = 'PENDING'
-                ORDER BY created_at
-                """;
-                
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, sessionId);
-                
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        MatchingEvent me = new MatchingEvent();
-                        me.setMeUuid(rs.getString("me_uuid"));
-                        me.setSessionId(rs.getString("session_id"));
-                        me.setRulesetName(rs.getString("ruleset_name"));
-                        me.setRuleName(rs.getString("rule_name"));
-                        me.setMatchingFacts(fromJson(rs.getString("matching_facts")));
-                        me.setStatus(MatchingEvent.MatchingEventStatus.valueOf(rs.getString("status")));
-                        me.setCreatedAt(rs.getString("created_at"));
-                        matchingEvents.add(me);
-                    }
-                }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, sessionId);
+            ResultSet rs = ps.executeQuery();
+            
+            while (rs.next()) {
+                MatchingEvent event = new MatchingEvent();
+                event.setMeUuid(rs.getString("me_uuid"));
+                event.setSessionId(rs.getString("session_id"));
+                event.setRuleSetName(rs.getString("rule_set_name"));
+                event.setRuleName(rs.getString("rule_name"));
+                event.setEventData(rs.getString("event_data"));
+                events.add(event);
             }
+            
         } catch (SQLException e) {
             logger.error("Failed to get pending matching events", e);
-            throw new RuntimeException("Failed to get pending matching events", e);
         }
         
-        return matchingEvents;
+        return events;
     }
     
     @Override
     public void commitState(String sessionId) {
-        // Implementation for two-version protocol
-        logger.debug("Committed state for session: {}", sessionId);
+        if (!isLeader) {
+            return;
+        }
+        
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            
+            // Mark current version as not current
+            String sql1 = "UPDATE eda_event_state SET is_current = false WHERE session_id = ? AND is_current = true";
+            try (PreparedStatement ps1 = conn.prepareStatement(sql1)) {
+                ps1.setString(1, sessionId);
+                ps1.executeUpdate();
+            }
+            
+            // Mark latest version as current
+            String sql2 = """
+                UPDATE eda_event_state 
+                SET is_current = true 
+                WHERE session_id = ? AND version = (SELECT MAX(version) FROM eda_event_state WHERE session_id = ?)
+                """;
+            try (PreparedStatement ps2 = conn.prepareStatement(sql2)) {
+                ps2.setString(1, sessionId);
+                ps2.setString(2, sessionId);
+                ps2.executeUpdate();
+            }
+            
+            conn.commit();
+            logger.debug("Committed state for session: {}", sessionId);
+            
+        } catch (SQLException e) {
+            logger.error("Failed to commit state", e);
+        }
     }
     
     @Override
     public void rollbackState(String sessionId) {
-        // Implementation for two-version protocol
-        logger.debug("Rolled back state for session: {}", sessionId);
-    }
-    
-    @Override
-    public void persistSessionStats(String sessionId, Map<String, Object> stats) {
         if (!isLeader) {
-            throw new IllegalStateException("Cannot persist session stats - not the leader");
+            return;
         }
         
-        // Add stats to current event state
-        EventState eventState = getEventState(sessionId);
-        if (eventState == null) {
-            eventState = new EventState();
-            eventState.setSessionId(sessionId);
+        String sql = "DELETE FROM eda_event_state WHERE session_id = ? AND is_current = false";
+        
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, sessionId);
+            ps.executeUpdate();
+            
+            logger.debug("Rolled back state for session: {}", sessionId);
+            
+        } catch (SQLException e) {
+            logger.error("Failed to rollback state", e);
         }
-        
-        eventState.setSessionStats(stats);
-        eventState.setCurrent(true);
-        persistEventState(sessionId, eventState);
-        
-        logger.debug("Persisted session stats for session: {}", sessionId);
     }
     
     @Override
     public void addAction(String sessionId, String matchingUuid, int index, Map<String, Object> action) {
         if (!isLeader) {
-            throw new IllegalStateException("Cannot add action - not the leader");
+            logger.debug("Not leader - skipping action addition");
+            return;
         }
         
-        try (Connection conn = dataSource.getConnection()) {
-            // Get or create action state for this matching event
-            ActionState actionState = getActionState(sessionId, matchingUuid);
-            if (actionState == null) {
-                actionState = new ActionState();
-                actionState.setMeUuid(matchingUuid);
-                // Get ruleset and rule name from matching event
-                populateActionStateFromMatchingEvent(conn, actionState, matchingUuid);
-            }
+        String actionId = UUID.randomUUID().toString();
+        
+        String sql = """
+            INSERT INTO ActionState (id, me_uuid, index, action_data)
+            VALUES (?, ?, ?, ?)
+            """;
+        
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
             
-            // Convert Map to Action object
-            ActionState.Action newAction = mapToAction(action, index);
+            ps.setString(1, actionId);
+            ps.setString(2, matchingUuid);
+            ps.setInt(3, index);
+            ps.setString(4, objectMapper.writeValueAsString(action));
             
-            // Add or update action in the list
-            List<ActionState.Action> actions = actionState.getActions();
-            if (actions == null) {
-                actions = new ArrayList<>();
-                actionState.setActions(actions);
-            }
-            
-            // Find and replace if index exists, otherwise add
-            boolean found = false;
-            for (int i = 0; i < actions.size(); i++) {
-                if (actions.get(i).getIndex() == index) {
-                    actions.set(i, newAction);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                actions.add(newAction);
-            }
-            
-            // Persist the updated action state
-            persistActionState(sessionId, matchingUuid, actionState);
+            ps.executeUpdate();
             
             // Update HA stats
             if (haStats != null) {
@@ -530,7 +342,9 @@ public class H2StateManager implements HAStateManager {
                 persistHAStats();
             }
             
-        } catch (SQLException e) {
+            logger.debug("Added action for ME UUID: {}, index: {}", matchingUuid, index);
+            
+        } catch (SQLException | JsonProcessingException e) {
             logger.error("Failed to add action", e);
             throw new RuntimeException("Failed to add action", e);
         }
@@ -539,60 +353,74 @@ public class H2StateManager implements HAStateManager {
     @Override
     public void updateAction(String sessionId, String matchingUuid, int index, Map<String, Object> action) {
         if (!isLeader) {
-            throw new IllegalStateException("Cannot update action - not the leader");
+            logger.debug("Not leader - skipping action update");
+            return;
         }
         
-        ActionState actionState = getActionState(sessionId, matchingUuid);
-        if (actionState == null) {
-            throw new IllegalArgumentException("No action state found for matching UUID: " + matchingUuid);
-        }
+        String sql = "UPDATE ActionState SET action_data = ? WHERE me_uuid = ? AND index = ?";
         
-        List<ActionState.Action> actions = actionState.getActions();
-        if (actions == null || actions.isEmpty()) {
-            throw new IllegalArgumentException("No actions found for matching UUID: " + matchingUuid);
-        }
-        
-        // Find and update action by index
-        boolean found = false;
-        for (int i = 0; i < actions.size(); i++) {
-            if (actions.get(i).getIndex() == index) {
-                ActionState.Action updatedAction = mapToAction(action, index);
-                actions.set(i, updatedAction);
-                found = true;
-                break;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, objectMapper.writeValueAsString(action));
+            ps.setString(2, matchingUuid);
+            ps.setInt(3, index);
+            
+            int updated = ps.executeUpdate();
+            if (updated > 0) {
+                logger.debug("Updated action for ME UUID: {}, index: {}", matchingUuid, index);
+            } else {
+                logger.warn("No action found to update for ME UUID: {}, index: {}", matchingUuid, index);
             }
+            
+        } catch (SQLException | JsonProcessingException e) {
+            logger.error("Failed to update action", e);
+            throw new RuntimeException("Failed to update action", e);
         }
-        
-        if (!found) {
-            throw new IllegalArgumentException("Action with index " + index + " not found");
-        }
-        
-        // Persist the updated action state
-        persistActionState(sessionId, matchingUuid, actionState);
     }
     
     @Override
     public boolean actionExists(String sessionId, String matchingUuid, int index) {
-        ActionState actionState = getActionState(sessionId, matchingUuid);
-        if (actionState == null || actionState.getActions() == null) {
-            return false;
+        String sql = "SELECT COUNT(*) FROM ActionState WHERE me_uuid = ? AND index = ?";
+        
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, matchingUuid);
+            ps.setInt(2, index);
+            
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+            
+        } catch (SQLException e) {
+            logger.error("Failed to check action existence", e);
         }
         
-        return actionState.getActions().stream()
-                .anyMatch(action -> action.getIndex() == index);
+        return false;
     }
     
     @Override
     public Map<String, Object> getAction(String sessionId, String matchingUuid, int index) {
-        ActionState actionState = getActionState(sessionId, matchingUuid);
-        if (actionState == null || actionState.getActions() == null) {
-            return new HashMap<>();
-        }
+        String sql = "SELECT action_data FROM ActionState WHERE me_uuid = ? AND index = ?";
         
-        for (ActionState.Action action : actionState.getActions()) {
-            if (action.getIndex() == index) {
-                return actionToMap(action);
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, matchingUuid);
+            ps.setInt(2, index);
+            
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String actionData = rs.getString("action_data");
+                if (actionData != null) {
+                    return objectMapper.readValue(actionData, new TypeReference<Map<String, Object>>() {});
+                }
             }
+            
+        } catch (SQLException | JsonProcessingException e) {
+            logger.error("Failed to get action", e);
         }
         
         return new HashMap<>();
@@ -601,262 +429,125 @@ public class H2StateManager implements HAStateManager {
     @Override
     public void deleteActions(String sessionId, String matchingUuid) {
         if (!isLeader) {
-            throw new IllegalStateException("Cannot delete actions - not the leader");
-        }
-        
-        // Use existing removeMatchingEvent method which deletes both matching event and actions
-        removeMatchingEvent(matchingUuid);
-    }
-    
-    @Override
-    public HAStats getHAStats() {
-        return haStats != null ? haStats : new HAStats();
-    }
-    
-    @Override
-    public void shutdown() {
-        logger.info("Shutting down H2StateManager");
-        if (dataSource != null && !dataSource.isClosed()) {
-            dataSource.close();
-        }
-    }
-    
-    // Helper methods for new API
-    
-    private void restoreHAState() {
-        // Initialize HA stats from database or create new
-        try (Connection conn = dataSource.getConnection()) {
-            String sql = "SELECT * FROM eda_ha_stats LIMIT 1";
-            try (PreparedStatement ps = conn.prepareStatement(sql);
-                 ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    // Restore existing HA stats
-                    haStats = new HAStats();
-                    haStats.setCurrentLeader(rs.getString("current_leader"));
-                    haStats.setLeaderSwitches(rs.getInt("leader_switches"));
-                    haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
-                    haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
-                    haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
-                    logger.info("Restored HA stats from database");
-                } else {
-                    // Create new HA stats
-                    haStats = new HAStats();
-                    persistHAStats();
-                    logger.info("Created new HA stats");
-                }
-            }
-        } catch (SQLException e) {
-            logger.warn("Failed to restore HA state, creating new", e);
-            haStats = new HAStats();
-        }
-    }
-    
-    private void persistHAStats() {
-        if (!isLeader || haStats == null) {
+            logger.debug("Not leader - skipping action deletion");
             return;
         }
         
         try (Connection conn = dataSource.getConnection()) {
-            String sql = """
-                INSERT INTO eda_ha_stats 
-                (session_id, current_leader, leader_switches, current_term_started_at,
-                 events_processed_in_term, actions_processed_in_term, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                current_leader = VALUES(current_leader),
-                leader_switches = VALUES(leader_switches),
-                current_term_started_at = VALUES(current_term_started_at),
-                events_processed_in_term = VALUES(events_processed_in_term),
-                actions_processed_in_term = VALUES(actions_processed_in_term),
-                updated_at = VALUES(updated_at)
-                """;
+            conn.setAutoCommit(false);
             
-            // For H2, use MERGE statement instead
-            String h2Sql = """
-                MERGE INTO eda_ha_stats 
-                (session_id, current_leader, leader_switches, current_term_started_at,
-                 events_processed_in_term, actions_processed_in_term, updated_at)
-                KEY(session_id) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """;
-                
-            try (PreparedStatement ps = conn.prepareStatement(h2Sql)) {
-                ps.setString(1, haUuid != null ? haUuid : "default");
-                ps.setString(2, haStats.getCurrentLeader());
-                ps.setInt(3, haStats.getLeaderSwitches());
-                ps.setString(4, haStats.getCurrentTermStartedAt());
-                ps.setInt(5, haStats.getEventsProcessedInTerm());
-                ps.setInt(6, haStats.getActionsProcessedInTerm());
-                ps.setTimestamp(7, Timestamp.from(Instant.now()));
-                
-                ps.executeUpdate();
+            // Delete actions first (due to foreign key)
+            String sqlActions = "DELETE FROM ActionState WHERE me_uuid = ?";
+            try (PreparedStatement ps1 = conn.prepareStatement(sqlActions)) {
+                ps1.setString(1, matchingUuid);
+                ps1.executeUpdate();
+            }
+            
+            // Delete matching event
+            String sqlME = "DELETE FROM MatchingEvent WHERE me_uuid = ?";
+            try (PreparedStatement ps2 = conn.prepareStatement(sqlME)) {
+                ps2.setString(1, matchingUuid);
+                ps2.executeUpdate();
             }
             
             conn.commit();
+            logger.debug("Deleted matching event and actions: {}", matchingUuid);
+            
+        } catch (SQLException e) {
+            logger.error("Failed to delete actions", e);
+            throw new RuntimeException("Failed to delete actions", e);
+        }
+    }
+    
+    @Override
+    public HAStats getHAStats() {
+        return haStats;
+    }
+    
+    @Override
+    public void persistSessionStats(String sessionId, Map<String, Object> stats) {
+        String sql = """
+            INSERT INTO eda_session_stats (session_id, stats_data)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE stats_data = VALUES(stats_data)
+            """;
+        
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, sessionId);
+            ps.setString(2, objectMapper.writeValueAsString(stats));
+            
+            ps.executeUpdate();
+            
+        } catch (SQLException | JsonProcessingException e) {
+            logger.error("Failed to persist session stats", e);
+        }
+    }
+    
+    @Override
+    public void shutdown() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            dataSource.close();
+            logger.info("Shutting down H2StateManager");
+        }
+    }
+    
+    // Private helper methods
+    
+    private void loadOrCreateHAStats() throws SQLException {
+        String sql = "SELECT * FROM eda_ha_stats WHERE session_id = ?";
+        
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, haUuid != null ? haUuid : "default");
+            ResultSet rs = ps.executeQuery();
+            
+            if (rs.next()) {
+                haStats.setCurrentLeader(rs.getString("current_leader"));
+                haStats.setLeaderSwitches(rs.getInt("leader_switches"));
+                haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
+                haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
+                haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
+                
+                logger.info("Restored HA stats from database");
+            } else {
+                // Create initial stats
+                persistHAStats();
+                logger.info("Created new HA stats");
+            }
+        }
+    }
+    
+    private void persistHAStats() {
+        if (haStats == null) {
+            return;
+        }
+        
+        // For H2, use MERGE statement
+        String h2Sql = """
+            MERGE INTO eda_ha_stats 
+            (session_id, current_leader, leader_switches, current_term_started_at,
+             events_processed_in_term, actions_processed_in_term, updated_at)
+            KEY(session_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """;
+            
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(h2Sql)) {
+            
+            ps.setString(1, haUuid != null ? haUuid : "default");
+            ps.setString(2, haStats.getCurrentLeader());
+            ps.setInt(3, haStats.getLeaderSwitches());
+            ps.setString(4, haStats.getCurrentTermStartedAt());
+            ps.setInt(5, haStats.getEventsProcessedInTerm());
+            ps.setInt(6, haStats.getActionsProcessedInTerm());
+            ps.setTimestamp(7, Timestamp.from(Instant.now()));
+            
+            ps.executeUpdate();
+            
         } catch (SQLException e) {
             logger.error("Failed to persist HA stats", e);
-        }
-    }
-    
-    private void populateActionStateFromMatchingEvent(Connection conn, ActionState actionState, String matchingUuid) throws SQLException {
-        String sql = "SELECT ruleset_name, rule_name FROM eda_matching_events WHERE me_uuid = ?";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, matchingUuid);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    actionState.setRulesetName(rs.getString("ruleset_name"));
-                    actionState.setRuleName(rs.getString("rule_name"));
-                }
-            }
-        }
-    }
-    
-    private ActionState.Action mapToAction(Map<String, Object> actionMap, int index) {
-        ActionState.Action action = new ActionState.Action();
-        action.setIndex(index);
-        action.setName((String) actionMap.get("name"));
-        action.setReferenceId((String) actionMap.get("reference_id"));
-        action.setReferenceUrl((String) actionMap.get("reference_url"));
-        action.setStartedAt((String) actionMap.get("start_time"));
-        action.setEndedAt((String) actionMap.get("end_time"));
-        action.setCustomData((Map<String, Object>) actionMap.get("custom_data"));
-        
-        // Map status string to enum
-        String statusStr = (String) actionMap.get("status");
-        if (statusStr != null) {
-            switch (statusStr.toLowerCase()) {
-                case "running":
-                    action.setStatus(ActionState.Action.ActionStatus.RUNNING);
-                    break;
-                case "success":
-                    action.setStatus(ActionState.Action.ActionStatus.SUCCESS);
-                    break;
-                case "failed":
-                    action.setStatus(ActionState.Action.ActionStatus.FAILED);
-                    break;
-                default:
-                    action.setStatus(ActionState.Action.ActionStatus.RUNNING);
-            }
-        }
-        
-        return action;
-    }
-    
-    private Map<String, Object> actionToMap(ActionState.Action action) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("name", action.getName());
-        map.put("index", action.getIndex());
-        map.put("reference_id", action.getReferenceId());
-        map.put("reference_url", action.getReferenceUrl());
-        map.put("start_time", action.getStartedAt());
-        map.put("end_time", action.getEndedAt());
-        map.put("custom_data", action.getCustomData());
-        
-        if (action.getStatus() != null) {
-            map.put("status", action.getStatus().name().toLowerCase());
-        }
-        
-        return map;
-    }
-    
-    // Existing helper methods
-    
-    private EventState mapToEventState(ResultSet rs) throws SQLException {
-        EventState event = new EventState();
-        event.setSessionId(rs.getString("session_id"));
-        event.setRulebookHash(rs.getString("rulebook_hash"));
-        event.setPartialMatchingEvents(fromJson(rs.getString("partial_matching_events")));
-        event.setTimeWindows(fromJson(rs.getString("time_windows")));
-        
-        Timestamp clockTime = rs.getTimestamp("clock_time");
-        if (clockTime != null) {
-            event.setClockTime(clockTime.toInstant().toString());
-        }
-        
-        event.setSessionStats(fromJson(rs.getString("session_stats")));
-        
-        event.setVersion(rs.getInt("version"));
-        event.setCurrent(rs.getBoolean("is_current"));
-        event.setCreatedAt(rs.getTimestamp("created_at").toInstant().toString());
-        event.setLeaderId(rs.getString("leader_id"));
-        
-        return event;
-    }
-    
-    private ActionState mapToActionState(ResultSet rs) throws SQLException {
-        ActionState actionState = new ActionState();
-        actionState.setMeUuid(rs.getString("me_uuid"));
-        actionState.setRulesetName(rs.getString("ruleset_name"));
-        actionState.setRuleName(rs.getString("rule_name"));
-        actionState.setVersion(rs.getInt("version"));
-        actionState.setUpdatedAt(rs.getTimestamp("updated_at").toInstant().toString());
-        
-        // Deserialize actions
-        String actionData = rs.getString("action_data");
-        if (actionData != null && !actionData.isEmpty()) {
-            try {
-                List<ActionState.Action> actions = objectMapper.readValue(
-                    actionData,
-                    objectMapper.getTypeFactory().constructCollectionType(
-                        List.class, ActionState.Action.class
-                    )
-                );
-                actionState.setActions(actions);
-            } catch (Exception e) {
-                logger.error("Failed to deserialize actions", e);
-                actionState.setActions(new ArrayList<>());
-            }
-        } else {
-            actionState.setActions(new ArrayList<>());
-        }
-        
-        return actionState;
-    }
-    
-    private String determineStatus(ActionState actionState) {
-        if (actionState.getActions() == null || actionState.getActions().isEmpty()) {
-            return "PENDING";
-        }
-        
-        boolean hasStarted = false;
-        boolean allCompleted = true;
-        boolean hasFailed = false;
-        
-        for (ActionState.Action action : actionState.getActions()) {
-            if (action.getStatus() == ActionState.Action.ActionStatus.RUNNING) {
-                hasStarted = true;
-                allCompleted = false;
-            } else if (action.getStatus() == ActionState.Action.ActionStatus.FAILED) {
-                hasFailed = true;
-                allCompleted = false;
-            } else if (action.getStatus() != ActionState.Action.ActionStatus.SUCCESS) {
-                allCompleted = false;
-            }
-        }
-        
-        if (hasFailed) return "FAILED";
-        if (allCompleted) return "SUCCESS";
-        if (hasStarted) return "IN_PROGRESS";
-        return "PENDING";
-    }
-    
-    private String toJson(Object obj) {
-        if (obj == null) return null;
-        try {
-            return objectMapper.writeValueAsString(obj);
-        } catch (Exception e) {
-            logger.error("Failed to serialize to JSON", e);
-            return null;
-        }
-    }
-    
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> fromJson(String json) {
-        if (json == null || json.isEmpty()) return null;
-        try {
-            return objectMapper.readValue(json, Map.class);
-        } catch (Exception e) {
-            logger.error("Failed to deserialize from JSON", e);
-            return null;
         }
     }
 }

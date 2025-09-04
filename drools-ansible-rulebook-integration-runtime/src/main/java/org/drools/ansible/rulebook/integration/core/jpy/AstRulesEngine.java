@@ -7,7 +7,6 @@ import org.drools.ansible.rulebook.integration.api.io.Response;
 import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
-import org.drools.ansible.rulebook.integration.ha.model.ActionState;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -15,6 +14,7 @@ import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import java.time.Instant;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
@@ -117,13 +117,18 @@ public class AstRulesEngine implements Closeable {
                     
                     // Create MatchingEvent object
                     MatchingEvent me = new MatchingEvent();
-                    me.setMeUuid(UUID.randomUUID().toString());
                     me.setSessionId(String.valueOf(sessionId));
-                    me.setRulesetName(rulesetName);
+                    me.setRuleSetName(rulesetName);
                     me.setRuleName(ruleName);
-                    me.setMatchingFacts(facts);
-                    me.setStatus(MatchingEvent.MatchingEventStatus.PENDING);
-                    me.setCreatedAt(Instant.now().toString());
+                    
+                    // Serialize facts as JSON
+                    try {
+                        String eventDataJson = new ObjectMapper().writeValueAsString(facts);
+                        me.setEventData(eventDataJson);
+                    } catch (Exception e) {
+                        logger.warn("Failed to serialize matching facts to JSON", e);
+                        me.setEventData("{}");
+                    }
                     
                     String meUuid = haStateManager.addMatchingEvent(me);
                     logger.debug("Created ME UUID {} for rule {}/{}", meUuid, rulesetName, ruleName);
@@ -369,19 +374,23 @@ public class AstRulesEngine implements Closeable {
             return;
         }
         
-        // Create recovery payload with ME UUID and action state
+        // Create recovery payload with ME UUID
         Map<String, Object> recoveryData = new HashMap<>();
         recoveryData.put("type", "MATCHING_EVENT_RECOVERY");
         recoveryData.put("me_uuid", matchingEvent.getMeUuid());
-        recoveryData.put("ruleset_name", matchingEvent.getRulesetName());
+        recoveryData.put("ruleset_name", matchingEvent.getRuleSetName());
         recoveryData.put("rule_name", matchingEvent.getRuleName());
-        recoveryData.put("matching_facts", matchingEvent.getMatchingFacts());
         
-        // Include action state if available
-        if (matchingEvent.getActionState() != null) {
-            Map<String, Object> actionStateMap = new HashMap<>();
-            actionStateMap.put("actions", matchingEvent.getActionState().getActions());
-            recoveryData.put("action_state", actionStateMap);
+        // Parse event data JSON back to object for compatibility
+        try {
+            if (matchingEvent.getEventData() != null) {
+                ObjectMapper mapper = new ObjectMapper();
+                Object eventData = mapper.readValue(matchingEvent.getEventData(), Object.class);
+                recoveryData.put("matching_facts", eventData);
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to parse event data JSON for recovery", e);
+            recoveryData.put("matching_facts", new HashMap<>());
         }
         
         // Send through async channel
