@@ -7,7 +7,7 @@ import java.util.Map;
  * Configuration for High Availability state management
  */
 public class HAConfiguration {
-    
+
     private String dbUrl;
     private String username;
     private String password;
@@ -17,101 +17,101 @@ public class HAConfiguration {
     private int connectionTimeout = 5000; // ms
     private boolean useMTLS = false;
     private Map<String, Object> additionalProperties = new HashMap<>();
-    
+
     // Database type for factory selection
     private DatabaseType databaseType = DatabaseType.H2;
-    
+
     public enum DatabaseType {
         H2,
         POSTGRESQL
     }
-    
+
     public String getDbUrl() {
         return dbUrl;
     }
-    
+
     public void setDbUrl(String dbUrl) {
         this.dbUrl = dbUrl;
     }
-    
+
     public String getUsername() {
         return username;
     }
-    
+
     public void setUsername(String username) {
         this.username = username;
     }
-    
+
     public String getPassword() {
         return password;
     }
-    
+
     public void setPassword(String password) {
         this.password = password;
     }
-    
+
     public String getCertificatePath() {
         return certificatePath;
     }
-    
+
     public void setCertificatePath(String certificatePath) {
         this.certificatePath = certificatePath;
     }
-    
+
     public String getPrivateKeyPath() {
         return privateKeyPath;
     }
-    
+
     public void setPrivateKeyPath(String privateKeyPath) {
         this.privateKeyPath = privateKeyPath;
     }
-    
+
     public int getConnectionPoolSize() {
         return connectionPoolSize;
     }
-    
+
     public void setConnectionPoolSize(int connectionPoolSize) {
         this.connectionPoolSize = connectionPoolSize;
     }
-    
+
     public int getConnectionTimeout() {
         return connectionTimeout;
     }
-    
+
     public void setConnectionTimeout(int connectionTimeout) {
         this.connectionTimeout = connectionTimeout;
     }
-    
+
     public boolean isUseMTLS() {
         return useMTLS;
     }
-    
+
     public void setUseMTLS(boolean useMTLS) {
         this.useMTLS = useMTLS;
     }
-    
+
     public DatabaseType getDatabaseType() {
         return databaseType;
     }
-    
+
     public void setDatabaseType(DatabaseType databaseType) {
         this.databaseType = databaseType;
     }
-    
+
     public Map<String, Object> getAdditionalProperties() {
         return additionalProperties;
     }
-    
+
     public void setAdditionalProperties(Map<String, Object> additionalProperties) {
         this.additionalProperties = additionalProperties;
     }
-    
+
     /**
      * Create configuration from a map (used by Python/JPY interface)
      */
     public static HAConfiguration fromMap(Map<String, Object> configMap) {
         HAConfiguration config = new HAConfiguration();
-        
+
         if (configMap.containsKey("db_url")) {
             config.setDbUrl((String) configMap.get("db_url"));
         }
@@ -137,7 +137,7 @@ public class HAConfiguration {
             String dbType = (String) configMap.get("database_type");
             config.setDatabaseType(DatabaseType.valueOf(dbType.toUpperCase()));
         }
-        
+
         return config;
     }
 }
