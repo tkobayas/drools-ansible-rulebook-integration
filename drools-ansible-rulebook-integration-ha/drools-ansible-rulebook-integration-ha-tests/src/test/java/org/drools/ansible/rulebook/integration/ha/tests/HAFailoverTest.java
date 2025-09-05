@@ -7,12 +7,10 @@ import java.util.Map;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Tests for HA failover scenarios
@@ -72,12 +70,12 @@ public class HAFailoverTest {
         assertThat(pending).hasSize(1);
 
         MatchingEvent recovered = pending.get(0);
-        assertEquals(me1, recovered.getMeUuid());
+        assertThat(recovered.getMeUuid()).isEqualTo(me1);
 
         // Check action was preserved
-        assertTrue(node2.actionStateExists(SESSION_ID, me1, 0));
+        assertThat(node2.actionStateExists(SESSION_ID, me1, 0)).isTrue();
         String recoveredAction = node2.getActionState(SESSION_ID, me1, 0);
-        assertEquals(actionData, recoveredAction);
+        assertThat(recoveredAction).isEqualTo(actionData);
 
         // Node 2 can complete the action
         String completedAction = "{\"name\":\"send_notification\",\"status\":\"success\",\"reference_id\":\"job-123\"}";
@@ -184,7 +182,7 @@ public class HAFailoverTest {
         node2.enableLeader("node-2");
 
         String failedAction = node2.getActionState(SESSION_ID, meUuid, 0);
-        assertEquals(failedActionData, failedAction);
+        assertThat(failedAction).isEqualTo(failedActionData);
 
         // Retry the action
         String retryAction = "{\"name\":\"flaky_action\",\"status\":\"running\",\"reference_id\":\"retry-job-2\"}";

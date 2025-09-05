@@ -10,17 +10,13 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.EventState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Integration tests for HAStateManager
@@ -31,7 +27,7 @@ public class HAStateManagerTest {
     private static final String SESSION_ID = "test-session-1";
     private static final String LEADER_ID = "test-leader-1";
 
-    @Before
+    @BeforeEach
     public void setUp() {
         // Use new initializeHA API
         String uuid = "test-ha-" + System.nanoTime();
@@ -45,7 +41,7 @@ public class HAStateManagerTest {
         stateManager.initializeHA(uuid, postgresParams, config);
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         if (stateManager != null) {
             stateManager.shutdown();
@@ -74,15 +70,15 @@ public class HAStateManagerTest {
     @Test
     public void testLeaderElection() {
         // Initially not a leader
-        assertFalse(stateManager.isLeader());
+        assertThat(stateManager.isLeader()).isFalse();
 
         // Enable leader mode
         stateManager.enableLeader(LEADER_ID);
-        assertTrue(stateManager.isLeader());
+        assertThat(stateManager.isLeader()).isTrue();
 
         // Disable leader mode
         stateManager.disableLeader(LEADER_ID);
-        assertFalse(stateManager.isLeader());
+        assertThat(stateManager.isLeader()).isFalse();
     }
 
     @Test
@@ -98,7 +94,7 @@ public class HAStateManagerTest {
         stateManager.persistEventState(SESSION_ID, event);
 
         // Event state persistence doesn't return anything but should not throw
-        assertTrue(true); // If we got here, persistence worked
+        assertThat(true).isTrue(); // If we got here, persistence worked
     }
 
     @Test
@@ -114,9 +110,9 @@ public class HAStateManagerTest {
         MatchingEvent me = createMatchingEvent(SESSION_ID, "alertRules", "tempAlert", facts);
         String meUuid = stateManager.addMatchingEvent(me);
 
-        assertNotNull(meUuid);
-        assertFalse(meUuid.isEmpty());
-        assertEquals(me.getMeUuid(), meUuid);
+        assertThat(meUuid).isNotNull();
+        assertThat(meUuid).isNotEmpty();
+        assertThat(meUuid).isEqualTo(me.getMeUuid());
     }
 
     @Test
@@ -133,12 +129,12 @@ public class HAStateManagerTest {
         stateManager.addActionState(SESSION_ID, meUuid, 0, actionData);
 
         // Verify action exists
-        assertTrue(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
-        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 1));
+        assertThat(stateManager.actionStateExists(SESSION_ID, meUuid, 0)).isTrue();
+        assertThat(stateManager.actionStateExists(SESSION_ID, meUuid, 1)).isFalse();
 
         // Get action and verify
         String retrieved = stateManager.getActionState(SESSION_ID, meUuid, 0);
-        assertEquals(actionData, retrieved);
+        assertThat(retrieved).isEqualTo(actionData);
 
         // Update action
         String updatedData = "{\"name\":\"send_alert\",\"status\":\"success\",\"end_time\":\"2024-01-01T10:01:00Z\"}";
@@ -146,7 +142,7 @@ public class HAStateManagerTest {
 
         // Verify update
         retrieved = stateManager.getActionState(SESSION_ID, meUuid, 0);
-        assertEquals(updatedData, retrieved);
+        assertThat(retrieved).isEqualTo(updatedData);
     }
 
     @Test
@@ -185,19 +181,25 @@ public class HAStateManagerTest {
         stateManager.addActionState(SESSION_ID, meUuid, 0, "{\"name\":\"test_action\"}");
 
         // Verify action exists
-        assertTrue(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
+        assertThat(stateManager.actionStateExists(SESSION_ID, meUuid, 0)).isTrue();
 
         // Delete matching event and all its actions
         stateManager.deleteActionStates(SESSION_ID, meUuid);
 
         // Verify action is gone
-        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
+        assertThat(stateManager.actionStateExists(SESSION_ID, meUuid, 0)).isFalse();
 
         // Should not appear in pending events
         List<MatchingEvent> pending = stateManager.getPendingMatchingEvents(SESSION_ID);
         assertThat(pending).isEmpty();
     }
 
+    // Revisit this test. Scenario is:
+    // 1. Node1 writes initial state (version 1)
+    // 2. Node1 writes new state (version 2), but assume it crashes before commit
+    // 3. On recovery, Node2 becomes leader and read the state - should see version 1 as current
+    // 4. Node2 can compare with its own state (= version 1). They are the same, so no action needed
+    // Note: This is more of an integration test scenario. This unit test should be much simpler.
     @Test
     public void testTwoVersionStateProtocol() {
         stateManager.enableLeader(LEADER_ID);
@@ -222,17 +224,19 @@ public class HAStateManagerTest {
 
         // Verify rollback worked (implementation specific)
         // This test demonstrates the API usage
-        assertTrue(true);
+        assertThat(true).isTrue();
     }
 
-    @Test(expected = IllegalStateException.class)
+    @Test
     public void testNonLeaderCannotPersist() {
         // Not setting as leader
         EventState event = new EventState();
         event.setSessionId(SESSION_ID);
 
         // Should throw IllegalStateException
-        stateManager.persistEventState(SESSION_ID, event);
+        assertThrows(IllegalStateException.class, () -> {
+            stateManager.persistEventState(SESSION_ID, event);
+        });
     }
 
     private static SessionStats dummySessionStats() {
@@ -265,18 +269,18 @@ public class HAStateManagerTest {
     public void testHAStats() {
         // Test initial HA stats
         HAStats stats = stateManager.getHAStats();
-        assertNotNull(stats);
-        assertNull(stats.getCurrentLeader());
-        assertEquals(0, stats.getLeaderSwitches());
-        assertEquals(0, stats.getEventsProcessedInTerm());
-        assertEquals(0, stats.getActionsProcessedInTerm());
+        assertThat(stats).isNotNull();
+        assertThat(stats.getCurrentLeader()).isNull();
+        assertThat(stats.getLeaderSwitches()).isEqualTo(0);
+        assertThat(stats.getEventsProcessedInTerm()).isEqualTo(0);
+        assertThat(stats.getActionsProcessedInTerm()).isEqualTo(0);
 
         // Enable leader and verify stats update
         stateManager.enableLeader(LEADER_ID);
         stats = stateManager.getHAStats();
-        assertEquals(LEADER_ID, stats.getCurrentLeader());
-        assertEquals(1, stats.getLeaderSwitches());
-        assertNotNull(stats.getCurrentTermStartedAt());
+        assertThat(stats.getCurrentLeader()).isEqualTo(LEADER_ID);
+        assertThat(stats.getLeaderSwitches()).isEqualTo(1);
+        assertThat(stats.getCurrentTermStartedAt()).isNotNull();
 
         // Process some events/actions and verify counters
         EventState event = new EventState();
@@ -289,41 +293,7 @@ public class HAStateManagerTest {
 
         // Check updated stats
         stats = stateManager.getHAStats();
-        assertEquals(1, stats.getEventsProcessedInTerm());
-        assertEquals(1, stats.getActionsProcessedInTerm());
-    }
-
-    @Test
-    public void testNewActionManagementAPIs() {
-        stateManager.enableLeader(LEADER_ID);
-
-        // Create matching event
-        MatchingEvent me = createMatchingEvent(SESSION_ID, "test", "rule", Map.of("test", "data"));
-        String meUuid = stateManager.addMatchingEvent(me);
-
-        // Test addAction
-        String action1 = "{\"name\":\"action1\",\"status\":\"running\",\"reference_id\":\"ref1\"}";
-
-        stateManager.addActionState(SESSION_ID, meUuid, 0, action1);
-
-        // Test actionExists
-        assertTrue(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
-        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 1));
-
-        // Test getAction
-        String retrievedAction = stateManager.getActionState(SESSION_ID, meUuid, 0);
-        assertEquals(action1, retrievedAction);
-
-        // Test updateAction
-        String updatedAction1 = "{\"name\":\"action1\",\"status\":\"success\",\"reference_id\":\"ref1\",\"end_time\":\"2024-01-01T10:05:00Z\"}";
-        stateManager.updateActionState(SESSION_ID, meUuid, 0, updatedAction1);
-
-        retrievedAction = stateManager.getActionState(SESSION_ID, meUuid, 0);
-        assertEquals(updatedAction1, retrievedAction);
-
-        // Test deleteActions
-        stateManager.deleteActionStates(SESSION_ID, meUuid);
-        assertFalse(stateManager.actionStateExists(SESSION_ID, meUuid, 0));
-        assertTrue(stateManager.getActionState(SESSION_ID, meUuid, 0).isEmpty());
+        assertThat(stats.getEventsProcessedInTerm()).isEqualTo(1); // TODO: events_processed should be incremented when assertEvent is called, not by persistEventState
+        assertThat(stats.getActionsProcessedInTerm()).isEqualTo(1);
     }
 }

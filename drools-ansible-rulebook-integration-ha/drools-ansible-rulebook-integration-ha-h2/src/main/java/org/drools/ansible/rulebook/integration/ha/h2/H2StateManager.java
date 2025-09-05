@@ -174,6 +174,7 @@ public class H2StateManager implements HAStateManager {
 
             conn.commit();
 
+            // TODO: events_processed should be incremented when assertEvent is called, not here
             // Update HA stats
             if (haStats != null) {
                 haStats.incrementEventsProcessed();

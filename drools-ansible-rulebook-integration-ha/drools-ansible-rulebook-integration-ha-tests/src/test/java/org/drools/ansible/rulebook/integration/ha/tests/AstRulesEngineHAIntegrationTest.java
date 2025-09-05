@@ -9,16 +9,12 @@ import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality
@@ -29,7 +25,7 @@ public class AstRulesEngineHAIntegrationTest {
     private long sessionId;
     private static final String SHARED_DB_URL = "jdbc:h2:mem:ast_integration_test;DB_CLOSE_DELAY=-1";
 
-    @Before
+    @BeforeEach
     public void setUp() {
         rulesEngine = new AstRulesEngine();
 
@@ -68,7 +64,7 @@ public class AstRulesEngineHAIntegrationTest {
         sessionId = rulesEngine.createRuleset(ruleset);
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         if (rulesEngine != null) {
             rulesEngine.dispose(sessionId);
@@ -123,7 +119,7 @@ public class AstRulesEngineHAIntegrationTest {
                 """;
 
         String result = rulesEngine.assertEvent(sessionId, event);
-        assertNotNull(result);
+        assertThat(result).isNotNull();
 
         // Parse result to verify ME UUID is included
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
@@ -142,7 +138,7 @@ public class AstRulesEngineHAIntegrationTest {
 
         // Get session stats to verify rule triggered
         String stats = rulesEngine.sessionStats(sessionId);
-        assertNotNull(stats);
+        assertThat(stats).isNotNull();
         Map<String, Object> statsMap = JsonMapper.readValueAsMapOfStringAndObject(stats);
         assertThat(statsMap.get("rulesTriggered")).isEqualTo(1);
     }
@@ -165,7 +161,7 @@ public class AstRulesEngineHAIntegrationTest {
                 """;
 
         String result = rulesEngine.assertEvent(sessionId, event);
-        assertNotNull(result);
+        assertThat(result).isNotNull();
 
         // Verify that matching events were persisted to database
         // We can check this by accessing the HA state manager directly
@@ -176,9 +172,9 @@ public class AstRulesEngineHAIntegrationTest {
             assertThat(pendingEvents).isNotEmpty();
 
             MatchingEvent me = pendingEvents.get(0);
-            assertEquals("temperature_alert", me.getRuleName());
+            assertThat(me.getRuleName()).isEqualTo("temperature_alert");
             // MatchingEvents no longer have status - they exist until deleted
-            assertNotNull(me.getMeUuid());
+            assertThat(me.getMeUuid()).isNotNull();
         } finally {
             haStateManagerForAssertion.shutdown();
         }
@@ -208,7 +204,7 @@ public class AstRulesEngineHAIntegrationTest {
                 """;
 
         String result = rulesEngine.assertEvent(sessionId, event);
-        assertNotNull(result);
+        assertThat(result).isNotNull();
 
         // Get the ME UUID from the database (in real usage, Python would extract from response)
         HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion-" + System.nanoTime());
@@ -226,15 +222,15 @@ public class AstRulesEngineHAIntegrationTest {
             rulesEngine.addActionState(sessionId, meUuid, 0, actionData);
 
             // Check action exists and get it
-            assertTrue(rulesEngine.actionStateExists(sessionId, meUuid, 0));
+            assertThat(rulesEngine.actionStateExists(sessionId, meUuid, 0)).isTrue();
             String retrieved = rulesEngine.getActionState(sessionId, meUuid, 0);
-            assertEquals(actionData, retrieved);
+            assertThat(retrieved).isEqualTo(actionData);
 
             // Delete actions when complete
             rulesEngine.deleteActionStates(sessionId, meUuid);
 
             // Should not exist after deletion
-            assertFalse(rulesEngine.actionStateExists(sessionId, meUuid, 0));
+            assertThat(rulesEngine.actionStateExists(sessionId, meUuid, 0)).isFalse();
         } finally {
             haStateManagerForAssertion.shutdown();
         }
@@ -280,7 +276,7 @@ public class AstRulesEngineHAIntegrationTest {
                 }
                 """;
         String result2 = rulesEngine.assertEvent(sessionId, event2);
-        assertNotNull(result2);
+        assertThat(result2).isNotNull();
 
         // Check that both events created matching events
         HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion-" + System.nanoTime());
@@ -293,10 +289,12 @@ public class AstRulesEngineHAIntegrationTest {
         }
     }
 
-    @Test(expected = IllegalStateException.class)
+    @Test
     public void testHAOperationsWithoutConfiguration() {
         // Try to set leader without configuring HA
-        rulesEngine.enableLeader("leader-1");
+        assertThrows(IllegalStateException.class, () -> {
+            rulesEngine.enableLeader("leader-1");
+        });
     }
 
     @Test
@@ -324,8 +322,8 @@ public class AstRulesEngineHAIntegrationTest {
         try {
             List<MatchingEvent> sessionEvents = haStateManagerForAssertion.getPendingMatchingEvents(String.valueOf(sessionId));
             assertThat(sessionEvents).hasSize(1);
-            assertEquals("temperature_alert", sessionEvents.get(0).getRuleName());
-            assertEquals(String.valueOf(sessionId), sessionEvents.get(0).getSessionId());
+            assertThat(sessionEvents.get(0).getRuleName()).isEqualTo("temperature_alert");
+            assertThat(sessionEvents.get(0).getSessionId()).isEqualTo(String.valueOf(sessionId));
         } finally {
             haStateManagerForAssertion.shutdown();
         }
@@ -408,8 +406,8 @@ public class AstRulesEngineHAIntegrationTest {
                 assertThat(allPendingEvents).hasSize(1);
 
                 MatchingEvent recoveredEvent = allPendingEvents.get(0);
-                assertEquals("temperature_alert", recoveredEvent.getRuleName());
-                assertNotNull(recoveredEvent.getEventData());
+                assertThat(recoveredEvent.getRuleName()).isEqualTo("temperature_alert");
+                assertThat(recoveredEvent.getEventData()).isNotNull();
                 // Event data is stored as JSON
                 assertThat(recoveredEvent.getEventData()).isNotEmpty();
             } finally {
@@ -431,7 +429,7 @@ public class AstRulesEngineHAIntegrationTest {
 
         // Trigger a rule to create matching event
         String result = rulesEngine.assertEvent(sessionId, "{\"temperature\": 35}");
-        assertNotNull(result);
+        assertThat(result).isNotNull();
 
         // Extract ME UUID from result (in real usage, Python would do this)
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
@@ -443,24 +441,24 @@ public class AstRulesEngineHAIntegrationTest {
         rulesEngine.addActionState(sessionId, meUuid, 0, action);
 
         // Test actionExists
-        assertTrue(rulesEngine.actionStateExists(sessionId, meUuid, 0));
-        assertFalse(rulesEngine.actionStateExists(sessionId, meUuid, 1));
+        assertThat(rulesEngine.actionStateExists(sessionId, meUuid, 0)).isTrue();
+        assertThat(rulesEngine.actionStateExists(sessionId, meUuid, 1)).isFalse();
 
         // Test getAction
         String retrieved = rulesEngine.getActionState(sessionId, meUuid, 0);
-        assertEquals(action, retrieved);
+        assertThat(retrieved).isEqualTo(action);
 
         // Test updateAction
         String updatedAction = "{\"name\":\"send_alert\",\"status\":\"success\",\"reference_id\":\"job-123\",\"start_time\":\"2024-01-01T10:00:00Z\",\"end_time\":\"2024-01-01T10:05:00Z\"}";
         rulesEngine.updateActionState(sessionId, meUuid, 0, updatedAction);
 
         retrieved = rulesEngine.getActionState(sessionId, meUuid, 0);
-        assertEquals(updatedAction, retrieved);
+        assertThat(retrieved).isEqualTo(updatedAction);
 
         // Test deleteActions
         rulesEngine.deleteActionStates(sessionId, meUuid);
-        assertFalse(rulesEngine.actionStateExists(sessionId, meUuid, 0));
-        assertTrue(rulesEngine.getActionState(sessionId, meUuid, 0).isEmpty());
+        assertThat(rulesEngine.actionStateExists(sessionId, meUuid, 0)).isFalse();
+        assertThat(rulesEngine.getActionState(sessionId, meUuid, 0)).isEmpty();
     }
 
     @Test
@@ -473,19 +471,19 @@ public class AstRulesEngineHAIntegrationTest {
 
         // Check initial stats
         Map<String, Object> stats = rulesEngine.getHAStats();
-        assertNotNull(stats);
-        assertNull(stats.get("current_leader"));
-        assertEquals(0, stats.get("leader_switches"));
-        assertEquals(0, stats.get("events_processed_in_term"));
-        assertEquals(0, stats.get("actions_processed_in_term"));
+        assertThat(stats).isNotNull();
+        assertThat(stats.get("current_leader")).isNull();
+        assertThat(stats.get("leader_switches")).isEqualTo(0);
+        assertThat(stats.get("events_processed_in_term")).isEqualTo(0);
+        assertThat(stats.get("actions_processed_in_term")).isEqualTo(0);
 
         // Enable leader
         rulesEngine.enableLeader("test-leader");
 
         stats = rulesEngine.getHAStats();
-        assertEquals("test-leader", stats.get("current_leader"));
-        assertEquals(1, stats.get("leader_switches"));
-        assertNotNull(stats.get("current_term_started_at"));
+        assertThat(stats.get("current_leader")).isEqualTo("test-leader");
+        assertThat(stats.get("leader_switches")).isEqualTo(1);
+        assertThat(stats.get("current_term_started_at")).isNotNull();
 
         // Process an event and action
         String result = rulesEngine.assertEvent(sessionId, "{\"temperature\": 35}");
@@ -495,7 +493,7 @@ public class AstRulesEngineHAIntegrationTest {
         rulesEngine.addActionState(sessionId, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
 
         stats = rulesEngine.getHAStats();
-        assertEquals(1, stats.get("events_processed_in_term"));
-        assertEquals(1, stats.get("actions_processed_in_term"));
+        assertThat(stats.get("events_processed_in_term")).isEqualTo(1);
+        assertThat(stats.get("actions_processed_in_term")).isEqualTo(1);
     }
 }
