@@ -1,5 +1,9 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
@@ -20,6 +24,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -170,10 +176,11 @@ public class AstRulesEngineHAIntegrationTest {
 
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
+        List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
+        String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
 
         // Verify that matching events were persisted to database
         // We can check this by accessing another HAStateManager directly, so this is a relatively white-box test
-        // TODO: Add an integration test that uses async channel to get pending MEs
         HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion");
 
         try {
@@ -182,7 +189,7 @@ public class AstRulesEngineHAIntegrationTest {
 
             MatchingEvent me = pendingEvents.get(0);
             assertThat(me.getRuleName()).isEqualTo("temperature_alert");
-            assertThat(me.getMeUuid()).isNotNull();
+            assertThat(me.getMeUuid()).isEqualTo(meUuid);
         } finally {
             haStateManagerForAssertion.shutdown();
         }
@@ -270,7 +277,7 @@ public class AstRulesEngineHAIntegrationTest {
     }
 
     @Test
-    public void testHAWithFailoverRecovery() {
+    public void testHAWithFailoverRecovery() throws IOException {
         rulesEngine1.enableLeader("engine-1");
 
         // Process an event
@@ -280,16 +287,38 @@ public class AstRulesEngineHAIntegrationTest {
                     "critical": true
                 }
                 """;
-        rulesEngine1.assertEvent(sessionId1, event);
+        String result = rulesEngine1.assertEvent(sessionId1, event);
+        List<Map<String, Object>> resultMaps = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
+        String meUuid = (String) ((Map<String, Object>) resultMaps.get(0).get("temperature_alert")).get("meUuid");
+        assertThat(meUuid).isNotNull();
 
         // Simulate engine-1 failure
         rulesEngine1.disableLeader("leader-1");
 
         try {
-            // Engine-2 takes over as leader
-            rulesEngine2.enableLeader("engine-2");
+            int port = rulesEngine2.port(); // port for async channel
 
-            // TODO: assertion with async channel to verify pending MEs are processed
+            try (Socket socket = new Socket("localhost", port)) {
+                DataInputStream bufferedInputStream = new DataInputStream(socket.getInputStream());
+
+                // enableLeader triggers sending pending matches to async channel
+                rulesEngine2.enableLeader("engine-2");
+
+                int l = bufferedInputStream.readInt();
+                byte[] bytes = bufferedInputStream.readNBytes(l);
+                String asyncResult = new String(bytes, StandardCharsets.UTF_8);
+                Map<String, Object> asyncResultMap = readValueAsMapOfStringAndObject(asyncResult);
+
+                assertThat(asyncResultMap).isNotNull();
+                assertThat(asyncResultMap).containsKey("session_id");
+                Map<String, Object> matchingEvent = (Map<String, Object>) asyncResultMap.get("result");
+                assertThat(matchingEvent).containsEntry("me_uuid", meUuid);
+                assertThat(matchingEvent).containsEntry("ruleset_name", "Test Ruleset");
+                assertThat(matchingEvent).containsEntry("rule_name", "temperature_alert");
+                Map<String, Map> eventData = (Map<String, Map>) matchingEvent.get("event_data");
+                assertThat(eventData.get("m")).containsEntry("critical", true);
+                assertThat(eventData.get("m")).containsEntry("temperature", 45);
+            }
         } finally {
             rulesEngine2.dispose(sessionId2);
         }

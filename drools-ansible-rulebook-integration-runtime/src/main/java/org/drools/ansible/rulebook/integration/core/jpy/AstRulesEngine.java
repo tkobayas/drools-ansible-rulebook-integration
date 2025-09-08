@@ -92,7 +92,9 @@ public class AstRulesEngine implements Closeable {
     }
 
     private String processHA(long sessionId, List<Match> matches) {
-        String result = matchesToJson(matches);
+        // matches is the internal representation of drools matches
+        // matchList is the simplified JSON-serializable structure
+        List<Map<String, Map>> matchList = RuleMatch.asList(matches);
 
         // In HA mode, persist event state for statistics tracking
         try {
@@ -108,62 +110,40 @@ public class AstRulesEngine implements Closeable {
         // In HA mode, create matching events for triggered rules and add ME UUIDs to response
         if (!matches.isEmpty()) {
             try {
-                logger.debug("Original response before ME UUID addition: {}", result);
-
-                // Parse the existing JSON result
-                // TODO: This part can be optimized to avoid double serialization
-                List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-                logger.debug("Parsed match list: {}", matchList);
-
                 // Process each match and add ME UUID
-                for (int i = 0; i < matches.size() && i < matchList.size(); i++) {
-                    Match match = matches.get(i);
-                    Map<String, Object> matchJson = matchList.get(i);
-
-                    String ruleName = match.getRule().getName();
+                for (int i = 0; i < matchList.size(); i++) {
+                    Map<String, Map> matchData = matchList.get(i); // e.g. {"temperature_alert":{"m":{"critical":true,"temperature":45}}}
+                    String ruleName = matchData.keySet().iterator().next(); // 1st level key is rule name
                     String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
-                    Map<String, Object> facts = new HashMap<>();
-                    match.getObjects().forEach(obj -> facts.put(obj.getClass().getSimpleName(), obj));
+                    Map eventData = matchData.get(ruleName); // e.g. {"m":{"critical":true,"temperature":45}}
 
                     // Create MatchingEvent object
                     MatchingEvent me = new MatchingEvent();
                     me.setSessionId(String.valueOf(sessionId));
                     me.setRuleSetName(rulesetName);
                     me.setRuleName(ruleName);
-
-                    // Serialize facts as JSON
-                    try {
-                        String eventDataJson = toJson(facts);
-                        me.setEventData(eventDataJson);
-                    } catch (Exception e) {
-                        logger.warn("Failed to serialize matching facts to JSON", e);
-                        me.setEventData("{}");
-                    }
+                    me.setEventData(toJson(eventData));
 
                     String meUuid = haStateManager.addMatchingEvent(me);
                     logger.debug("Created ME UUID {} for rule {}/{}", meUuid, rulesetName, ruleName);
 
                     // Add meUuid to the rule object in JSON
                     // Structure: [{"ruleName": {"m": {...}, "meUuid": "..."}}]
-                    if (matchJson.containsKey(ruleName)) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> ruleObject = (Map<String, Object>) matchJson.get(ruleName);
-                        ruleObject.put("meUuid", meUuid);
-                        logger.debug("Added meUuid to rule object for {}", ruleName);
-                    } else {
-                        logger.warn("Rule name {} not found in matchJson keys: {}", ruleName, matchJson.keySet());
-                    }
+                    Map<String, Object> eventMap = (Map<String, Object>) matchData.get(ruleName);
+                    eventMap.put("meUuid", meUuid);
+                    logger.debug("Added meUuid to result match for {}", ruleName);
                 }
 
-                result = toJson(matchList);
+                String result = toJson(matchList);
                 logger.debug("Modified response with ME UUIDs: {}", result);
+                return result;
             } catch (Exception e) {
                 logger.error("Failed to parse or modify assertEvent response for HA mode", e);
                 // Fall back to original response if JSON processing fails
             }
         }
 
-        return result;
+        return toJson(matchList);
     }
 
     /**
@@ -391,11 +371,11 @@ public class AstRulesEngine implements Closeable {
         try {
             if (matchingEvent.getEventData() != null) {
                 Map<String, Object> eventData = readValueAsMapOfStringAndObject(matchingEvent.getEventData());
-                recoveryData.put("matching_facts", eventData);
+                recoveryData.put("event_data", eventData);
             }
         } catch (Exception e) {
             logger.warn("Failed to parse event data JSON for recovery", e);
-            recoveryData.put("matching_facts", new HashMap<>());
+            recoveryData.put("event_data", new HashMap<>());
         }
         
         // Send through async channel
