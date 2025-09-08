@@ -121,7 +121,7 @@ public class AstRulesEngine implements Closeable {
                     Map<String, Object> matchJson = matchList.get(i);
 
                     String ruleName = match.getRule().getName();
-                    String rulesetName = match.getRule().getPackageName();
+                    String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
                     Map<String, Object> facts = new HashMap<>();
                     match.getObjects().forEach(obj -> facts.put(obj.getClass().getSimpleName(), obj));
 
@@ -357,12 +357,11 @@ public class AstRulesEngine implements Closeable {
         }
         
         for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
-            String sessionId = String.valueOf(executor.getId());
-            List<MatchingEvent> pendingEvents = haStateManager.getPendingMatchingEvents(sessionId);
+            List<MatchingEvent> pendingEvents = haStateManager.getPendingMatchingEvents(executor.getRuleSetName());
             
             if (!pendingEvents.isEmpty()) {
-                logger.info("Found {} pending matching events for session {}", 
-                           pendingEvents.size(), sessionId);
+                logger.info("Found {} pending matching events for session {} : {}",
+                           pendingEvents.size(), executor.getId(), executor.getRuleSetName());
                 
                 // Send each pending ME through async channel for Python to recover
                 for (MatchingEvent pendingEvent : pendingEvents) {
