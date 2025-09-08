@@ -69,12 +69,12 @@ public interface HAStateManager {
     String addMatchingEvent(MatchingEvent matchingEvent);
 
     /**
-     * Get all pending matching events for a session
+     * Get all pending matching events based on ruleset name
      *
-     * @param sessionId The ruleset session ID
+     * @param ruleSetName The ruleset name
      * @return List of pending matching events
      */
-    List<MatchingEvent> getPendingMatchingEvents(String sessionId);
+    List<MatchingEvent> getPendingMatchingEvents(String ruleSetName);
 
     /**
      * Commit the current state (two-version protocol)

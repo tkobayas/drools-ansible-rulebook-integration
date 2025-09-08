@@ -57,13 +57,8 @@ public class HAStateManagerTest {
         me.setRuleName(ruleName);
 
         // Serialize matching facts to JSON
-        try {
-            String eventDataJson = toJson(matchingFacts);
-            me.setEventData(eventDataJson);
-        } catch (Exception e) {
-            me.setEventData("{}");
-        }
-
+        String eventDataJson = toJson(matchingFacts);
+        me.setEventData(eventDataJson);
         return me;
     }
 
@@ -150,11 +145,11 @@ public class HAStateManagerTest {
         stateManager.enableLeader(LEADER_ID);
 
         // Create multiple matching events with different states
-        MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "rules1", "rule1",
+        MatchingEvent matchingEvent1 = createMatchingEvent(SESSION_ID, "ruleset1", "rule1",
                                                            Map.of("event", "1"));
         String me1 = stateManager.addMatchingEvent(matchingEvent1);
 
-        MatchingEvent matchingEvent2 = createMatchingEvent(SESSION_ID, "rules2", "rule2",
+        MatchingEvent matchingEvent2 = createMatchingEvent(SESSION_ID, "ruleset1", "rule2",
                                                            Map.of("event", "2"));
         String me2 = stateManager.addMatchingEvent(matchingEvent2);
 
@@ -162,7 +157,7 @@ public class HAStateManagerTest {
         stateManager.addActionState(SESSION_ID, me1, 0, "{\"status\":\"running\"}");
 
         // Get pending events (should include both)
-        List<MatchingEvent> pending = stateManager.getPendingMatchingEvents(SESSION_ID);
+        List<MatchingEvent> pending = stateManager.getPendingMatchingEvents("ruleset1");
         assertThat(pending).hasSize(2);
         assertThat(pending.stream().map(MatchingEvent::getMeUuid))
                 .containsExactlyInAnyOrder(me1, me2);

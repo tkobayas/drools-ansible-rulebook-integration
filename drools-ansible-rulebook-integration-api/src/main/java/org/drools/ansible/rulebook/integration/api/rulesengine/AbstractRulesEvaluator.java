@@ -53,6 +53,11 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
     }
 
     @Override
+    public String getRuleSetName() {
+        return rulesExecutorSession.getRuleSetName();
+    }
+
+    @Override
     public void setRulesExecutorContainer(RulesExecutorContainer rulesExecutorContainer) {
         this.rulesExecutorContainer = rulesExecutorContainer;
         this.asyncExecutor = rulesExecutorContainer.getAsyncExecutor();

@@ -46,6 +46,10 @@ public class RulesExecutor {
         return rulesEvaluator.getSessionId();
     }
 
+    public String getRuleSetName() {
+        return rulesEvaluator.getRuleSetName();
+    }
+
     public SessionStats getSessionStats() {
         return rulesEvaluator.getSessionStats();
 
