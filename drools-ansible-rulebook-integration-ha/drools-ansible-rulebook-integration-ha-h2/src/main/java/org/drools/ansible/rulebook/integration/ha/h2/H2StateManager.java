@@ -224,14 +224,14 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public List<MatchingEvent> getPendingMatchingEvents(String sessionId) {
-        String sql = "SELECT * FROM MatchingEvent WHERE session_id = ?";
+    public List<MatchingEvent> getPendingMatchingEvents(String ruleSetName) {
+        String sql = "SELECT * FROM MatchingEvent WHERE rule_set_name = ?";
         List<MatchingEvent> events = new ArrayList<>();
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, sessionId);
+            ps.setString(1, ruleSetName);
             ResultSet rs = ps.executeQuery();
 
             while (rs.next()) {

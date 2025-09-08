@@ -28,13 +28,8 @@ public class HAFailoverTest {
         me.setRuleName(ruleName);
 
         // Serialize matching facts to JSON
-        try {
-            String eventDataJson = toJson(matchingFacts);
-            me.setEventData(eventDataJson);
-        } catch (Exception e) {
-            me.setEventData("{}");
-        }
-
+        String eventDataJson = toJson(matchingFacts);
+        me.setEventData(eventDataJson);
         return me;
     }
 
@@ -66,7 +61,7 @@ public class HAFailoverTest {
         node2.enableLeader("node-2");
 
         // Node 2 should see pending actions
-        List<MatchingEvent> pending = node2.getPendingMatchingEvents(SESSION_ID);
+        List<MatchingEvent> pending = node2.getPendingMatchingEvents("rules");
         assertThat(pending).hasSize(1);
 
         MatchingEvent recovered = pending.get(0);
@@ -103,7 +98,7 @@ public class HAFailoverTest {
         // Node 2 takes over
         HAStateManager node2 = createNode(dbUrl);
         node2.enableLeader("node-2");
-        List<MatchingEvent> pending2 = node2.getPendingMatchingEvents(SESSION_ID);
+        List<MatchingEvent> pending2 = node2.getPendingMatchingEvents("rules");
         assertThat(pending2).hasSize(1);
 
         // Node 2 creates more work
@@ -115,7 +110,7 @@ public class HAFailoverTest {
         // Node 3 takes over
         HAStateManager node3 = createNode(dbUrl);
         node3.enableLeader("node-3");
-        List<MatchingEvent> pending3 = node3.getPendingMatchingEvents(SESSION_ID);
+        List<MatchingEvent> pending3 = node3.getPendingMatchingEvents("rules");
 
         // Should see both MEs
         assertThat(pending3).hasSize(2);
@@ -128,6 +123,8 @@ public class HAFailoverTest {
         node3.shutdown();
     }
 
+    // TODO: Confirm if this is an expected result
+    // We may want an additional mechanism to resolve conflicts
     @Test
     public void testSplitBrainRecovery() {
         String dbUrl = "jdbc:h2:mem:split_brain;DB_CLOSE_DELAY=-1";
@@ -152,7 +149,7 @@ public class HAFailoverTest {
         node1.disableLeader("node-1");
 
         // Node2 should see both MEs
-        List<MatchingEvent> allEvents = node2.getPendingMatchingEvents(SESSION_ID);
+        List<MatchingEvent> allEvents = node2.getPendingMatchingEvents("rules");
         assertThat(allEvents).hasSize(2);
 
         // Clean up
