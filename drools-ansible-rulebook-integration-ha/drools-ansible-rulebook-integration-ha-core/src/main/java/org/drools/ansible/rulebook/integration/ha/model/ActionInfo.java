@@ -1,16 +1,16 @@
 package org.drools.ansible.rulebook.integration.ha.model;
 
 /**
- * Represents a single action state for a matching event
+ * Represents a single action info for a matching event
  */
-public class ActionState {
+public class ActionInfo {
 
     private String id;          // UUID primary key
     private String meUuid;       // Foreign key to MatchingEvent
     private int index;           // Action index within the matching event
     private String actionData;   // JSON blob containing action details
 
-    public ActionState() {
+    public ActionInfo() {
     }
 
     public String getId() {

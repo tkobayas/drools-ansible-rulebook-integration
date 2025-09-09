@@ -55,29 +55,29 @@ class HAStateManagerActionTest {
 
         // Add an action
         String actionData = "{\"name\":\"send_alert\",\"status\":\"running\",\"start_time\":\"2024-01-01T10:00:00Z\"}";
-        stateManager.addActionState(SESSION_ID, meUuid, 0, actionData);
+        stateManager.addActionInfo(SESSION_ID, meUuid, 0, actionData);
 
         // Verify action exists
-        assertThat(stateManager.actionStateExists(SESSION_ID, meUuid, 0)).isTrue();
-        assertThat(stateManager.actionStateExists(SESSION_ID, meUuid, 1)).isFalse();
+        assertThat(stateManager.actionInfoExists(SESSION_ID, meUuid, 0)).isTrue();
+        assertThat(stateManager.actionInfoExists(SESSION_ID, meUuid, 1)).isFalse();
 
         // Get action and verify
-        String retrieved = stateManager.getActionState(SESSION_ID, meUuid, 0);
+        String retrieved = stateManager.getActionInfo(SESSION_ID, meUuid, 0);
         assertThat(retrieved).isEqualTo(actionData);
 
         // Update action
         String updatedData = "{\"name\":\"send_alert\",\"status\":\"success\",\"end_time\":\"2024-01-01T10:01:00Z\"}";
-        stateManager.updateActionState(SESSION_ID, meUuid, 0, updatedData);
+        stateManager.updateActionInfo(SESSION_ID, meUuid, 0, updatedData);
 
         // Verify update
-        retrieved = stateManager.getActionState(SESSION_ID, meUuid, 0);
+        retrieved = stateManager.getActionInfo(SESSION_ID, meUuid, 0);
         assertThat(retrieved).isEqualTo(updatedData);
 
         // Delete action
-        stateManager.deleteActionStates(SESSION_ID, meUuid);
+        stateManager.deleteActionInfo(SESSION_ID, meUuid);
 
         // Verify action is gone
-        assertThat(stateManager.actionStateExists(SESSION_ID, meUuid, 0)).isFalse();
+        assertThat(stateManager.actionInfoExists(SESSION_ID, meUuid, 0)).isFalse();
 
         // Should not appear in pending events
         List<MatchingEvent> pending = stateManager.getPendingMatchingEvents(SESSION_ID);
@@ -98,7 +98,7 @@ class HAStateManagerActionTest {
         String meUuid2 = stateManager.addMatchingEvent(matchingEvent2);
 
         // Add action for first ME (in progress)
-        stateManager.addActionState(SESSION_ID, meUuid1, 0, "{\"status\":\"running\"}");
+        stateManager.addActionInfo(SESSION_ID, meUuid1, 0, "{\"status\":\"running\"}");
 
         // Get pending events (should include both)
         List<MatchingEvent> pending = stateManager.getPendingMatchingEvents("ruleset1");

@@ -9,8 +9,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.sql.DataSource;
-
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
@@ -215,24 +213,24 @@ public class AstRulesEngineHAIntegrationTest {
         String meUuid = (String) ((Map<String, Object>) resultMaps.get(0).get("temperature_alert")).get("meUuid");
         assertThat(meUuid).isNotNull();
 
-        // Set ActionState
+        // Set ActionInfo
         String actionData = "{\"name\":\"send_alert\",\"status\":\"running\",\"reference_id\":\"job-456\"}";
-        rulesEngine1.addActionState(sessionId1, meUuid, 0, actionData);
+        rulesEngine1.addActionInfo(sessionId1, meUuid, 0, actionData);
 
         // Check action exists and get it
-        assertThat(rulesEngine1.actionStateExists(sessionId1, meUuid, 0)).isTrue();
-        String retrieved = rulesEngine1.getActionState(sessionId1, meUuid, 0);
+        assertThat(rulesEngine1.actionInfoExists(sessionId1, meUuid, 0)).isTrue();
+        String retrieved = rulesEngine1.getActionInfo(sessionId1, meUuid, 0);
         assertThat(retrieved).isEqualTo(actionData);
 
-        // Update ActionState
+        // Update ActionInfo
         String updatedActionData = "{\"name\":\"send_alert\",\"status\":\"success\",\"reference_id\":\"job-456\"}";
-        rulesEngine1.updateActionState(sessionId1, meUuid, 0, updatedActionData);
+        rulesEngine1.updateActionInfo(sessionId1, meUuid, 0, updatedActionData);
 
-        // Delete ActionState and MarchingEvent when complete
-        rulesEngine1.deleteActionStates(sessionId1, meUuid);
+        // Delete ActionInfo and MarchingEvent when complete
+        rulesEngine1.deleteActionInfo(sessionId1, meUuid);
 
         // Should not exist after deletion
-        assertThat(rulesEngine1.actionStateExists(sessionId1, meUuid, 0)).isFalse();
+        assertThat(rulesEngine1.actionInfoExists(sessionId1, meUuid, 0)).isFalse();
     }
 
     @Test
@@ -347,7 +345,7 @@ public class AstRulesEngineHAIntegrationTest {
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
         String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
 
-        rulesEngine1.addActionState(sessionId1, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
+        rulesEngine1.addActionInfo(sessionId1, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
 
         stats = rulesEngine1.getHAStats();
         assertThat(stats.get("events_processed_in_term")).isEqualTo(1);

@@ -53,9 +53,9 @@ public class H2Schema {
             stmt.execute(createMatchingEventTable);
             logger.debug("Created/verified MatchingEvent table");
 
-            // Create ActionState table (renamed and restructured - single action per record)
-            String createActionStateTable = """
-                    CREATE TABLE IF NOT EXISTS ActionState (
+            // Create ActionInfo table (renamed and restructured - single action per record)
+            String createActionInfoTable = """
+                    CREATE TABLE IF NOT EXISTS ActionInfo (
                         id VARCHAR(36) PRIMARY KEY,
                         me_uuid VARCHAR(36) NOT NULL,
                         index INT NOT NULL,
@@ -64,8 +64,8 @@ public class H2Schema {
                         FOREIGN KEY (me_uuid) REFERENCES MatchingEvent(me_uuid) ON DELETE CASCADE
                     )
                     """;
-            stmt.execute(createActionStateTable);
-            logger.debug("Created/verified ActionState table");
+            stmt.execute(createActionInfoTable);
+            logger.debug("Created/verified ActionInfo table");
 
             // Create indexes for better query performance
             String createSessionStateIndex = """
@@ -80,11 +80,11 @@ public class H2Schema {
                     """;
             stmt.execute(createMatchingEventIndex);
 
-            String createActionStateIndex = """
-                    CREATE INDEX IF NOT EXISTS idx_action_state_me 
-                    ON ActionState(me_uuid)
+            String createActionInfoIndex = """
+                    CREATE INDEX IF NOT EXISTS idx_action_info_me 
+                    ON ActionInfo(me_uuid)
                     """;
-            stmt.execute(createActionStateIndex);
+            stmt.execute(createActionInfoIndex);
 
             // Create HA stats table (unchanged)
             String createHAStatsTable = """
@@ -113,7 +113,7 @@ public class H2Schema {
              Statement stmt = conn.createStatement()) {
 
             // Drop in reverse order due to foreign keys
-            stmt.execute("DROP TABLE IF EXISTS ActionState");
+            stmt.execute("DROP TABLE IF EXISTS ActionInfo");
             stmt.execute("DROP TABLE IF EXISTS MatchingEvent");
             stmt.execute("DROP TABLE IF EXISTS SessionState");
             stmt.execute("DROP TABLE IF EXISTS HAStats");
