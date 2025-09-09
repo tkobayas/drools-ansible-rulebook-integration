@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * General function tests for HAStateManager
- * 
+ *
  * For Action and MatchingEvent related tests see HAStateManagerActionTest
  * For Session related tests see HAStateManagerSessionTest
  */
@@ -99,7 +99,7 @@ class HAStateManagerTest {
 
         MatchingEvent me = createMatchingEvent(SESSION_ID, "test", "rule", Map.of("test", "data"));
         String meUuid = stateManager.addMatchingEvent(me);
-        stateManager.addActionState(SESSION_ID, meUuid, 0, "{\"name\":\"test_action\",\"status\":\"running\"}");
+        stateManager.addActionInfo(SESSION_ID, meUuid, 0, "{\"name\":\"test_action\",\"status\":\"running\"}");
 
         // Check updated stats
         stats = stateManager.getHAStats();

@@ -50,7 +50,7 @@ public class HAFailoverTest {
         // Start action execution
         String actionData = "{\"name\":\"send_notification\",\"status\":\"running\",\"reference_id\":\"job-123\"}";
 
-        node1.addActionState(SESSION_ID, me1, 0, actionData);
+        node1.addActionInfo(SESSION_ID, me1, 0, actionData);
 
         // Simulate node 1 failure
         node1.disableLeader("node-1");
@@ -68,16 +68,16 @@ public class HAFailoverTest {
         assertThat(recovered.getMeUuid()).isEqualTo(me1);
 
         // Check action was preserved
-        assertThat(node2.actionStateExists(SESSION_ID, me1, 0)).isTrue();
-        String recoveredAction = node2.getActionState(SESSION_ID, me1, 0);
+        assertThat(node2.actionInfoExists(SESSION_ID, me1, 0)).isTrue();
+        String recoveredAction = node2.getActionInfo(SESSION_ID, me1, 0);
         assertThat(recoveredAction).isEqualTo(actionData);
 
         // Node 2 can complete the action
         String completedAction = "{\"name\":\"send_notification\",\"status\":\"success\",\"reference_id\":\"job-123\"}";
-        node2.updateActionState(SESSION_ID, me1, 0, completedAction);
+        node2.updateActionInfo(SESSION_ID, me1, 0, completedAction);
 
         // Clean up
-        node2.deleteActionStates(SESSION_ID, me1);
+        node2.deleteActionInfo(SESSION_ID, me1);
         node2.shutdown();
     }
 
@@ -171,26 +171,26 @@ public class HAFailoverTest {
 
         String failedActionData = "{\"name\":\"flaky_action\",\"status\":\"failed\",\"reference_id\":\"failed-job-1\"}";
 
-        node1.addActionState(SESSION_ID, meUuid, 0, failedActionData);
+        node1.addActionInfo(SESSION_ID, meUuid, 0, failedActionData);
         node1.disableLeader("node-1");
 
         // New leader retries
         HAStateManager node2 = createNode(dbUrl);
         node2.enableLeader("node-2");
 
-        String failedAction = node2.getActionState(SESSION_ID, meUuid, 0);
+        String failedAction = node2.getActionInfo(SESSION_ID, meUuid, 0);
         assertThat(failedAction).isEqualTo(failedActionData);
 
         // Retry the action
         String retryAction = "{\"name\":\"flaky_action\",\"status\":\"running\",\"reference_id\":\"retry-job-2\"}";
-        node2.updateActionState(SESSION_ID, meUuid, 0, retryAction);
+        node2.updateActionInfo(SESSION_ID, meUuid, 0, retryAction);
 
         // Eventually succeed
         String successAction = "{\"name\":\"flaky_action\",\"status\":\"success\",\"reference_id\":\"retry-job-2\"}";
-        node2.updateActionState(SESSION_ID, meUuid, 0, successAction);
+        node2.updateActionInfo(SESSION_ID, meUuid, 0, successAction);
 
         // Clean up
-        node2.deleteActionStates(SESSION_ID, meUuid);
+        node2.deleteActionInfo(SESSION_ID, meUuid);
         node1.shutdown();
         node2.shutdown();
     }

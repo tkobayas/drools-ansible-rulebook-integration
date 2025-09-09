@@ -313,7 +313,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void addActionState(String sessionId, String matchingUuid, int index, String action) {
+    public void addActionInfo(String sessionId, String matchingUuid, int index, String action) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot add action - not leader");
         }
@@ -321,7 +321,7 @@ public class H2StateManager implements HAStateManager {
         String actionId = UUID.randomUUID().toString();
 
         String sql = """
-                INSERT INTO ActionState (id, me_uuid, index, action_data)
+                INSERT INTO ActionInfo (id, me_uuid, index, action_data)
                 VALUES (?, ?, ?, ?)
                 """;
 
@@ -349,13 +349,13 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void updateActionState(String sessionId, String matchingUuid, int index, String action) {
+    public void updateActionInfo(String sessionId, String matchingUuid, int index, String action) {
         if (!isLeader) {
             logger.debug("Not leader - skipping action update");
             return;
         }
 
-        String sql = "UPDATE ActionState SET action_data = ? WHERE me_uuid = ? AND index = ?";
+        String sql = "UPDATE ActionInfo SET action_data = ? WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -377,8 +377,8 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public boolean actionStateExists(String sessionId, String matchingUuid, int index) {
-        String sql = "SELECT COUNT(*) FROM ActionState WHERE me_uuid = ? AND index = ?";
+    public boolean actionInfoExists(String sessionId, String matchingUuid, int index) {
+        String sql = "SELECT COUNT(*) FROM ActionInfo WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -398,8 +398,8 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public String getActionState(String sessionId, String matchingUuid, int index) {
-        String sql = "SELECT action_data FROM ActionState WHERE me_uuid = ? AND index = ?";
+    public String getActionInfo(String sessionId, String matchingUuid, int index) {
+        String sql = "SELECT action_data FROM ActionInfo WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -422,7 +422,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void deleteActionStates(String sessionId, String matchingUuid) {
+    public void deleteActionInfo(String sessionId, String matchingUuid) {
         if (!isLeader) {
             logger.debug("Not leader - skipping action deletion");
             return;
@@ -432,7 +432,7 @@ public class H2StateManager implements HAStateManager {
             conn.setAutoCommit(false);
 
             // Delete actions first (due to foreign key)
-            String sqlActions = "DELETE FROM ActionState WHERE me_uuid = ?";
+            String sqlActions = "DELETE FROM ActionInfo WHERE me_uuid = ?";
             try (PreparedStatement ps1 = conn.prepareStatement(sqlActions)) {
                 ps1.setString(1, matchingUuid);
                 ps1.executeUpdate();
