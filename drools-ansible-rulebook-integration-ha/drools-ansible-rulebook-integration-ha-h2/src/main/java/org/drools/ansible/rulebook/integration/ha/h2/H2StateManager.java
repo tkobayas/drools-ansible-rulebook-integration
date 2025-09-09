@@ -116,18 +116,18 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public SessionState getSessionState(String sessionId) {
-        String sql = "SELECT * FROM SessionState WHERE session_id = ? AND is_current = true";
+    public SessionState getSessionState() {
+        String sql = "SELECT * FROM SessionState WHERE ha_uuid = ? AND is_current = true";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, sessionId);
+            ps.setString(1, haUuid);
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
                 SessionState sessionState = new SessionState();
-                sessionState.setSessionId(rs.getString("session_id"));
+                sessionState.setHaUuid(rs.getString("ha_uuid"));
                 sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
                 String sessionStatsJson = rs.getString("session_stats");
@@ -146,7 +146,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void persistSessionState(String sessionId, SessionState sessionState) {
+    public void persistSessionState(SessionState sessionState) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot persist event state - not leader");
         }
@@ -156,14 +156,14 @@ public class H2StateManager implements HAStateManager {
 
             // Insert new version
             String sql = """
-                    INSERT INTO SessionState (session_id, rulebook_hash, session_stats, version, is_current, leader_id)
+                    INSERT INTO SessionState (ha_uuid, rulebook_hash, session_stats, version, is_current, leader_id)
                     VALUES (?, ?, ?, 
-                        COALESCE((SELECT MAX(version) FROM SessionState WHERE session_id = ?), 0) + 1,
+                        COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ?), 0) + 1,
                         false, ?)
                     """;
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, sessionId);
+                ps.setString(1, haUuid);
                 ps.setString(2, sessionState.getRulebookHash());
 
                 String sessionStatsJson = null;
@@ -171,7 +171,7 @@ public class H2StateManager implements HAStateManager {
                     sessionStatsJson = toJson(sessionState.getSessionStats());
                 }
                 ps.setString(3, sessionStatsJson);
-                ps.setString(4, sessionId);
+                ps.setString(4, haUuid);
                 ps.setString(5, leaderId);
 
                 ps.executeUpdate();
@@ -186,7 +186,7 @@ public class H2StateManager implements HAStateManager {
                 persistHAStats();
             }
 
-            logger.debug("Persisted event state for session: {}", sessionId);
+            logger.debug("Persisted event state for haUuid: {}", haUuid);
         } catch (SQLException e) {
             logger.error("Failed to persist event state", e);
             throw new RuntimeException("Failed to persist event state", e);
@@ -203,7 +203,7 @@ public class H2StateManager implements HAStateManager {
         matchingEvent.setMeUuid(meUuid);
 
         String sql = """
-                INSERT INTO MatchingEvent (me_uuid, session_id, rule_set_name, rule_name, event_data)
+                INSERT INTO MatchingEvent (me_uuid, ha_uuid, rule_set_name, rule_name, event_data)
                 VALUES (?, ?, ?, ?, ?)
                 """;
 
@@ -211,7 +211,7 @@ public class H2StateManager implements HAStateManager {
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, meUuid);
-            ps.setString(2, matchingEvent.getSessionId());
+            ps.setString(2, matchingEvent.getHaUuid());
             ps.setString(3, matchingEvent.getRuleSetName());
             ps.setString(4, matchingEvent.getRuleName());
             ps.setString(5, matchingEvent.getEventData());
@@ -229,20 +229,20 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public List<MatchingEvent> getPendingMatchingEvents(String ruleSetName) {
-        String sql = "SELECT * FROM MatchingEvent WHERE rule_set_name = ?";
+    public List<MatchingEvent> getPendingMatchingEvents() {
+        String sql = "SELECT * FROM MatchingEvent WHERE ha_uuid = ?";
         List<MatchingEvent> events = new ArrayList<>();
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, ruleSetName);
+            ps.setString(1, haUuid);
             ResultSet rs = ps.executeQuery();
 
             while (rs.next()) {
                 MatchingEvent event = new MatchingEvent();
                 event.setMeUuid(rs.getString("me_uuid"));
-                event.setSessionId(rs.getString("session_id"));
+                event.setHaUuid(rs.getString("ha_uuid"));
                 event.setRuleSetName(rs.getString("rule_set_name"));
                 event.setRuleName(rs.getString("rule_name"));
                 event.setEventData(rs.getString("event_data"));
@@ -256,64 +256,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void commitState(String sessionId) {
-        if (!isLeader) {
-            return;
-        }
-
-        // TODO: Revisit this logic. We keep just 2 versions of SessionState. `commit` is not a right name
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // Mark current version as not current
-            String sql1 = "UPDATE SessionState SET is_current = false WHERE session_id = ? AND is_current = true";
-            try (PreparedStatement ps1 = conn.prepareStatement(sql1)) {
-                ps1.setString(1, sessionId);
-                ps1.executeUpdate();
-            }
-
-            // Mark latest version as current
-            String sql2 = """
-                    UPDATE SessionState 
-                    SET is_current = true 
-                    WHERE session_id = ? AND version = (SELECT MAX(version) FROM SessionState WHERE session_id = ?)
-                    """;
-            try (PreparedStatement ps2 = conn.prepareStatement(sql2)) {
-                ps2.setString(1, sessionId);
-                ps2.setString(2, sessionId);
-                ps2.executeUpdate();
-            }
-
-            conn.commit();
-            logger.debug("Committed state for session: {}", sessionId);
-        } catch (SQLException e) {
-            logger.error("Failed to commit state", e);
-        }
-    }
-
-    @Override
-    public void rollbackState(String sessionId) {
-        if (!isLeader) {
-            return;
-        }
-
-        // TODO: Revisit this logic. We keep just 2 versions of SessionState. `rollback` is not a right name
-        String sql = "DELETE FROM SessionState WHERE session_id = ? AND is_current = false";
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, sessionId);
-            ps.executeUpdate();
-
-            logger.debug("Rolled back state for session: {}", sessionId);
-        } catch (SQLException e) {
-            logger.error("Failed to rollback state", e);
-        }
-    }
-
-    @Override
-    public void addActionInfo(String sessionId, String matchingUuid, int index, String action) {
+    public void addActionInfo(String matchingUuid, int index, String action) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot add action - not leader");
         }
@@ -349,7 +292,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void updateActionInfo(String sessionId, String matchingUuid, int index, String action) {
+    public void updateActionInfo(String matchingUuid, int index, String action) {
         if (!isLeader) {
             logger.debug("Not leader - skipping action update");
             return;
@@ -377,7 +320,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public boolean actionInfoExists(String sessionId, String matchingUuid, int index) {
+    public boolean actionInfoExists(String matchingUuid, int index) {
         String sql = "SELECT COUNT(*) FROM ActionInfo WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
@@ -398,7 +341,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public String getActionInfo(String sessionId, String matchingUuid, int index) {
+    public String getActionInfo(String matchingUuid, int index) {
         String sql = "SELECT action_data FROM ActionInfo WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
@@ -422,7 +365,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void deleteActionInfo(String sessionId, String matchingUuid) {
+    public void deleteActionInfo(String matchingUuid) {
         if (!isLeader) {
             logger.debug("Not leader - skipping action deletion");
             return;
@@ -469,12 +412,12 @@ public class H2StateManager implements HAStateManager {
     // Private helper methods
 
     private void loadOrCreateHAStats() throws SQLException {
-        String sql = "SELECT * FROM HAStats WHERE session_id = ?";
+        String sql = "SELECT * FROM HAStats WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, haUuid != null ? haUuid : "default");
+            ps.setString(1, haUuid);
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
@@ -501,15 +444,15 @@ public class H2StateManager implements HAStateManager {
         // For H2, use MERGE statement
         String h2Sql = """
                 MERGE INTO HAStats 
-                (session_id, current_leader, leader_switches, current_term_started_at,
+                (ha_uuid, current_leader, leader_switches, current_term_started_at,
                  events_processed_in_term, actions_processed_in_term, updated_at)
-                KEY(session_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+                KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(h2Sql)) {
 
-            ps.setString(1, haUuid != null ? haUuid : "default");
+            ps.setString(1, haUuid);
             ps.setString(2, haStats.getCurrentLeader());
             ps.setInt(3, haStats.getLeaderSwitches());
             ps.setString(4, haStats.getCurrentTermStartedAt());

@@ -11,7 +11,7 @@ import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
  */
 public class SessionState {
 
-    private String sessionId;
+    private String haUuid;
     private String rulebookHash;
 
     // Regular event processing state
@@ -31,12 +31,12 @@ public class SessionState {
         this.isCurrent = false;
     }
 
-    public String getSessionId() {
-        return sessionId;
+    public String getHaUuid() {
+        return haUuid;
     }
 
-    public void setSessionId(String sessionId) {
-        this.sessionId = sessionId;
+    public void setHaUuid(String haUuid) {
+        this.haUuid = haUuid;
     }
 
     public String getRulebookHash() {
