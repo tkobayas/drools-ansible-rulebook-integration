@@ -12,6 +12,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
 
 /**
  * Session related tests for HAStateManager
@@ -19,21 +22,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class HAStateManagerSessionTest {
 
     private HAStateManager stateManager;
-    private static final String SESSION_ID = "test-session-1";
+    private static final String HA_UUID = "test-ha-1";
     private static final String LEADER_ID = "test-leader-1";
 
     @BeforeEach
     void setUp() {
-        // Use new initializeHA API
-        String uuid = "test-ha-" + System.nanoTime();
-        Map<String, Object> postgresParams = new HashMap<>();
-        // Use H2 for testing (falls back when postgres params are empty)
-
-        Map<String, Object> config = new HashMap<>();
-        config.put("write_after", 1);
-
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(uuid, postgresParams, config);
+        stateManager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
     }
 
     @AfterEach
@@ -41,6 +36,8 @@ class HAStateManagerSessionTest {
         if (stateManager != null) {
             stateManager.shutdown();
         }
+
+        dropTables();
     }
 
     @Test
@@ -49,11 +46,11 @@ class HAStateManagerSessionTest {
 
         // Create and persist session state
         SessionState sessionState = new SessionState();
-        sessionState.setSessionId(SESSION_ID);
+        sessionState.setHaUuid(HA_UUID);
         sessionState.setRulebookHash("abc123");
         sessionState.setSessionStats(dummySessionStats());
 
-        stateManager.persistSessionState(SESSION_ID, sessionState);
+        stateManager.persistSessionState(sessionState);
 
         // Session state persistence doesn't return anything but should not throw
         assertThat(true).isTrue(); // If we got here, persistence worked

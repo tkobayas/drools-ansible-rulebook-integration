@@ -23,13 +23,18 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality
  */
-public class AstRulesEngineHAIntegrationTest {
+class AstRulesEngineHAIntegrationTest {
+
+    private static final String HA_UUID = "failover-ha-1";
 
     private AstRulesEngine rulesEngine1; // node 1
     private AstRulesEngine rulesEngine2; // node 2
@@ -37,15 +42,8 @@ public class AstRulesEngineHAIntegrationTest {
     private long sessionId1; // node1
     private long sessionId2; // node2
 
-    private static final Map<String, Object> TEST_PG_CONFIG = new HashMap<>(); // Empty for H2
-    public static final String TEST_H2_URL = "jdbc:h2:mem:ast_integration_test;DB_CLOSE_DELAY=-1";
-    private static final Map<String, Object> TEST_HA_CONFIG = Map.of( // DB is shared between nodes
-                                                                      "db_url", TEST_H2_URL, // Shared H2 database
-                                                                      "write_after", 1 // Immediate persistence
-    );
-
     @BeforeEach
-    public void setUp() {
+    void setUp() {
 
         // Create a ruleset using the correct AST format
         String ruleset = """
@@ -82,15 +80,15 @@ public class AstRulesEngineHAIntegrationTest {
 
         rulesEngine1 = new AstRulesEngine();
         sessionId1 = rulesEngine1.createRuleset(ruleset);
-        rulesEngine1.initializeHA("ha-uuid", TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
+        rulesEngine1.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
 
         rulesEngine2 = new AstRulesEngine();
         sessionId2 = rulesEngine2.createRuleset(ruleset);
-        rulesEngine2.initializeHA("ha-uuid", TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
+        rulesEngine2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
     }
 
     @AfterEach
-    public void tearDown() {
+    void tearDown() {
         if (rulesEngine1 != null) {
             rulesEngine1.dispose(sessionId1);
         }
@@ -101,29 +99,15 @@ public class AstRulesEngineHAIntegrationTest {
         dropTables();
     }
 
-    private void dropTables() {
-        HikariConfig hikariConfig = new HikariConfig();
-        hikariConfig.setJdbcUrl(TEST_H2_URL);
-        hikariConfig.setUsername("sa");
-        hikariConfig.setPassword("");
-        hikariConfig.setMaximumPoolSize(10);
-
-        try (HikariDataSource dataSource = new HikariDataSource(hikariConfig);) {
-            H2Schema.dropSchema(dataSource);
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     // Helper method to create HAStateManager with shared database
-    private HAStateManager createSharedHAStateManager(String uuid) {
+    private HAStateManager createSharedHAStateManager() {
         HAStateManager manager = HAStateManagerFactory.create();
-        manager.initializeHA(uuid, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        manager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
         return manager;
     }
 
     @Test
-    public void testBasicBehaviorOtherThanHA() {
+    void testBasicBehaviorOtherThanHA() {
         // Enable leader mode
         rulesEngine1.enableLeader("engine-leader-1");
 
@@ -161,7 +145,7 @@ public class AstRulesEngineHAIntegrationTest {
     }
 
     @Test
-    public void testMatchingEventPersistence() {
+    void testMatchingEventPersistence() {
         rulesEngine1.enableLeader("leader-1");
 
         // Process an event that triggers a rule
@@ -179,10 +163,10 @@ public class AstRulesEngineHAIntegrationTest {
 
         // Verify that matching events were persisted to database
         // We can check this by accessing another HAStateManager directly, so this is a relatively white-box test
-        HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion");
+        HAStateManager haStateManagerForAssertion = createSharedHAStateManager();
 
         try {
-            List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents("Test Ruleset");
+            List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents();
             assertThat(pendingEvents).isNotEmpty();
 
             MatchingEvent me = pendingEvents.get(0);
@@ -194,7 +178,7 @@ public class AstRulesEngineHAIntegrationTest {
     }
 
     @Test
-    public void testActionStateManagement() {
+    void testActionStateManagement() {
         rulesEngine1.enableLeader("leader-1");
 
         // First trigger a rule to create a matching event
@@ -234,7 +218,7 @@ public class AstRulesEngineHAIntegrationTest {
     }
 
     @Test
-    public void testLeaderTransition() {
+    void testLeaderTransition() {
         // Set as leader
         rulesEngine1.enableLeader("leader-1");
 
@@ -264,10 +248,10 @@ public class AstRulesEngineHAIntegrationTest {
         assertThat(result2).isNotNull();
 
         // Check that both events created matching events
-        HAStateManager haStateManagerForAssertion = createSharedHAStateManager("test-assertion-" + System.nanoTime());
+        HAStateManager haStateManagerForAssertion = createSharedHAStateManager();
 
         try {
-            List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents("Test Ruleset");
+            List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents();
             assertThat(pendingEvents).hasSize(2); // Both events should create MEs
         } finally {
             haStateManagerForAssertion.shutdown();
