@@ -9,15 +9,14 @@ import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
  * Represents the state of events in the HA system.
  * Contains both regular event processing state and in-flight matching events.
  */
-public class EventState {
+public class SessionState {
 
     private String sessionId;
     private String rulebookHash;
 
     // Regular event processing state
-    private Map<String, Object> partialMatchingEvents;
-    private Map<String, Object> timeWindows;
-    private String clockTime;
+    private Map<String, Object> partialEvents;
+    private long clockTimeMillis;
     private SessionStats sessionStats;
 
     // Metadata
@@ -26,7 +25,7 @@ public class EventState {
     private String createdAt;
     private String leaderId;
 
-    public EventState() {
+    public SessionState() {
         this.createdAt = Instant.now().toString();
         this.version = 1;
         this.isCurrent = false;
@@ -48,28 +47,20 @@ public class EventState {
         this.rulebookHash = rulebookHash;
     }
 
-    public Map<String, Object> getPartialMatchingEvents() {
-        return partialMatchingEvents;
+    public Map<String, Object> getPartialEvents() {
+        return partialEvents;
     }
 
-    public void setPartialMatchingEvents(Map<String, Object> partialMatchingEvents) {
-        this.partialMatchingEvents = partialMatchingEvents;
+    public void setPartialEvents(Map<String, Object> partialEvents) {
+        this.partialEvents = partialEvents;
     }
 
-    public Map<String, Object> getTimeWindows() {
-        return timeWindows;
+    public long getClockTimeMillis() {
+        return clockTimeMillis;
     }
 
-    public void setTimeWindows(Map<String, Object> timeWindows) {
-        this.timeWindows = timeWindows;
-    }
-
-    public String getClockTime() {
-        return clockTime;
-    }
-
-    public void setClockTime(String clockTime) {
-        this.clockTime = clockTime;
+    public void setClockTimeMillis(long clockTimeMillis) {
+        this.clockTimeMillis = clockTimeMillis;
     }
 
     public SessionStats getSessionStats() {
