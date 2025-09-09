@@ -15,7 +15,7 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
-import org.drools.ansible.rulebook.integration.ha.model.EventState;
+import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.slf4j.Logger;
@@ -111,8 +111,13 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public EventState getEventState(String sessionId) {
-        String sql = "SELECT * FROM EventState WHERE session_id = ? AND is_current = true";
+    public String getHaUuid() {
+        return haUuid;
+    }
+
+    @Override
+    public SessionState getSessionState(String sessionId) {
+        String sql = "SELECT * FROM SessionState WHERE session_id = ? AND is_current = true";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -121,17 +126,17 @@ public class H2StateManager implements HAStateManager {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
-                EventState eventState = new EventState();
-                eventState.setSessionId(rs.getString("session_id"));
-                eventState.setRulebookHash(rs.getString("rulebook_hash"));
+                SessionState sessionState = new SessionState();
+                sessionState.setSessionId(rs.getString("session_id"));
+                sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
                 String sessionStatsJson = rs.getString("session_stats");
                 if (sessionStatsJson != null) {
                     SessionStats sessionStats = readValueAsSessionStats(sessionStatsJson);
-                    eventState.setSessionStats(sessionStats);
+                    sessionState.setSessionStats(sessionStats);
                 }
 
-                return eventState;
+                return sessionState;
             }
         } catch (SQLException e) {
             logger.error("Failed to get event state", e);
@@ -141,7 +146,7 @@ public class H2StateManager implements HAStateManager {
     }
 
     @Override
-    public void persistEventState(String sessionId, EventState eventState) {
+    public void persistSessionState(String sessionId, SessionState sessionState) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot persist event state - not leader");
         }
@@ -151,19 +156,19 @@ public class H2StateManager implements HAStateManager {
 
             // Insert new version
             String sql = """
-                    INSERT INTO EventState (session_id, rulebook_hash, session_stats, version, is_current, leader_id)
+                    INSERT INTO SessionState (session_id, rulebook_hash, session_stats, version, is_current, leader_id)
                     VALUES (?, ?, ?, 
-                        COALESCE((SELECT MAX(version) FROM EventState WHERE session_id = ?), 0) + 1,
+                        COALESCE((SELECT MAX(version) FROM SessionState WHERE session_id = ?), 0) + 1,
                         false, ?)
                     """;
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, sessionId);
-                ps.setString(2, eventState.getRulebookHash());
+                ps.setString(2, sessionState.getRulebookHash());
 
                 String sessionStatsJson = null;
-                if (eventState.getSessionStats() != null) {
-                    sessionStatsJson = toJson(eventState.getSessionStats());
+                if (sessionState.getSessionStats() != null) {
+                    sessionStatsJson = toJson(sessionState.getSessionStats());
                 }
                 ps.setString(3, sessionStatsJson);
                 ps.setString(4, sessionId);
@@ -256,12 +261,12 @@ public class H2StateManager implements HAStateManager {
             return;
         }
 
-        // TODO: Revisit this logic. We keep just 2 versions of EventState. `commit` is not a right name
+        // TODO: Revisit this logic. We keep just 2 versions of SessionState. `commit` is not a right name
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
             // Mark current version as not current
-            String sql1 = "UPDATE EventState SET is_current = false WHERE session_id = ? AND is_current = true";
+            String sql1 = "UPDATE SessionState SET is_current = false WHERE session_id = ? AND is_current = true";
             try (PreparedStatement ps1 = conn.prepareStatement(sql1)) {
                 ps1.setString(1, sessionId);
                 ps1.executeUpdate();
@@ -269,9 +274,9 @@ public class H2StateManager implements HAStateManager {
 
             // Mark latest version as current
             String sql2 = """
-                    UPDATE EventState 
+                    UPDATE SessionState 
                     SET is_current = true 
-                    WHERE session_id = ? AND version = (SELECT MAX(version) FROM EventState WHERE session_id = ?)
+                    WHERE session_id = ? AND version = (SELECT MAX(version) FROM SessionState WHERE session_id = ?)
                     """;
             try (PreparedStatement ps2 = conn.prepareStatement(sql2)) {
                 ps2.setString(1, sessionId);
@@ -292,8 +297,8 @@ public class H2StateManager implements HAStateManager {
             return;
         }
 
-        // TODO: Revisit this logic. We keep just 2 versions of EventState. `rollback` is not a right name
-        String sql = "DELETE FROM EventState WHERE session_id = ? AND is_current = false";
+        // TODO: Revisit this logic. We keep just 2 versions of SessionState. `rollback` is not a right name
+        String sql = "DELETE FROM SessionState WHERE session_id = ? AND is_current = false";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {

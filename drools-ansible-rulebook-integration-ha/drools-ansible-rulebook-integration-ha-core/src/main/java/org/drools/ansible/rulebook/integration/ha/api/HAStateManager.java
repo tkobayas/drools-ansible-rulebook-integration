@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
-import org.drools.ansible.rulebook.integration.ha.model.EventState;
+import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 
@@ -45,20 +45,27 @@ public interface HAStateManager {
     boolean isLeader();
 
     /**
-     * Get current event state for a session
+     * Get the UUID of this HA instance
      *
-     * @param sessionId The ruleset session ID
-     * @return The current event state or null if not found
+     * @return The HA instance UUID
      */
-    EventState getEventState(String sessionId);
+    String getHaUuid();
 
     /**
-     * Persist complete event state (includes matching events)
+     * Get current session state for a session
+     *
+     * @param sessionId The ruleset session ID
+     * @return The current session state or null if not found
+     */
+    SessionState getSessionState(String sessionId);
+
+    /**
+     * Persist complete session state (includes matching events)
      *
      * @param sessionId  The ruleset session ID
-     * @param eventState The event state to persist
+     * @param sessionState The session state to persist
      */
-    void persistEventState(String sessionId, EventState eventState);
+    void persistSessionState(String sessionId, SessionState sessionState);
 
     /**
      * Add a matching event to the database
