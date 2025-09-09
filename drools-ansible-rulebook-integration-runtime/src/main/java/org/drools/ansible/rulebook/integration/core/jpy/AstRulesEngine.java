@@ -21,7 +21,7 @@ import org.drools.ansible.rulebook.integration.api.io.Response;
 import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
-import org.drools.ansible.rulebook.integration.ha.model.EventState;
+import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.kie.api.runtime.rule.Match;
@@ -55,7 +55,23 @@ public class AstRulesEngine implements Closeable {
             }
         }
         RulesExecutor executor = rulesExecutorContainer.register( RulesExecutorFactory.createRulesExecutor(rulesSet) );
+
+        if (haMode && haStateManager != null && haStateManager.isLeader()) {
+            processHASessionState(executor);
+        }
+
         return executor.getId();
+    }
+
+    private void processHASessionState(RulesExecutor executor) {
+        // The first creation of SessionState
+        long sessionId = executor.getId();
+        SessionState sessionState = new SessionState();
+        sessionState.setSessionId(String.valueOf(sessionId));
+        sessionState.setPartialEvents(new HashMap<>());
+        sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
+        sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
+        haStateManager.persistSessionState(String.valueOf(sessionId), sessionState);
     }
 
     public String sessionStats(long sessionId) {
@@ -98,11 +114,13 @@ public class AstRulesEngine implements Closeable {
 
         // In HA mode, persist event state for statistics tracking
         try {
-            // TODO: Populate full EventState with partial matches, time windows, clock time, etc.
-            EventState eventState = new EventState();
-            eventState.setSessionId(String.valueOf(sessionId));
-            eventState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
-            haStateManager.persistEventState(String.valueOf(sessionId), eventState);
+            // TODO: Populate full SessionState with partial matches, time windows, clock time, etc.
+            SessionState sessionState = new SessionState();
+            sessionState.setSessionId(String.valueOf(sessionId));
+            sessionState.setPartialEvents(new HashMap<>()); // for now, no partial events
+            sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
+            sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
+            haStateManager.persistSessionState(String.valueOf(sessionId), sessionState);
         } catch (Exception e) {
             logger.warn("Failed to persist event state for HA statistics", e);
         }
