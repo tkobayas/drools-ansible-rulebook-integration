@@ -3,7 +3,6 @@ package org.drools.ansible.rulebook.integration.ha.api;
 import java.util.List;
 import java.util.Map;
 
-import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -105,7 +104,7 @@ public interface HAStateManager {
      * @param index        The action index
      * @param action       The action data as JSON string
      */
-    void addActionState(String sessionId, String matchingUuid, int index, String action);
+    void addActionInfo(String sessionId, String matchingUuid, int index, String action);
 
     /**
      * Update an existing action
@@ -115,7 +114,7 @@ public interface HAStateManager {
      * @param index        The action index
      * @param action       The updated action data as JSON string
      */
-    void updateActionState(String sessionId, String matchingUuid, int index, String action);
+    void updateActionInfo(String sessionId, String matchingUuid, int index, String action);
 
     /**
      * Check if an action exists
@@ -125,7 +124,7 @@ public interface HAStateManager {
      * @param index        The action index
      * @return true if action exists, false otherwise
      */
-    boolean actionStateExists(String sessionId, String matchingUuid, int index);
+    boolean actionInfoExists(String sessionId, String matchingUuid, int index);
 
     /**
      * Get an action by index
@@ -135,7 +134,7 @@ public interface HAStateManager {
      * @param index        The action index
      * @return The action data as JSON string, empty string if not found
      */
-    String getActionState(String sessionId, String matchingUuid, int index);
+    String getActionInfo(String sessionId, String matchingUuid, int index);
 
     /**
      * Delete all actions and matching events for a matching UUID
@@ -143,7 +142,7 @@ public interface HAStateManager {
      * @param sessionId    The ruleset session ID
      * @param matchingUuid The matching event UUID
      */
-    void deleteActionStates(String sessionId, String matchingUuid);
+    void deleteActionInfo(String sessionId, String matchingUuid);
 
     /**
      * Get current HA statistics
