@@ -5,13 +5,21 @@ package org.drools.ansible.rulebook.integration.ha.model;
  */
 public class MatchingEvent {
 
+    private String haUuid;  // HA instance that this MatchingEvent belongs to
     private String meUuid;
-    private String sessionId;
     private String ruleSetName;
     private String ruleName;
     private String eventData;  // JSON string representation of matching facts
 
     public MatchingEvent() {
+    }
+
+    public String getHaUuid() {
+        return haUuid;
+    }
+
+    public void setHaUuid(String haUuid) {
+        this.haUuid = haUuid;
     }
 
     public String getMeUuid() {
@@ -20,14 +28,6 @@ public class MatchingEvent {
 
     public void setMeUuid(String meUuid) {
         this.meUuid = meUuid;
-    }
-
-    public String getSessionId() {
-        return sessionId;
-    }
-
-    public void setSessionId(String sessionId) {
-        this.sessionId = sessionId;
     }
 
     public String getRuleSetName() {

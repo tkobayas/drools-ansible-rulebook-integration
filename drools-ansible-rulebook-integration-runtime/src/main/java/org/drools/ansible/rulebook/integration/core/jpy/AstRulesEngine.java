@@ -66,11 +66,11 @@ public class AstRulesEngine implements Closeable {
         // The first creation of SessionState
         long sessionId = executor.getId();
         SessionState sessionState = new SessionState();
-        sessionState.setSessionId(String.valueOf(sessionId));
+        sessionState.setHaUuid(haStateManager.getHaUuid());
         sessionState.setPartialEvents(new HashMap<>());
         sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
         sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
-        haStateManager.persistSessionState(String.valueOf(sessionId), sessionState);
+        haStateManager.persistSessionState(sessionState);
     }
 
     public String sessionStats(long sessionId) {
@@ -114,12 +114,12 @@ public class AstRulesEngine implements Closeable {
         // In HA mode, persist event state for statistics tracking
         try {
             // TODO: Populate full SessionState with partial matches, time windows, clock time, etc.
+            // getSessionState() ??
             SessionState sessionState = new SessionState();
-            sessionState.setSessionId(String.valueOf(sessionId));
             sessionState.setPartialEvents(new HashMap<>()); // for now, no partial events
             sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
             sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
-            haStateManager.persistSessionState(String.valueOf(sessionId), sessionState);
+            haStateManager.persistSessionState(sessionState);
         } catch (Exception e) {
             logger.warn("Failed to persist event state for HA statistics", e);
         }
@@ -136,7 +136,7 @@ public class AstRulesEngine implements Closeable {
 
                     // Create MatchingEvent object
                     MatchingEvent me = new MatchingEvent();
-                    me.setSessionId(String.valueOf(sessionId));
+                    me.setHaUuid(haStateManager.getHaUuid());
                     me.setRuleSetName(rulesetName);
                     me.setRuleName(ruleName);
                     me.setEventData(toJson(eventData));
@@ -268,7 +268,7 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        haStateManager.addActionInfo(String.valueOf(sessionId), matchingUuid, index, action);
+        haStateManager.addActionInfo(matchingUuid, index, action);
         logger.debug("Added action at index {} for ME UUID: {}", index, matchingUuid);
     }
     
@@ -281,7 +281,7 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        haStateManager.updateActionInfo(String.valueOf(sessionId), matchingUuid, index, action);
+        haStateManager.updateActionInfo(matchingUuid, index, action);
         logger.debug("Updated action at index {} for ME UUID: {}", index, matchingUuid);
     }
     
@@ -294,7 +294,7 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        return haStateManager.actionInfoExists(String.valueOf(sessionId), matchingUuid, index);
+        return haStateManager.actionInfoExists(matchingUuid, index);
     }
     
     /**
@@ -306,7 +306,7 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        return haStateManager.getActionInfo(String.valueOf(sessionId), matchingUuid, index);
+        return haStateManager.getActionInfo(matchingUuid, index);
     }
     
     /**
@@ -318,7 +318,7 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        haStateManager.deleteActionInfo(String.valueOf(sessionId), matchingUuid);
+        haStateManager.deleteActionInfo(matchingUuid);
         logger.debug("Deleted all actions for ME UUID: {}", matchingUuid);
     }
     
@@ -354,7 +354,7 @@ public class AstRulesEngine implements Closeable {
         }
         
         for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
-            List<MatchingEvent> pendingEvents = haStateManager.getPendingMatchingEvents(executor.getRuleSetName());
+            List<MatchingEvent> pendingEvents = haStateManager.getPendingMatchingEvents();
             
             if (!pendingEvents.isEmpty()) {
                 logger.info("Found {} pending matching events for session {} : {}",
