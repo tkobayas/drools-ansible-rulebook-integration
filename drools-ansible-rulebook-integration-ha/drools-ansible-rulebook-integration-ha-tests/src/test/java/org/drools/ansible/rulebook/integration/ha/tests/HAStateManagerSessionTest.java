@@ -48,12 +48,32 @@ class HAStateManagerSessionTest {
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(HA_UUID);
         sessionState.setRulebookHash("abc123");
-        sessionState.setSessionStats(dummySessionStats());
+        sessionState.setLeaderId(LEADER_ID);
+        Map<String, Object> partialEvents = Map.of("event1", Map.of("data", "value1"));
+        sessionState.setPartialEvents(partialEvents);
+        sessionState.setClockTimeMillis(1625079600000L);
+        SessionStats stats = dummySessionStats();
+        sessionState.setSessionStats(stats);
+        sessionState.setVersion(1);
+        sessionState.setCurrent(true);
+        sessionState.setCreatedAt("2024-06-01T10:00:00Z");
 
         stateManager.persistSessionState(sessionState);
 
-        // Session state persistence doesn't return anything but should not throw
-        assertThat(true).isTrue(); // If we got here, persistence worked
+        // Retrieve the persisted session state
+        SessionState retrievedState = stateManager.getSessionState();
+
+        // Verify the retrieved state matches what was persisted
+        assertThat(retrievedState).isNotNull();
+        assertThat(retrievedState.getHaUuid()).isEqualTo(HA_UUID);
+        assertThat(retrievedState.getRulebookHash()).isEqualTo("abc123");
+        assertThat(retrievedState.getLeaderId()).isEqualTo(LEADER_ID);
+        assertThat(retrievedState.getPartialEvents()).isEqualTo(partialEvents);
+        assertThat(retrievedState.getClockTimeMillis()).isEqualTo(1625079600000L);
+        assertThat(retrievedState.getSessionStats()).usingRecursiveComparison().isEqualTo(stats);
+        assertThat(retrievedState.getVersion()).isEqualTo(1);
+        assertThat(retrievedState.isCurrent()).isTrue();
+        assertThat(retrievedState.getCreatedAt()).isEqualTo("2024-06-01T10:00:00Z");
     }
 
     // Revisit this test. Scenario is:
