@@ -130,10 +130,35 @@ public class H2StateManager implements HAStateManager {
                 sessionState.setHaUuid(rs.getString("ha_uuid"));
                 sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
+                // Handle partial events
+                String partialEventsJson = rs.getString("partial_matching_events");
+                if (partialEventsJson != null) {
+                    Map<String, Object> partialEvents = org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject(partialEventsJson);
+                    sessionState.setPartialEvents(partialEvents);
+                }
+
+                // Handle clock time
+                Timestamp clockTime = rs.getTimestamp("clock_time");
+                if (clockTime != null) {
+                    sessionState.setClockTimeMillis(clockTime.getTime());
+                }
+
+                // Handle session stats
                 String sessionStatsJson = rs.getString("session_stats");
                 if (sessionStatsJson != null) {
                     SessionStats sessionStats = readValueAsSessionStats(sessionStatsJson);
                     sessionState.setSessionStats(sessionStats);
+                }
+
+                // Handle metadata
+                sessionState.setVersion(rs.getInt("version"));
+                sessionState.setCurrent(rs.getBoolean("is_current"));
+                sessionState.setLeaderId(rs.getString("leader_id"));
+
+                // Handle created_at
+                Timestamp createdAt = rs.getTimestamp("created_at");
+                if (createdAt != null) {
+                    sessionState.setCreatedAt(createdAt.toInstant().toString());
                 }
 
                 return sessionState;
@@ -154,37 +179,60 @@ public class H2StateManager implements HAStateManager {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
-            // Insert new version
+            // Mark all existing versions as not current
+            String updateSql = "UPDATE SessionState SET is_current = false WHERE ha_uuid = ?";
+            try (PreparedStatement ps = conn.prepareStatement(updateSql)) {
+                ps.setString(1, sessionState.getHaUuid());
+                ps.executeUpdate();
+            }
+
+            // Insert new version as current
             String sql = """
-                    INSERT INTO SessionState (ha_uuid, rulebook_hash, session_stats, version, is_current, leader_id)
-                    VALUES (?, ?, ?, 
+                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, clock_time, session_stats, version, is_current, created_at, leader_id)
+                    VALUES (?, ?, ?, ?, ?, 
                         COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ?), 0) + 1,
-                        false, ?)
+                        true, ?, ?)
                     """;
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, haUuid);
+                ps.setString(1, sessionState.getHaUuid());
                 ps.setString(2, sessionState.getRulebookHash());
 
+                // Handle partial events
+                String partialEventsJson = null;
+                if (sessionState.getPartialEvents() != null) {
+                    partialEventsJson = toJson(sessionState.getPartialEvents());
+                }
+                ps.setString(3, partialEventsJson);
+
+                // Handle clock time
+                if (sessionState.getClockTimeMillis() > 0) {
+                    ps.setTimestamp(4, new Timestamp(sessionState.getClockTimeMillis()));
+                } else {
+                    ps.setTimestamp(4, null);
+                }
+
+                // Handle session stats
                 String sessionStatsJson = null;
                 if (sessionState.getSessionStats() != null) {
                     sessionStatsJson = toJson(sessionState.getSessionStats());
                 }
-                ps.setString(3, sessionStatsJson);
-                ps.setString(4, haUuid);
-                ps.setString(5, leaderId);
+                ps.setString(5, sessionStatsJson);
+                ps.setString(6, sessionState.getHaUuid());
+
+                // Handle created_at
+                if (sessionState.getCreatedAt() != null) {
+                    ps.setTimestamp(7, Timestamp.from(Instant.parse(sessionState.getCreatedAt())));
+                } else {
+                    ps.setTimestamp(7, Timestamp.from(Instant.now()));
+                }
+
+                ps.setString(8, sessionState.getLeaderId());
 
                 ps.executeUpdate();
             }
 
             conn.commit();
-
-            // TODO: events_processed should be incremented when assertEvent is called, not here
-            // Update HA stats
-            if (haStats != null) {
-                haStats.incrementEventsProcessed();
-                persistHAStats();
-            }
 
             logger.debug("Persisted event state for haUuid: {}", haUuid);
         } catch (SQLException e) {

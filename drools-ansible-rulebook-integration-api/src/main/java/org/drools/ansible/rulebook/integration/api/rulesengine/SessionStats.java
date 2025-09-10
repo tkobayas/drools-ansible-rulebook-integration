@@ -1,6 +1,9 @@
 package org.drools.ansible.rulebook.integration.api.rulesengine;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.kie.api.prototype.PrototypeFactInstance;
 
 import java.time.Instant;
@@ -8,6 +11,7 @@ import java.util.Collection;
 import java.util.stream.Stream;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonIgnoreProperties(ignoreUnknown = true) // ignore usedMemory, maxAvailableMemory on deserialization, they are calculated on the fly
 public class SessionStats {
     private final String start;
     private final String end;
@@ -68,9 +72,18 @@ public class SessionStats {
         this.peakMemory = stats.getPeakMemory();
     }
 
-    public SessionStats(String start, String end, String lastClockTime, int clockAdvanceCount, int numberOfRules, int numberOfDisabledRules, int rulesTriggered, int eventsProcessed,
-                        int eventsMatched, int eventsSuppressed, int permanentStorageCount, int permanentStorageSize, int asyncResponses, int bytesSentOnAsync,
-                        long sessionId, String ruleSetName, String lastRuleFired, String lastRuleFiredAt, String lastEventReceivedAt, long baseLevelMemory, long peakMemory) {
+    // required for JSON deserialization in HA
+    @JsonCreator
+    public SessionStats(@JsonProperty("start") String start, @JsonProperty("end") String end, @JsonProperty("lastClockTime") String lastClockTime, 
+                        @JsonProperty("clockAdvanceCount") int clockAdvanceCount, @JsonProperty("numberOfRules") int numberOfRules, 
+                        @JsonProperty("numberOfDisabledRules") int numberOfDisabledRules, @JsonProperty("rulesTriggered") int rulesTriggered, 
+                        @JsonProperty("eventsProcessed") int eventsProcessed, @JsonProperty("eventsMatched") int eventsMatched, 
+                        @JsonProperty("eventsSuppressed") int eventsSuppressed, @JsonProperty("permanentStorageCount") int permanentStorageCount, 
+                        @JsonProperty("permanentStorageSize") int permanentStorageSize, @JsonProperty("asyncResponses") int asyncResponses, 
+                        @JsonProperty("bytesSentOnAsync") int bytesSentOnAsync, @JsonProperty("sessionId") long sessionId, 
+                        @JsonProperty("ruleSetName") String ruleSetName, @JsonProperty("lastRuleFired") String lastRuleFired, 
+                        @JsonProperty("lastRuleFiredAt") String lastRuleFiredAt, @JsonProperty("lastEventReceivedAt") String lastEventReceivedAt, 
+                        @JsonProperty("baseLevelMemory") long baseLevelMemory, @JsonProperty("peakMemory") long peakMemory) {
         this.start = start;
         this.end = end;
         this.lastClockTime = lastClockTime;
