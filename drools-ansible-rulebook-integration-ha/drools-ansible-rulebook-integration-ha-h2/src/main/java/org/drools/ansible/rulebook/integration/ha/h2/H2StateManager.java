@@ -484,7 +484,8 @@ public class H2StateManager implements HAStateManager {
         }
     }
 
-    private void persistHAStats() {
+    @Override
+    public void persistHAStats() {
         if (haStats == null) {
             return;
         }

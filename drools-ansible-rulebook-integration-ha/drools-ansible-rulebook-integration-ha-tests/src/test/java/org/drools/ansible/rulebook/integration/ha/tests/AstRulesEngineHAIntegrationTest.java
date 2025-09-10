@@ -79,12 +79,12 @@ class AstRulesEngineHAIntegrationTest {
                 """;
 
         rulesEngine1 = new AstRulesEngine();
-        sessionId1 = rulesEngine1.createRuleset(ruleset);
         rulesEngine1.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
+        sessionId1 = rulesEngine1.createRuleset(ruleset);
 
         rulesEngine2 = new AstRulesEngine();
-        sessionId2 = rulesEngine2.createRuleset(ruleset);
         rulesEngine2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
+        sessionId2 = rulesEngine2.createRuleset(ruleset);
     }
 
     @AfterEach
@@ -275,7 +275,7 @@ class AstRulesEngineHAIntegrationTest {
         assertThat(meUuid).isNotNull();
 
         // Simulate engine-1 failure
-        rulesEngine1.disableLeader("leader-1");
+        rulesEngine1.disableLeader("engine-1");
 
         try {
             int port = rulesEngine2.port(); // port for async channel
@@ -332,7 +332,7 @@ class AstRulesEngineHAIntegrationTest {
         rulesEngine1.addActionInfo(sessionId1, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
 
         stats = rulesEngine1.getHAStats();
-//        assertThat(stats.get("events_processed_in_term")).isEqualTo(1); // TODO: implement event count increment on assertEvent
+        assertThat(stats.get("events_processed_in_term")).isEqualTo(1); // TODO: implement event count increment on assertEvent
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(1);
     }
 }
