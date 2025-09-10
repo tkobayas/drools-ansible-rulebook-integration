@@ -100,7 +100,7 @@ class HAStateManagerTest {
 
         // Check updated stats
         stats = stateManager.getHAStats();
-//        assertThat(stats.getEventsProcessedInTerm()).isEqualTo(1); // TODO: events_processed should be incremented when assertEvent is called, not by persistSessionState
+        assertThat(stats.getEventsProcessedInTerm()).isEqualTo(0); // Events processed not incremented in this test
         assertThat(stats.getActionsProcessedInTerm()).isEqualTo(1);
     }
 }
