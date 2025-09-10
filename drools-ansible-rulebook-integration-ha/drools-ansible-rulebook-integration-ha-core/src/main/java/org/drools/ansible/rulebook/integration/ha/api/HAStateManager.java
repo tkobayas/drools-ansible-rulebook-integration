@@ -130,6 +130,11 @@ public interface HAStateManager {
     HAStats getHAStats();
 
     /**
+     * Persist current HA statistics
+     */
+    void persistHAStats();
+
+    /**
      * Cleanup resources and close connections
      */
     void shutdown();

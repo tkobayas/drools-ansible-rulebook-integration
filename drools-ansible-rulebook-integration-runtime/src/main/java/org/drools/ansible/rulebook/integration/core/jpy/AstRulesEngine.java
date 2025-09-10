@@ -1,6 +1,7 @@
 package org.drools.ansible.rulebook.integration.core.jpy;
 
 import java.io.Closeable;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,22 +56,12 @@ public class AstRulesEngine implements Closeable {
         }
         RulesExecutor executor = rulesExecutorContainer.register( RulesExecutorFactory.createRulesExecutor(rulesSet) );
 
-        if (haMode && haStateManager != null && haStateManager.isLeader()) {
-            processHASessionState(executor);
+        if (haMode && haStateManager != null) {
+            // regardless of leader or not, try to restore session state if exists
+            restoreOrCreateSessionState(executor);
         }
 
         return executor.getId();
-    }
-
-    private void processHASessionState(RulesExecutor executor) {
-        // The first creation of SessionState
-        long sessionId = executor.getId();
-        SessionState sessionState = new SessionState();
-        sessionState.setHaUuid(haStateManager.getHaUuid());
-        sessionState.setPartialEvents(new HashMap<>());
-        sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
-        sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
-        haStateManager.persistSessionState(sessionState);
     }
 
     public String sessionStats(long sessionId) {
@@ -114,12 +105,15 @@ public class AstRulesEngine implements Closeable {
         // In HA mode, persist event state for statistics tracking
         try {
             // TODO: Populate full SessionState with partial matches, time windows, clock time, etc.
-            // getSessionState() ??
-            SessionState sessionState = new SessionState();
+            SessionState sessionState = haStateManager.getSessionState();
             sessionState.setPartialEvents(new HashMap<>()); // for now, no partial events
             sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
             sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
             haStateManager.persistSessionState(sessionState);
+
+            HAStats haStats = haStateManager.getHAStats();
+            haStats.incrementEventsProcessed(); // TODO: increment by number of events if batch processing
+            haStateManager.persistHAStats();
         } catch (Exception e) {
             logger.warn("Failed to persist event state for HA statistics", e);
         }
@@ -241,9 +235,47 @@ public class AstRulesEngine implements Closeable {
         
         logger.info("Enabling leader mode for: {}", leaderName);
         haStateManager.enableLeader(leaderName);
-        
+
+        restoreOrCreateSessionState();
+
         // Recover pending actions when becoming leader
         recoverPendingMatchingEvents();
+    }
+
+    private void restoreOrCreateSessionState() {
+        // TODO: Do we support multiple sessions in HA mode?
+
+        Collection<RulesExecutor> executors = rulesExecutorContainer.getAllExecutors();
+        if (executors.isEmpty()) {
+            // No-op if no sessions exist yet
+            return;
+        }
+        // Assume single session for now
+        RulesExecutor executor = executors.iterator().next();
+
+        restoreOrCreateSessionState(executor);
+    }
+
+    private void restoreOrCreateSessionState(RulesExecutor executor) {
+        // TODO: verify if the SessionState is the latest
+        SessionState retrievedSessionState = haStateManager.getSessionState();
+        if (retrievedSessionState == null) {
+            if (haStateManager.isLeader()) {
+                // The first creation of SessionState
+                long sessionId = executor.getId();
+                SessionState sessionState = new SessionState();
+                sessionState.setHaUuid(haStateManager.getHaUuid());
+                sessionState.setPartialEvents(new HashMap<>());
+                sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
+                sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
+                haStateManager.persistSessionState(sessionState);
+            }
+        } else {
+            // TODO: Restore session state from database
+            // recreate ksession by inserting partial events
+            // update SessionStatsCollector using retrievedSessionState.getSessionStats()
+            // update clock time? using retrievedSessionState.getClockTimeMillis(). But it's automatically managed by AutomaticPseudoClock
+        }
     }
     
     /**
