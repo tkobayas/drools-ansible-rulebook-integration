@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 class AstRulesEngineHAIntegrationTest {
 
-    private static final String HA_UUID = "failover-ha-1";
+    private static final String HA_UUID = "integration-ha-1";
 
     private AstRulesEngine rulesEngine1; // node 1
     private AstRulesEngine rulesEngine2; // node 2
@@ -42,11 +42,8 @@ class AstRulesEngineHAIntegrationTest {
     private long sessionId1; // node1
     private long sessionId2; // node2
 
-    @BeforeEach
-    void setUp() {
-
-        // Create a ruleset using the correct AST format
-        String ruleset = """
+    // Create a ruleset using the correct AST format
+    private final String RULE_SET = """
                 {
                     "name": "Test Ruleset",
                     "sources": {"EventSource": "test"},
@@ -78,13 +75,15 @@ class AstRulesEngineHAIntegrationTest {
                 }
                 """;
 
+    @BeforeEach
+    void setUp() {
         rulesEngine1 = new AstRulesEngine();
         rulesEngine1.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
-        sessionId1 = rulesEngine1.createRuleset(ruleset);
+        sessionId1 = rulesEngine1.createRuleset(RULE_SET);
 
         rulesEngine2 = new AstRulesEngine();
         rulesEngine2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
-        sessionId2 = rulesEngine2.createRuleset(ruleset);
+        sessionId2 = rulesEngine2.createRuleset(RULE_SET);
     }
 
     @AfterEach
@@ -259,7 +258,7 @@ class AstRulesEngineHAIntegrationTest {
     }
 
     @Test
-    public void testHAWithFailoverRecovery() throws IOException {
+    void testHAWithFailoverRecovery() throws IOException {
         rulesEngine1.enableLeader("engine-1");
 
         // Process an event
@@ -307,7 +306,7 @@ class AstRulesEngineHAIntegrationTest {
     }
 
     @Test
-    public void testGetHAStats() {
+    void testGetHAStats() {
         // Check initial stats
         Map<String, Object> stats = rulesEngine1.getHAStats();
         assertThat(stats).isNotNull();
@@ -334,5 +333,43 @@ class AstRulesEngineHAIntegrationTest {
         stats = rulesEngine1.getHAStats();
         assertThat(stats.get("events_processed_in_term")).isEqualTo(1); // TODO: implement event count increment on assertEvent
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(1);
+    }
+
+    @Test
+    void testSingleRestart() {
+        rulesEngine1.enableLeader("engine-1");
+
+        // Process an event
+        String event = """
+                {
+                    "temperature": 45,
+                    "critical": true
+                }
+                """;
+        String result = rulesEngine1.assertEvent(sessionId1, event);
+        assertThat(result).contains("temperature_alert");
+
+        String sessionStatsJson = rulesEngine1.sessionStats(sessionId1);
+        Map<String, Object> sessionStatsMap = readValueAsMapOfStringAndObject(result);
+        // TODO: confirm how SessionStats changes after restart
+
+        // Simulate engine-1 crash
+        rulesEngine1 = null;
+
+        // Simulate restarting engine-1 on the same node. The old instance is gone, so we create a new one
+        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
+        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        long sessionId1Restart = rulesEngine1Restart.createRuleset(RULE_SET);
+        rulesEngine1Restart.enableLeader("engine-1");
+
+        // Process another event
+        String event2 = """
+                {
+                    "temperature": 50,
+                    "critical": true
+                }
+                """;
+        String result2 = rulesEngine1Restart.assertEvent(sessionId1Restart, event2);
+        assertThat(result2).contains("temperature_alert");
     }
 }
