@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
@@ -18,6 +21,7 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
+import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -133,14 +137,20 @@ public class H2StateManager implements HAStateManager {
                 // Handle partial events
                 String partialEventsJson = rs.getString("partial_matching_events");
                 if (partialEventsJson != null) {
-                    Map<String, Object> partialEvents = org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject(partialEventsJson);
-                    sessionState.setPartialEvents(partialEvents);
+                    try {
+                        ObjectMapper objectMapper = new ObjectMapper();
+                        List<EventRecord> partialEvents = objectMapper.readValue(partialEventsJson, 
+                            new TypeReference<List<EventRecord>>() {});
+                        sessionState.setPartialEvents(partialEvents);
+                    } catch (Exception e) {
+                        logger.error("Failed to deserialize partial events", e);
+                    }
                 }
 
-                // Handle clock time
-                Timestamp clockTime = rs.getTimestamp("clock_time");
-                if (clockTime != null) {
-                    sessionState.setClockTimeMillis(clockTime.getTime());
+                // Handle persisted time
+                Timestamp persistedTime = rs.getTimestamp("persisted_time");
+                if (persistedTime != null) {
+                    sessionState.setPersistedTime(persistedTime.getTime());
                 }
 
                 // Handle session stats
@@ -155,10 +165,10 @@ public class H2StateManager implements HAStateManager {
                 sessionState.setCurrent(rs.getBoolean("is_current"));
                 sessionState.setLeaderId(rs.getString("leader_id"));
 
-                // Handle created_at
-                Timestamp createdAt = rs.getTimestamp("created_at");
-                if (createdAt != null) {
-                    sessionState.setCreatedAt(createdAt.toInstant().toString());
+                // Handle created_time
+                Timestamp createdTime = rs.getTimestamp("created_time");
+                if (createdTime != null) {
+                    sessionState.setCreatedTime(createdTime.getTime());
                 }
 
                 return sessionState;
@@ -188,7 +198,7 @@ public class H2StateManager implements HAStateManager {
 
             // Insert new version as current
             String sql = """
-                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, clock_time, session_stats, version, is_current, created_at, leader_id)
+                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, persisted_time, session_stats, version, is_current, created_time, leader_id)
                     VALUES (?, ?, ?, ?, ?, 
                         COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ?), 0) + 1,
                         true, ?, ?)
@@ -205,9 +215,9 @@ public class H2StateManager implements HAStateManager {
                 }
                 ps.setString(3, partialEventsJson);
 
-                // Handle clock time
-                if (sessionState.getClockTimeMillis() > 0) {
-                    ps.setTimestamp(4, new Timestamp(sessionState.getClockTimeMillis()));
+                // Handle persisted time
+                if (sessionState.getPersistedTime() > 0) {
+                    ps.setTimestamp(4, new Timestamp(sessionState.getPersistedTime()));
                 } else {
                     ps.setTimestamp(4, null);
                 }
@@ -220,11 +230,11 @@ public class H2StateManager implements HAStateManager {
                 ps.setString(5, sessionStatsJson);
                 ps.setString(6, sessionState.getHaUuid());
 
-                // Handle created_at
-                if (sessionState.getCreatedAt() != null) {
-                    ps.setTimestamp(7, Timestamp.from(Instant.parse(sessionState.getCreatedAt())));
+                // Handle created_time
+                if (sessionState.getCreatedTime() > 0) {
+                    ps.setTimestamp(7, new Timestamp(sessionState.getCreatedTime()));
                 } else {
-                    ps.setTimestamp(7, Timestamp.from(Instant.now()));
+                    ps.setTimestamp(7, new Timestamp(System.currentTimeMillis()));
                 }
 
                 ps.setString(8, sessionState.getLeaderId());

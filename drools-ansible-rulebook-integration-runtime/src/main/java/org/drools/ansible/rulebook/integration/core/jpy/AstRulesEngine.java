@@ -106,8 +106,8 @@ public class AstRulesEngine implements Closeable {
         try {
             // TODO: Populate full SessionState with partial matches, time windows, clock time, etc.
             SessionState sessionState = haStateManager.getSessionState();
-            sessionState.setPartialEvents(new HashMap<>()); // for now, no partial events
-            sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
+            sessionState.setPartialEvents(List.of()); // for now, no partial events
+            sessionState.setPersistedTime(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
             sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
             haStateManager.persistSessionState(sessionState);
 
@@ -265,8 +265,8 @@ public class AstRulesEngine implements Closeable {
                 long sessionId = executor.getId();
                 SessionState sessionState = new SessionState();
                 sessionState.setHaUuid(haStateManager.getHaUuid());
-                sessionState.setPartialEvents(new HashMap<>());
-                sessionState.setClockTimeMillis(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
+                sessionState.setPartialEvents(List.of());
+                sessionState.setPersistedTime(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
                 sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
                 haStateManager.persistSessionState(sessionState);
             }
