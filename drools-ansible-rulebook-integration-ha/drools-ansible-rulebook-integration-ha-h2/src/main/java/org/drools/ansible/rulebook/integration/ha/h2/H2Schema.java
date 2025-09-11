@@ -28,11 +28,11 @@ public class H2Schema {
                         rulebook_hash VARCHAR(64),
                         partial_matching_events CLOB,
                         time_windows CLOB,
-                        clock_time TIMESTAMP,
+                        persisted_time TIMESTAMP,
                         session_stats CLOB,
                         version INT DEFAULT 1,
                         is_current BOOLEAN DEFAULT FALSE,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         leader_id VARCHAR(255),
                         UNIQUE(ha_uuid, version)
                     )

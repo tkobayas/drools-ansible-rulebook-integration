@@ -1,7 +1,7 @@
 package org.drools.ansible.rulebook.integration.ha.model;
 
 import java.time.Instant;
-import java.util.Map;
+import java.util.List;
 
 import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 
@@ -14,19 +14,19 @@ public class SessionState {
     private String haUuid;
     private String rulebookHash;
 
-    // Regular event processing state
-    private Map<String, Object> partialEvents;
-    private long clockTimeMillis;
+    private List<EventRecord> partialEvents;
     private SessionStats sessionStats;
+
+    private long createdTime;
+    private long persistedTime;
 
     // Metadata
     private int version;
     private boolean isCurrent;
-    private String createdAt;
     private String leaderId;
 
     public SessionState() {
-        this.createdAt = Instant.now().toString();
+        this.createdTime = Instant.now().toEpochMilli();
         this.version = 1;
         this.isCurrent = false;
     }
@@ -47,20 +47,20 @@ public class SessionState {
         this.rulebookHash = rulebookHash;
     }
 
-    public Map<String, Object> getPartialEvents() {
+    public List<EventRecord> getPartialEvents() {
         return partialEvents;
     }
 
-    public void setPartialEvents(Map<String, Object> partialEvents) {
+    public void setPartialEvents(List<EventRecord> partialEvents) {
         this.partialEvents = partialEvents;
     }
 
-    public long getClockTimeMillis() {
-        return clockTimeMillis;
+    public long getPersistedTime() {
+        return persistedTime;
     }
 
-    public void setClockTimeMillis(long clockTimeMillis) {
-        this.clockTimeMillis = clockTimeMillis;
+    public void setPersistedTime(long persistedTime) {
+        this.persistedTime = persistedTime;
     }
 
     public SessionStats getSessionStats() {
@@ -87,12 +87,12 @@ public class SessionState {
         isCurrent = current;
     }
 
-    public String getCreatedAt() {
-        return createdAt;
+    public long getCreatedTime() {
+        return createdTime;
     }
 
-    public void setCreatedAt(String createdAt) {
-        this.createdAt = createdAt;
+    public void setCreatedTime(long createdTime) {
+        this.createdTime = createdTime;
     }
 
     public String getLeaderId() {
