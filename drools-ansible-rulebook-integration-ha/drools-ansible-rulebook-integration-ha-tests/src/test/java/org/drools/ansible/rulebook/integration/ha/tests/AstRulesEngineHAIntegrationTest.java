@@ -121,6 +121,10 @@ class AstRulesEngineHAIntegrationTest {
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
 
+        System.out.println("======");
+        System.out.println("Result: " + result);
+        System.out.println("======");
+
         // Parse result to verify ME UUID is included
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
         assertThat(matchList).hasSize(1);
@@ -350,7 +354,7 @@ class AstRulesEngineHAIntegrationTest {
         assertThat(result).contains("temperature_alert");
 
         String sessionStatsJson = rulesEngine1.sessionStats(sessionId1);
-        Map<String, Object> sessionStatsMap = readValueAsMapOfStringAndObject(result);
+        Map<String, Object> sessionStatsMap = readValueAsMapOfStringAndObject(sessionStatsJson);
         // TODO: confirm how SessionStats changes after restart
 
         // Simulate engine-1 crash
