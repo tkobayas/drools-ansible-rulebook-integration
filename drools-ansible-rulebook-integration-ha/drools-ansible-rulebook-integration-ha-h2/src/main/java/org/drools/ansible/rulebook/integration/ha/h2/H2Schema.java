@@ -29,7 +29,6 @@ public class H2Schema {
                         partial_matching_events CLOB,
                         time_windows CLOB,
                         persisted_time TIMESTAMP,
-                        session_stats CLOB,
                         version INT DEFAULT 1,
                         is_current BOOLEAN DEFAULT FALSE,
                         created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
