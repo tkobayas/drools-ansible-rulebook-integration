@@ -353,10 +353,6 @@ class AstRulesEngineHAIntegrationTest {
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).contains("temperature_alert");
 
-        String sessionStatsJson = rulesEngine1.sessionStats(sessionId1);
-        Map<String, Object> sessionStatsMap = readValueAsMapOfStringAndObject(sessionStatsJson);
-        // TODO: confirm how SessionStats changes after restart
-
         // Simulate engine-1 crash
         rulesEngine1 = null;
 

@@ -16,7 +16,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
@@ -25,7 +24,6 @@ import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsSessionStats;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 
 /**
@@ -153,13 +151,6 @@ public class H2StateManager implements HAStateManager {
                     sessionState.setPersistedTime(persistedTime.getTime());
                 }
 
-                // Handle session stats
-                String sessionStatsJson = rs.getString("session_stats");
-                if (sessionStatsJson != null) {
-                    SessionStats sessionStats = readValueAsSessionStats(sessionStatsJson);
-                    sessionState.setSessionStats(sessionStats);
-                }
-
                 // Handle metadata
                 sessionState.setVersion(rs.getInt("version"));
                 sessionState.setCurrent(rs.getBoolean("is_current"));
@@ -198,8 +189,8 @@ public class H2StateManager implements HAStateManager {
 
             // Insert new version as current
             String sql = """
-                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, persisted_time, session_stats, version, is_current, created_time, leader_id)
-                    VALUES (?, ?, ?, ?, ?, 
+                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, persisted_time, version, is_current, created_time, leader_id)
+                    VALUES (?, ?, ?, ?, 
                         COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ?), 0) + 1,
                         true, ?, ?)
                     """;
@@ -222,22 +213,16 @@ public class H2StateManager implements HAStateManager {
                     ps.setTimestamp(4, null);
                 }
 
-                // Handle session stats
-                String sessionStatsJson = null;
-                if (sessionState.getSessionStats() != null) {
-                    sessionStatsJson = toJson(sessionState.getSessionStats());
-                }
-                ps.setString(5, sessionStatsJson);
-                ps.setString(6, sessionState.getHaUuid());
+                ps.setString(5, sessionState.getHaUuid());
 
                 // Handle created_time
                 if (sessionState.getCreatedTime() > 0) {
-                    ps.setTimestamp(7, new Timestamp(sessionState.getCreatedTime()));
+                    ps.setTimestamp(6, new Timestamp(sessionState.getCreatedTime()));
                 } else {
-                    ps.setTimestamp(7, new Timestamp(System.currentTimeMillis()));
+                    ps.setTimestamp(6, new Timestamp(System.currentTimeMillis()));
                 }
 
-                ps.setString(8, sessionState.getLeaderId());
+                ps.setString(7, sessionState.getLeaderId());
 
                 ps.executeUpdate();
             }

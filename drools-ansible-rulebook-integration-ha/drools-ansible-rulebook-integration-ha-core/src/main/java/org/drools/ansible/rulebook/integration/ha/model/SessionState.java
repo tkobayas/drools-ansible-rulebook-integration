@@ -3,8 +3,6 @@ package org.drools.ansible.rulebook.integration.ha.model;
 import java.time.Instant;
 import java.util.List;
 
-import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
-
 /**
  * Represents the state of events in the HA system.
  * Contains both regular event processing state and in-flight matching events.
@@ -15,7 +13,6 @@ public class SessionState {
     private String rulebookHash;
 
     private List<EventRecord> partialEvents;
-    private SessionStats sessionStats;
 
     private long createdTime;
     private long persistedTime;
@@ -61,14 +58,6 @@ public class SessionState {
 
     public void setPersistedTime(long persistedTime) {
         this.persistedTime = persistedTime;
-    }
-
-    public SessionStats getSessionStats() {
-        return sessionStats;
-    }
-
-    public void setSessionStats(SessionStats sessionStats) {
-        this.sessionStats = sessionStats;
     }
 
     public int getVersion() {
