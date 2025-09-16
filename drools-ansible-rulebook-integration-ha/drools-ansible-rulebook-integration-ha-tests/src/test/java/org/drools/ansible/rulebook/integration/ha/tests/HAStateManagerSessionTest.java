@@ -6,7 +6,6 @@ import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
 import org.drools.ansible.rulebook.integration.api.RuleNotation;
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.RulesExecutorFactory;
-import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
@@ -45,45 +44,6 @@ class HAStateManagerSessionTest {
         dropTables();
     }
 
-    @Test
-    void testSessionStatePersistence() {
-        stateManager.enableLeader(LEADER_ID);
-
-        // Create and persist session state
-        SessionState sessionState = new SessionState();
-        sessionState.setHaUuid(HA_UUID);
-        sessionState.setRulebookHash("abc123");
-        sessionState.setLeaderId(LEADER_ID);
-        List<EventRecord> partialEvents = List.of(
-            new EventRecord("{\"event1\": {\"data\": \"value1\"}}", System.currentTimeMillis())
-        );
-        sessionState.setPartialEvents(partialEvents);
-        sessionState.setPersistedTime(1625079600000L);
-        SessionStats stats = dummySessionStats();
-        sessionState.setSessionStats(stats);
-        sessionState.setVersion(1);
-        sessionState.setCurrent(true);
-        sessionState.setCreatedTime(1717232400000L); // 2024-06-01T10:00:00Z
-
-        stateManager.persistSessionState(sessionState);
-
-        // Retrieve the persisted session state
-        SessionState retrievedState = stateManager.getSessionState();
-
-        // Verify the retrieved state matches what was persisted
-        assertThat(retrievedState).isNotNull();
-        assertThat(retrievedState.getHaUuid()).isEqualTo(HA_UUID);
-        assertThat(retrievedState.getRulebookHash()).isEqualTo("abc123");
-        assertThat(retrievedState.getLeaderId()).isEqualTo(LEADER_ID);
-        assertThat(retrievedState.getPartialEvents()).hasSize(1);
-        assertThat(retrievedState.getPartialEvents().get(0).getEventJson()).isEqualToIgnoringWhitespace("{\"event1\": {\"data\": \"value1\"}}");
-        assertThat(retrievedState.getPersistedTime()).isEqualTo(1625079600000L);
-        assertThat(retrievedState.getSessionStats()).usingRecursiveComparison().isEqualTo(stats);
-        assertThat(retrievedState.getVersion()).isEqualTo(1);
-        assertThat(retrievedState.isCurrent()).isTrue();
-        assertThat(retrievedState.getCreatedTime()).isEqualTo(1717232400000L);
-    }
-
     // Revisit this test. Scenario is:
     // 1. Node1 writes initial state (version 1)
     // 2. Node1 writes new state (version 2), but assume it crashes before commit
@@ -93,32 +53,6 @@ class HAStateManagerSessionTest {
     @Test
     void testTwoVersionState() {
         // TBD
-    }
-
-    private static SessionStats dummySessionStats() {
-        return new SessionStats(
-                "2024-06-01T10:00:00Z", // start
-                "2024-06-01T12:00:00Z", // end
-                "2024-06-01T12:00:00Z", // lastClockTime
-                5,                      // clockAdvanceCount
-                10,                     // numberOfRules
-                2,                      // numberOfDisabledRules
-                7,                      // rulesTriggered
-                100,                    // eventsProcessed
-                80,                     // eventsMatched
-                20,                     // eventsSuppressed
-                15,                     // permanentStorageCount
-                2048,                   // permanentStorageSize
-                3,                      // asyncResponses
-                1024,                   // bytesSentOnAsync
-                123456L,                // sessionId
-                "MyRuleSet",            // ruleSetName
-                "RuleA",                // lastRuleFired
-                "2024-06-01T11:59:00Z", // lastRuleFiredAt
-                "2024-06-01T11:58:00Z", // lastEventReceivedAt
-                500000L,                // baseLevelMemory
-                800000L                 // peakMemory
-        );
     }
 
     public static final String ALL_CONDITION_RULE =
@@ -181,8 +115,6 @@ class HAStateManagerSessionTest {
         sessionState.setLeaderId(LEADER_ID);
         sessionState.setPartialEvents(partialEvents);
         sessionState.setPersistedTime(1625079600000L);
-        SessionStats stats = dummySessionStats();
-        sessionState.setSessionStats(stats);
         sessionState.setVersion(1);
         sessionState.setCurrent(true);
         sessionState.setCreatedTime(1717232400000L); // 2024-06-01T10:00:00Z

@@ -108,7 +108,6 @@ public class AstRulesEngine implements Closeable {
             SessionState sessionState = haStateManager.getSessionState();
             sessionState.setPartialEvents(List.of()); // for now, no partial events
             sessionState.setPersistedTime(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
-            sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
             haStateManager.persistSessionState(sessionState);
 
             HAStats haStats = haStateManager.getHAStats();
@@ -267,7 +266,6 @@ public class AstRulesEngine implements Closeable {
                 sessionState.setHaUuid(haStateManager.getHaUuid());
                 sessionState.setPartialEvents(List.of());
                 sessionState.setPersistedTime(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
-                sessionState.setSessionStats(rulesExecutorContainer.get(sessionId).getSessionStats());
                 haStateManager.persistSessionState(sessionState);
             }
         } else {
