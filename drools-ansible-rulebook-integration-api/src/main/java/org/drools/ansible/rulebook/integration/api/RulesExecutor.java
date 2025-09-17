@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.api.rulesengine.MemoryMonitorUtil;
 import org.drools.ansible.rulebook.integration.api.rulesengine.RulesEvaluator;
 import org.drools.ansible.rulebook.integration.api.rulesengine.RulesExecutorSession;
@@ -103,10 +104,19 @@ public class RulesExecutor {
     }
 
     public CompletableFuture<List<Match>> advanceTime(long amount, TimeUnit unit ) {
+        log.debug("Advancing time by {} {}", amount, unit);
         return rulesEvaluator.advanceTime(amount, unit );
     }
 
     public KieSession asKieSession() {
         return rulesEvaluator.asKieSession();
+    }
+
+    public RulesSet getRulesSet() {
+        return rulesEvaluator.getRulesSet();
+    }
+
+    public void setOnRecovery(boolean onRecovery) {
+        rulesEvaluator.setOnRecovery(onRecovery);
     }
 }

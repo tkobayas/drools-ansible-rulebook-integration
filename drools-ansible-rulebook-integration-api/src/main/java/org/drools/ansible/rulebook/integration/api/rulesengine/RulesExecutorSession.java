@@ -185,4 +185,8 @@ public class RulesExecutorSession {
     public RulesSetEventStructure getRulesSetEventStructure() {
         return rulesSetEventStructure;
     }
+
+    public RulesSet getRulesSet() {
+        return rulesSet;
+    }
 }

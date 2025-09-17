@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.drools.ansible.rulebook.integration.ha.api.AbstractHAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
@@ -29,7 +30,7 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 /**
  * H2 implementation of HAStateManager with simplified domain model
  */
-public class H2StateManager implements HAStateManager {
+public class H2StateManager extends AbstractHAStateManager {
 
     private static final Logger logger = LoggerFactory.getLogger(H2StateManager.class);
 

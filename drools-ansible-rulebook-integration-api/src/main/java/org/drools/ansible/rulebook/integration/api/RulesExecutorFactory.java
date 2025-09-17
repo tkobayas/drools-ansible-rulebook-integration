@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import static org.drools.ansible.rulebook.integration.api.RuleConfigurationOption.*;
 
@@ -59,6 +60,17 @@ public class RulesExecutorFactory {
         } else {
             LOG.info("No automatic advance of internal pseudo-clock since option {} was detected", FULLY_MANUAL_PSEUDOCLOCK);
         }
+        return rulesExecutor;
+    }
+
+    public static RulesExecutor createRulesExecutorWithRecovery(RulesSet rulesSet, Consumer<RulesExecutor> recovery) {
+        LOG.info("Creating RulesExecutor in recovery mode");
+        RulesExecutor rulesExecutor = new RulesExecutor(createRulesExecutorSession(rulesSet), rulesSet.hasOption(ASYNC_EVALUATION));
+        rulesExecutor.setOnRecovery(true);
+        LOG.info("No automatic advance of internal pseudo-clock because session recovery is in-progress");
+        recovery.accept(rulesExecutor);
+        rulesExecutor.setOnRecovery(false);
+        LOG.info("Session recovery completed");
         return rulesExecutor;
     }
 

@@ -271,7 +271,6 @@ public class AstRulesEngine implements Closeable {
         } else {
             // TODO: Restore session state from database
             // recreate ksession by inserting partial events
-            // update SessionStatsCollector using retrievedSessionState.getSessionStats()
             // update clock time? using retrievedSessionState.getClockTimeMillis(). But it's automatically managed by AutomaticPseudoClock
         }
     }

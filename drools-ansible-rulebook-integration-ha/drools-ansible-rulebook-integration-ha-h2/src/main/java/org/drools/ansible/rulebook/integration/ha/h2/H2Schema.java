@@ -37,7 +37,6 @@ public class H2Schema {
                     )
                     """;
             stmt.execute(createSessionStateTable);
-            logger.debug("Created/verified SessionState table");
 
             // Create MatchingEvent table (renamed and restructured)
             String createMatchingEventTable = """
@@ -50,7 +49,6 @@ public class H2Schema {
                     )
                     """;
             stmt.execute(createMatchingEventTable);
-            logger.debug("Created/verified MatchingEvent table");
 
             // Create ActionInfo table (renamed and restructured - single action per record)
             String createActionInfoTable = """
@@ -64,7 +62,6 @@ public class H2Schema {
                     )
                     """;
             stmt.execute(createActionInfoTable);
-            logger.debug("Created/verified ActionInfo table");
 
             String createMatchingEventIndex = """
                     CREATE INDEX IF NOT EXISTS idx_matching_event_ha_uuid 
@@ -93,7 +90,6 @@ public class H2Schema {
                     )
                     """;
             stmt.execute(createHAStatsTable);
-            logger.debug("Created/verified HAStats table");
 
             conn.commit();
             logger.info("H2 schema creation completed successfully");
