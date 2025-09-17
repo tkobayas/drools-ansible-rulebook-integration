@@ -1,6 +1,7 @@
 package org.drools.ansible.rulebook.integration.api.rulesengine;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutorContainer;
+import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.kie.api.runtime.KieSession;
 import org.kie.api.runtime.rule.Match;
 
@@ -50,4 +51,8 @@ public interface RulesEvaluator {
     KieSession asKieSession();
 
     void stashFirstEventJsonForValidation(String json);
+
+    void setOnRecovery(boolean onRecovery);
+
+    RulesSet getRulesSet();
 }

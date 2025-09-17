@@ -99,14 +99,20 @@ class HAStateManagerSessionTest {
         stateManager.enableLeader(LEADER_ID);
 
         RulesExecutor rulesExecutor1 = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK), ALL_CONDITION_RULE);
+        long createdTime = rulesExecutor1.asKieSession().getSessionClock().getCurrentTime();
+
+        rulesExecutor1.advanceTime(10, java.util.concurrent.TimeUnit.SECONDS);
 
         String eventJson = "{\"i\":1}";
-        long insertedAt = System.currentTimeMillis();
+        long insertedAt = createdTime + 10 * 1000; // 10 seconds later
 
-        List<EventRecord> partialEvents = List.of(new EventRecord(eventJson, insertedAt));
+        EventRecord event1 = new EventRecord(eventJson, insertedAt);
+        List<EventRecord> partialEvents = List.of(event1);
 
         List<Match> matchList = rulesExecutor1.processEvents(eventJson).join(); // partial match
         assertThat(matchList).isEmpty();
+
+        long persistedTime = insertedAt;
 
         // Create and persist session state
         SessionState sessionState = new SessionState();
@@ -114,10 +120,10 @@ class HAStateManagerSessionTest {
         sessionState.setRulebookHash("abc123");
         sessionState.setLeaderId(LEADER_ID);
         sessionState.setPartialEvents(partialEvents);
-        sessionState.setPersistedTime(1625079600000L);
+        sessionState.setPersistedTime(persistedTime);
         sessionState.setVersion(1);
         sessionState.setCurrent(true);
-        sessionState.setCreatedTime(1717232400000L); // 2024-06-01T10:00:00Z
+        sessionState.setCreatedTime(createdTime);
 
         stateManager.persistSessionState(sessionState);
 
@@ -125,13 +131,22 @@ class HAStateManagerSessionTest {
 
         // Simulate that a node crashes
         rulesExecutor1 = null;
+        stateManager = null;
 
-        // On recovery, create a new RulesExecutor instance
-        RulesExecutor rulesExecutor2 = RulesExecutorFactory.createFromJson(ALL_CONDITION_RULE);
+        // Recovery----
+        // This test simulates that the restarted node recovers the session
+        // Note that in a fail-over scenario, the RulesExecutor in a different node has already processed some events and has AutomaticPseudoClock running
+        HAStateManager stateManager2 = HAStateManagerFactory.create();
+        stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        RulesExecutor rulesExecutor2 = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK), ALL_CONDITION_RULE);
 
-        // Retrieve the persisted session state
-        SessionState retrievedState = stateManager.getSessionState();
+        RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(rulesExecutor2);
 
-//        stateManager.restoreSession();
+        rulesExecutorRecovered.advanceTime(10, java.util.concurrent.TimeUnit.SECONDS);
+
+        String eventJson2 = "{\"j\":2}";
+
+        matchList = rulesExecutorRecovered.processEvents(eventJson2).join();
+        assertThat(matchList).hasSize(1);
     }
 }
