@@ -3,6 +3,7 @@ package org.drools.ansible.rulebook.integration.ha.api;
 import java.util.List;
 import java.util.Map;
 
+import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -63,6 +64,14 @@ public interface HAStateManager {
      * @param sessionState The session state to persist
      */
     void persistSessionState(SessionState sessionState);
+
+    /**
+     * Recover drools session using session state from the database
+     * This should be called on startup to restore state
+     *
+     * @return
+     */
+    RulesExecutor recoverSession(RulesExecutor rulesExecutor);
 
     /**
      * Add a matching event to the database

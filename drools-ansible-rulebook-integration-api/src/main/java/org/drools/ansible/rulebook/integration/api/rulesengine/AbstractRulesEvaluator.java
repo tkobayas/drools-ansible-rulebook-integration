@@ -2,6 +2,7 @@ package org.drools.ansible.rulebook.integration.api.rulesengine;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutorContainer;
 import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
+import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.api.io.Response;
 import org.drools.ansible.rulebook.integration.api.io.RuleExecutorChannel;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiConsumer;
@@ -41,6 +43,8 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
     protected RuleExecutorChannel channel;
 
     protected AsyncExecutor asyncExecutor;
+
+    private volatile boolean onRecovery = false;
 
     public AbstractRulesEvaluator(RulesExecutorSession rulesExecutorSession) {
         this.rulesExecutorSession = rulesExecutorSession;
@@ -218,12 +222,14 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
     }
 
     protected List<Match> writeResponseOnChannel(List<Match> matches) {
-        if (!matches.isEmpty()) { // skip empty result
+        if (!onRecovery && !matches.isEmpty()) { // skip empty result
             byte[] bytes = channel.write(new Response(getSessionId(), RuleMatch.asList(matches)));
             rulesExecutorSession.registerAsyncResponse(bytes);
         }
         return matches;
     }
+
+
 
     private final Lock ruleEvaluationLock = new ReentrantLock();
 
@@ -274,5 +280,15 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
     @Override
     public void stashFirstEventJsonForValidation(String json) {
         rulesExecutorSession.getRulesSetEventStructure().stashFirstEventJsonForValidation(json);
+    }
+
+    @Override
+    public void setOnRecovery(boolean onRecovery) {
+        this.onRecovery = onRecovery;
+    }
+
+    @Override
+    public RulesSet getRulesSet() {
+        return rulesExecutorSession.getRulesSet();
     }
 }
