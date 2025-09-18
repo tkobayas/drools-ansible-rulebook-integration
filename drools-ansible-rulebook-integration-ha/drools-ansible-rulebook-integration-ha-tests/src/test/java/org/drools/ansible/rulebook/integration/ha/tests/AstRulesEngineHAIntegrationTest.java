@@ -1,49 +1,28 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
-import java.io.DataInputStream;
-import java.io.IOException;
-import java.net.Socket;
-import java.nio.charset.StandardCharsets;
-import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
-import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
-import org.drools.ansible.rulebook.integration.ha.h2.H2Schema;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality
  */
-class AstRulesEngineHAIntegrationTest {
+class AstRulesEngineHAIntegrationTest extends AstRulesEngineHAIntegrationTestBase {
 
-    private static final String HA_UUID = "integration-ha-1";
-
-    private AstRulesEngine rulesEngine1; // node 1
-    private AstRulesEngine rulesEngine2; // node 2
-
-    private long sessionId1; // node1
-    private long sessionId2; // node2
-
-    // Create a ruleset using the correct AST format
-    private final String RULE_SET = """
+    // Basic rule
+    private static final String RULE_SET_BASIC = """
                 {
                     "name": "Test Ruleset",
                     "sources": {"EventSource": "test"},
@@ -75,34 +54,8 @@ class AstRulesEngineHAIntegrationTest {
                 }
                 """;
 
-    @BeforeEach
-    void setUp() {
-        rulesEngine1 = new AstRulesEngine();
-        rulesEngine1.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
-        sessionId1 = rulesEngine1.createRuleset(RULE_SET);
-
-        rulesEngine2 = new AstRulesEngine();
-        rulesEngine2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
-        sessionId2 = rulesEngine2.createRuleset(RULE_SET);
-    }
-
-    @AfterEach
-    void tearDown() {
-        if (rulesEngine1 != null) {
-            rulesEngine1.dispose(sessionId1);
-        }
-        if (rulesEngine2 != null) {
-            rulesEngine2.dispose(sessionId2);
-        }
-
-        dropTables();
-    }
-
-    // Helper method to create HAStateManager with shared database
-    private HAStateManager createSharedHAStateManager() {
-        HAStateManager manager = HAStateManagerFactory.create();
-        manager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        return manager;
+    protected String getRuleSet() {
+        return RULE_SET_BASIC;
     }
 
     @Test
@@ -220,6 +173,8 @@ class AstRulesEngineHAIntegrationTest {
         assertThat(rulesEngine1.actionInfoExists(sessionId1, meUuid, 0)).isFalse();
     }
 
+
+
     @Test
     void testLeaderTransition() {
         // Set as leader
@@ -262,7 +217,7 @@ class AstRulesEngineHAIntegrationTest {
     }
 
     @Test
-    void testHAWithFailoverRecovery() throws IOException {
+    void testHAWithFailoverRecovery() {
         rulesEngine1.enableLeader("engine-1");
 
         // Process an event
@@ -280,33 +235,25 @@ class AstRulesEngineHAIntegrationTest {
         // Simulate engine-1 failure
         rulesEngine1.disableLeader("engine-1");
 
-        try {
-            int port = rulesEngine2.port(); // port for async channel
+        // enableLeader triggers sending pending matches to async channel
+        rulesEngine2.enableLeader("engine-2");
 
-            try (Socket socket = new Socket("localhost", port)) {
-                DataInputStream bufferedInputStream = new DataInputStream(socket.getInputStream());
+        await().atMost(5, TimeUnit.SECONDS)
+                .until(() -> consumer2.getReceivedMessages().size() >= 1);
 
-                // enableLeader triggers sending pending matches to async channel
-                rulesEngine2.enableLeader("engine-2");
+        String asyncResult = consumer2.getReceivedMessages().get(0);
 
-                int l = bufferedInputStream.readInt();
-                byte[] bytes = bufferedInputStream.readNBytes(l);
-                String asyncResult = new String(bytes, StandardCharsets.UTF_8);
-                Map<String, Object> asyncResultMap = readValueAsMapOfStringAndObject(asyncResult);
+        Map<String, Object> asyncResultMap = readValueAsMapOfStringAndObject(asyncResult);
 
-                assertThat(asyncResultMap).isNotNull();
-                assertThat(asyncResultMap).containsKey("session_id");
-                Map<String, Object> matchingEvent = (Map<String, Object>) asyncResultMap.get("result");
-                assertThat(matchingEvent).containsEntry("me_uuid", meUuid);
-                assertThat(matchingEvent).containsEntry("ruleset_name", "Test Ruleset");
-                assertThat(matchingEvent).containsEntry("rule_name", "temperature_alert");
-                Map<String, Map> eventData = (Map<String, Map>) matchingEvent.get("event_data");
-                assertThat(eventData.get("m")).containsEntry("critical", true);
-                assertThat(eventData.get("m")).containsEntry("temperature", 45);
-            }
-        } finally {
-            rulesEngine2.dispose(sessionId2);
-        }
+        assertThat(asyncResultMap).isNotNull();
+        assertThat(asyncResultMap).containsKey("session_id");
+        Map<String, Object> matchingEvent = (Map<String, Object>) asyncResultMap.get("result");
+        assertThat(matchingEvent).containsEntry("me_uuid", meUuid);
+        assertThat(matchingEvent).containsEntry("ruleset_name", "Test Ruleset");
+        assertThat(matchingEvent).containsEntry("rule_name", "temperature_alert");
+        Map<String, Map> eventData = (Map<String, Map>) matchingEvent.get("event_data");
+        assertThat(eventData.get("m")).containsEntry("critical", true);
+        assertThat(eventData.get("m")).containsEntry("temperature", 45);
     }
 
     @Test
@@ -355,11 +302,15 @@ class AstRulesEngineHAIntegrationTest {
 
         // Simulate engine-1 crash
         rulesEngine1 = null;
+        consumer1.stop();
 
         // Simulate restarting engine-1 on the same node. The old instance is gone, so we create a new one
         AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
         rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        long sessionId1Restart = rulesEngine1Restart.createRuleset(RULE_SET);
+        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
+        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
+        consumer1restart.startConsuming(rulesEngine1Restart.port());
+
         rulesEngine1Restart.enableLeader("engine-1");
 
         // Process another event
@@ -371,5 +322,7 @@ class AstRulesEngineHAIntegrationTest {
                 """;
         String result2 = rulesEngine1Restart.assertEvent(sessionId1Restart, event2);
         assertThat(result2).contains("temperature_alert");
+
+        consumer1restart.stop();
     }
 }

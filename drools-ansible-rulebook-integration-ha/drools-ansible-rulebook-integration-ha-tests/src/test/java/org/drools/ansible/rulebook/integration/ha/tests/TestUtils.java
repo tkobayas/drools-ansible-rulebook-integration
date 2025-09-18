@@ -3,6 +3,7 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -48,5 +49,11 @@ public class TestUtils {
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    // Add meta/uuid to event body
+    public static String createEvent(String eventBody) {
+        String eventUuid = UUID.randomUUID().toString();
+        return eventBody.replaceFirst("\\{", "{\"meta\": {\"uuid\": \"" + eventUuid + "\"}, ");
     }
 }

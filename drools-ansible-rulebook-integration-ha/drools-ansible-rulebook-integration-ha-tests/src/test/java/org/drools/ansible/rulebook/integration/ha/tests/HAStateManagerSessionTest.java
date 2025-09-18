@@ -3,9 +3,12 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 import java.util.List;
 
 import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
+import org.drools.ansible.rulebook.integration.api.RuleFormat;
 import org.drools.ansible.rulebook.integration.api.RuleNotation;
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.RulesExecutorFactory;
+import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
+import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutor;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
@@ -98,6 +101,7 @@ class HAStateManagerSessionTest {
     void testSessionRecoveryWithPartialMatch() {
         stateManager.enableLeader(LEADER_ID);
 
+        // This test works without HARulesExecutor
         RulesExecutor rulesExecutor1 = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK), ALL_CONDITION_RULE);
         long createdTime = rulesExecutor1.asKieSession().getSessionClock().getCurrentTime();
 
@@ -106,7 +110,7 @@ class HAStateManagerSessionTest {
         String eventJson = "{\"i\":1}";
         long insertedAt = createdTime + 10 * 1000; // 10 seconds later
 
-        EventRecord event1 = new EventRecord(eventJson, insertedAt);
+        EventRecord event1 = new EventRecord("1", eventJson, insertedAt);
         List<EventRecord> partialEvents = List.of(event1);
 
         List<Match> matchList = rulesExecutor1.processEvents(eventJson).join(); // partial match
@@ -134,13 +138,13 @@ class HAStateManagerSessionTest {
         stateManager = null;
 
         // Recovery----
-        // This test simulates that the restarted node recovers the session
-        // Note that in a fail-over scenario, the RulesExecutor in a different node has already processed some events and has AutomaticPseudoClock running
+        // This test simulates that the restarted node recovers the session, assuming that the leader is taken over by another node
         HAStateManager stateManager2 = HAStateManagerFactory.create();
         stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        RulesExecutor rulesExecutor2 = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK), ALL_CONDITION_RULE);
+        RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK).toRulesSet(RuleFormat.JSON, ALL_CONDITION_RULE);
 
-        RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(rulesExecutor2);
+        SessionState retrievedSessionState = stateManager2.getSessionState();
+        RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(rulesSet, retrievedSessionState);
 
         rulesExecutorRecovered.advanceTime(10, java.util.concurrent.TimeUnit.SECONDS);
 
