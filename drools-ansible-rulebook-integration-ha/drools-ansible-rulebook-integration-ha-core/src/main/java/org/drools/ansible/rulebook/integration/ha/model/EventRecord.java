@@ -2,6 +2,8 @@ package org.drools.ansible.rulebook.integration.ha.model;
 
 public class EventRecord {
 
+    private String eventUuid; // TODO: consider if we exclude this field for persistece for performance
+
     private String eventJson;
 
     private long insertedAt;
@@ -11,24 +13,21 @@ public class EventRecord {
     public EventRecord() {
     }
 
-    public EventRecord(String eventJson, long insertedAt) {
+    public EventRecord(String eventUuid, String eventJson, long insertedAt) {
+        this.eventUuid = eventUuid;
         this.eventJson = eventJson;
         this.insertedAt = insertedAt;
+    }
+
+    public String getEventUuid() {
+        return eventUuid;
     }
 
     public String getEventJson() {
         return eventJson;
     }
 
-    public void setEventJson(String eventJson) {
-        this.eventJson = eventJson;
-    }
-
     public long getInsertedAt() {
         return insertedAt;
-    }
-
-    public void setInsertedAt(long insertedAt) {
-        this.insertedAt = insertedAt;
     }
 }

@@ -1,8 +1,10 @@
 package org.drools.ansible.rulebook.integration.core.jpy;
 
 import java.io.Closeable;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -19,8 +21,11 @@ import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
 import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.api.io.Response;
 import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
+import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutor;
+import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutorFactory;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
+import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -30,6 +35,8 @@ import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
+import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil.asFactMap;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
 
 public class AstRulesEngine implements Closeable {
 
@@ -54,12 +61,18 @@ public class AstRulesEngine implements Closeable {
                 rulesExecutorContainer.allowAsync();
             }
         }
-        RulesExecutor executor = rulesExecutorContainer.register( RulesExecutorFactory.createRulesExecutor(rulesSet) );
+
+        RulesExecutor executor;
 
         if (haMode && haStateManager != null) {
             // regardless of leader or not, try to restore session state if exists
-            restoreOrCreateSessionState(executor);
+            executor = createHARulesExecutorWithSessionState(rulesSet);
+        } else {
+            // normal non-HA mode
+            executor = RulesExecutorFactory.createRulesExecutor(rulesSet);
         }
+
+        rulesExecutorContainer.register( executor );
 
         return executor.getId();
     }
@@ -91,13 +104,13 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processEvents(serializedFact).join();
 
         if (haMode && haStateManager != null && haStateManager.isLeader()) {
-            return processHA(sessionId, matches);
+            return processEventHA(sessionId, matches);
         } else {
             return matchesToJson(matches);
         }
     }
 
-    private String processHA(long sessionId, List<Match> matches) {
+    private String processEventHA(long sessionId, List<Match> matches) {
         // matches is the internal representation of drools matches
         // matchList is the simplified JSON-serializable structure
         List<Map<String, Map>> matchList = RuleMatch.asList(matches);
@@ -105,9 +118,13 @@ public class AstRulesEngine implements Closeable {
         // In HA mode, persist event state for statistics tracking
         try {
             // TODO: Populate full SessionState with partial matches, time windows, clock time, etc.
+            HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
+
             SessionState sessionState = haStateManager.getSessionState();
-            sessionState.setPartialEvents(List.of()); // for now, no partial events
-            sessionState.setPersistedTime(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
+
+            LinkedHashMap<String, EventRecord> eventUuidsInMemory = rulesExecutor.getHaSessionContext().getEventUuidsInMemory();
+            sessionState.setPartialEvents(new ArrayList<>(eventUuidsInMemory.values()));
+            sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
             haStateManager.persistSessionState(sessionState);
 
             HAStats haStats = haStateManager.getHAStats();
@@ -215,6 +232,9 @@ public class AstRulesEngine implements Closeable {
             this.haStateManager = HAStateManagerFactory.create();
             this.haStateManager.initializeHA(uuid, postgresParams, config);
             this.haMode = true;
+
+            // HA mode always requires async channel
+            rulesExecutorContainer.allowAsync();
             
             logger.info("HA mode initialized successfully");
         } catch (Exception e) {
@@ -235,13 +255,13 @@ public class AstRulesEngine implements Closeable {
         logger.info("Enabling leader mode for: {}", leaderName);
         haStateManager.enableLeader(leaderName);
 
-        restoreOrCreateSessionState();
+        restoreAllSessions();
 
         // Recover pending actions when becoming leader
         recoverPendingMatchingEvents();
     }
 
-    private void restoreOrCreateSessionState() {
+    private void restoreAllSessions() {
         // TODO: Do we support multiple sessions in HA mode?
 
         Collection<RulesExecutor> executors = rulesExecutorContainer.getAllExecutors();
@@ -252,29 +272,69 @@ public class AstRulesEngine implements Closeable {
         // Assume single session for now
         RulesExecutor executor = executors.iterator().next();
 
-        restoreOrCreateSessionState(executor);
+        if (!(executor instanceof HARulesExecutor)) {
+            throw new IllegalStateException("Expected HARulesExecutor in HA mode");
+        }
+
+        restoreOrCreateSessionStateAsLeader(executor);
     }
 
-    private void restoreOrCreateSessionState(RulesExecutor executor) {
+    private void restoreOrCreateSessionStateAsLeader(RulesExecutor executor) {
+        if (!haStateManager.isLeader()) {
+            throw new IllegalStateException("This method should only be called by the leader");
+        }
+
         // TODO: verify if the SessionState is the latest
         SessionState retrievedSessionState = haStateManager.getSessionState();
         if (retrievedSessionState == null) {
+            // The first creation of SessionState
+            // TODO: Confirm the spec that the current session is clean (nothing processed yet) at the moment
+            SessionState sessionState = new SessionState();
+            sessionState.setHaUuid(haStateManager.getHaUuid());
+            sessionState.setPartialEvents(List.of());
+            long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
+            sessionState.setCreatedTime(currentTime);
+            sessionState.setPersistedTime(currentTime);
+            haStateManager.persistSessionState(sessionState);
+        } else {
+            // TODO: At the moment, we assume that the new leader's session is the same as the retrieved session state, so no need to restore
+            return;
+
+//            // restore session using SessionState
+//            // TODO: compare SessionState with the current session. If the same, no need to restore. Typically, this is more likely the case
+//            RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(executor.getRulesSet(), retrievedSessionState);
+//            // replace the existing executor with the recovered one
+//            rulesExecutorContainer.dispose(executor.getId());
+//            rulesExecutorContainer.register(recoveredRulesExecutor);
+//            // TODO: notify the new sessionId to Python side?
+        }
+    }
+
+    private RulesExecutor createHARulesExecutorWithSessionState(RulesSet rulesSet) {
+
+        // TODO: verify if the SessionState is the latest
+        SessionState retrievedSessionState = haStateManager.getSessionState();
+        if (retrievedSessionState == null) {
+            // No existing SessionState , create a new RulesExecutor
+            RulesExecutor executor = rulesExecutorContainer.register(HARulesExecutorFactory.createRulesExecutor(rulesSet));
+
             if (haStateManager.isLeader()) {
                 // The first creation of SessionState
-                long sessionId = executor.getId();
                 SessionState sessionState = new SessionState();
                 sessionState.setHaUuid(haStateManager.getHaUuid());
                 sessionState.setPartialEvents(List.of());
-                sessionState.setPersistedTime(rulesExecutorContainer.get(sessionId).asKieSession().getSessionClock().getCurrentTime());
+                long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
+                sessionState.setCreatedTime(currentTime);
+                sessionState.setPersistedTime(currentTime);
                 haStateManager.persistSessionState(sessionState);
             }
+            return executor;
         } else {
-            // TODO: Restore session state from database
-            // recreate ksession by inserting partial events
-            // update clock time? using retrievedSessionState.getClockTimeMillis(). But it's automatically managed by AutomaticPseudoClock
+            // restore session using SessionState
+            return haStateManager.recoverSession(rulesSet, retrievedSessionState);
         }
     }
-    
+
     /**
      * Disable leader mode and stop writing to database
      * Called by Python: self._api.disableLeader(leader_name)
@@ -376,12 +436,7 @@ public class AstRulesEngine implements Closeable {
      */
     private void recoverPendingMatchingEvents() {
         logger.info("Checking for pending matching events to recover");
-        
-        // Ensure async channel is available for recovery
-        if (rulesExecutorContainer.getChannel() == null) {
-            rulesExecutorContainer.allowAsync();
-        }
-        
+
         for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
             List<MatchingEvent> pendingEvents = haStateManager.getPendingMatchingEvents();
             

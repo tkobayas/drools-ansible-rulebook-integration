@@ -26,7 +26,7 @@ import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelU
 
 public class RulesExecutorSession {
 
-    private final RulesSet rulesSet;
+    protected final RulesSet rulesSet;
 
     private final KieSession kieSession;
 
@@ -74,7 +74,7 @@ public class RulesExecutorSession {
         return sessionStatsCollector;
     }
 
-    InternalFactHandle insert(Map<String, Object> factMap, boolean event) {
+    protected InternalFactHandle insert(Map<String, Object> factMap, boolean event) {
         PrototypeFactInstance fact = mapToFact(factMap, event);
         if (event) {
             ((PrototypeEventInstance) fact).withExpiration(rulesSet.getEventsTtl().getAmount(), rulesSet.getEventsTtl().getTimeUnit());
@@ -86,7 +86,7 @@ public class RulesExecutorSession {
         return fh;
     }
 
-    void delete(FactHandle fh) {
+    protected void delete(FactHandle fh) {
         kieSession.delete(fh);
     }
 
@@ -184,9 +184,5 @@ public class RulesExecutorSession {
 
     public RulesSetEventStructure getRulesSetEventStructure() {
         return rulesSetEventStructure;
-    }
-
-    public RulesSet getRulesSet() {
-        return rulesSet;
     }
 }

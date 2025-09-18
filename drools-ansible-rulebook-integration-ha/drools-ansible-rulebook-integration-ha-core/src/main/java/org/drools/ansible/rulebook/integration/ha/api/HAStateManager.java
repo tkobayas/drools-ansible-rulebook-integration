@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
+import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -71,7 +72,7 @@ public interface HAStateManager {
      *
      * @return
      */
-    RulesExecutor recoverSession(RulesExecutor rulesExecutor);
+    RulesExecutor recoverSession(RulesSet rulesSet, SessionState sessionState);
 
     /**
      * Add a matching event to the database
@@ -147,4 +148,6 @@ public interface HAStateManager {
      * Cleanup resources and close connections
      */
     void shutdown();
+
+    void registerEventUuid(String ruleSetName, String eventUuid);
 }
