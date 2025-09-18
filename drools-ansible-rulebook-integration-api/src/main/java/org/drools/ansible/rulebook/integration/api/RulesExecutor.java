@@ -7,7 +7,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.api.rulesengine.MemoryMonitorUtil;
 import org.drools.ansible.rulebook.integration.api.rulesengine.RulesEvaluator;
 import org.drools.ansible.rulebook.integration.api.rulesengine.RulesExecutorSession;
@@ -25,13 +24,17 @@ public class RulesExecutor {
 
     protected static final Logger log = LoggerFactory.getLogger(RulesExecutor.class);
 
-    private final RulesEvaluator rulesEvaluator;
+    protected final RulesEvaluator rulesEvaluator;
 
     RulesExecutor(RulesExecutorSession rulesExecutorSession, boolean async) {
         this.rulesEvaluator = RulesEvaluator.createRulesEvaluator(rulesExecutorSession, async);
     }
 
-    void startAutomaticPseudoClock(long period, TimeUnit unit) {
+    protected RulesExecutor(RulesEvaluator rulesEvaluator) {
+        this.rulesEvaluator = rulesEvaluator;
+    }
+
+    public void startAutomaticPseudoClock(long period, TimeUnit unit) {
         this.rulesEvaluator.startAutomaticPseudoClock(period, unit);
     }
 
@@ -110,13 +113,5 @@ public class RulesExecutor {
 
     public KieSession asKieSession() {
         return rulesEvaluator.asKieSession();
-    }
-
-    public RulesSet getRulesSet() {
-        return rulesEvaluator.getRulesSet();
-    }
-
-    public void setOnRecovery(boolean onRecovery) {
-        rulesEvaluator.setOnRecovery(onRecovery);
     }
 }

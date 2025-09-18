@@ -26,7 +26,7 @@ public class HAStateManagerFactory {
                     "org.drools.ansible.rulebook.integration.ha.h2.H2StateManager"
             );
             HAStateManager manager = (HAStateManager) h2Class.getDeclaredConstructor().newInstance();
-            logger.info("Created H2StateManager instance without initialization");
+            logger.info("Created H2StateManager instance");
             return manager;
         } catch (Exception e) {
             throw new RuntimeException("Failed to create H2StateManager: " + e.getMessage(), e);

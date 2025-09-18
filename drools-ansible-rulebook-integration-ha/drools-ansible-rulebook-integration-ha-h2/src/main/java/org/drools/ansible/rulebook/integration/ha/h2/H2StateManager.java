@@ -75,7 +75,6 @@ public class H2StateManager extends AbstractHAStateManager {
 
         try {
             H2Schema.createSchema(dataSource);
-            logger.info("HA schema created successfully for UUID: {}", uuid);
 
             // Initialize or load HA stats
             loadOrCreateHAStats();
@@ -166,7 +165,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 return sessionState;
             }
         } catch (SQLException e) {
-            logger.error("Failed to get event state", e);
+            logger.error("Failed to get SessionState", e);
         }
 
         return null;
@@ -175,7 +174,7 @@ public class H2StateManager extends AbstractHAStateManager {
     @Override
     public void persistSessionState(SessionState sessionState) {
         if (!isLeader) {
-            throw new IllegalStateException("Cannot persist event state - not leader");
+            throw new IllegalStateException("Cannot persist SessionState - not leader");
         }
 
         try (Connection conn = dataSource.getConnection()) {
@@ -230,10 +229,10 @@ public class H2StateManager extends AbstractHAStateManager {
 
             conn.commit();
 
-            logger.debug("Persisted event state for haUuid: {}", haUuid);
+            logger.debug("Persisted SessionState for haUuid: {}", haUuid);
         } catch (SQLException e) {
-            logger.error("Failed to persist event state", e);
-            throw new RuntimeException("Failed to persist event state", e);
+            logger.error("Failed to persist SessionState", e);
+            throw new RuntimeException("Failed to persist SessionState", e);
         }
     }
 
@@ -475,7 +474,6 @@ public class H2StateManager extends AbstractHAStateManager {
             } else {
                 // Create initial stats
                 persistHAStats();
-                logger.info("Created new HA stats");
             }
         }
     }
