@@ -19,7 +19,7 @@ import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG
 /**
  * Integration tests for AstRulesEngine with HA functionality
  */
-class AstRulesEngineHAIntegrationTest extends AstRulesEngineHAIntegrationTestBase {
+class HAIntegrationTest extends HAIntegrationTestBase {
 
     // Basic rule
     private static final String RULE_SET_BASIC = """
