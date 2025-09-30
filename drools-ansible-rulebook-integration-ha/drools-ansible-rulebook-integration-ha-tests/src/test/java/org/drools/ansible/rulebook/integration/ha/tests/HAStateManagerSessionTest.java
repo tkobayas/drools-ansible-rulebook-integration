@@ -153,4 +153,36 @@ class HAStateManagerSessionTest {
         matchList = rulesExecutorRecovered.processEvents(eventJson2).join();
         assertThat(matchList).hasSize(1);
     }
+
+    @Test
+    void testSessionStateShaFieldsPersistAndLoad() {
+        stateManager.enableLeader(LEADER_ID);
+
+        SessionState sessionState = new SessionState();
+        sessionState.setHaUuid(HA_UUID);
+        sessionState.setLeaderId(LEADER_ID);
+        sessionState.setRulebookHash("rulebook-sha-001");
+        sessionState.setPartialEvents(List.of());
+
+        long now = System.currentTimeMillis();
+        sessionState.setCreatedTime(now);
+        sessionState.setPersistedTime(now);
+
+        sessionState.setCurrentStateSHA("sha-current-001");
+        sessionState.setPreviousStateSHA("sha-prev-000");
+        sessionState.setLastProcessedEventUuid("event-uuid-001");
+
+        stateManager.persistSessionState(sessionState);
+
+        stateManager.shutdown();
+
+        stateManager = HAStateManagerFactory.create();
+        stateManager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+
+        SessionState retrieved = stateManager.getSessionState();
+        assertThat(retrieved.getCurrentStateSHA()).isEqualTo("sha-current-001");
+        assertThat(retrieved.getPreviousStateSHA()).isEqualTo("sha-prev-000");
+        assertThat(retrieved.getLastProcessedEventUuid()).isEqualTo("event-uuid-001");
+        assertThat(retrieved.getRulebookHash()).isEqualTo("rulebook-sha-001");
+    }
 }
