@@ -11,6 +11,8 @@ public class HASessionContext {
     // TODO: Consider performance. For now, LinkedHashMap because we need Map lookup and order of insertion
     private LinkedHashMap<String, EventRecord> eventUuidsInMemory = new LinkedHashMap<>();
 
+    private String currentEventUuid;
+
     public LinkedHashMap<String, EventRecord> getEventUuidsInMemory() {
         return eventUuidsInMemory;
     }
@@ -18,9 +20,14 @@ public class HASessionContext {
     public void addEventUuidInMemory(String uuid, EventRecord eventRecord) {
         // TODO: consider MAX_EVENTS? but we already have memory check (MemoryMonitorUtil)
         eventUuidsInMemory.put(uuid, eventRecord);
+        currentEventUuid = uuid;
     }
 
     public void removeEventUuidInMemory(String uuid) {
         eventUuidsInMemory.remove(uuid);
+    }
+
+    public String getCurrentEventUuid() {
+        return currentEventUuid;
     }
 }

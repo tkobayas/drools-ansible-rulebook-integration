@@ -22,6 +22,11 @@ public class SessionState {
     private boolean isCurrent;
     private String leaderId;
 
+    // For integrity checks
+    private String currentStateSHA;      // SHA256 of current state
+    private String previousStateSHA;     // SHA256 of previous state
+    private String lastProcessedEventUuid;
+
     public SessionState() {
         this.createdTime = Instant.now().toEpochMilli();
         this.version = 1;
@@ -90,5 +95,29 @@ public class SessionState {
 
     public void setLeaderId(String leaderId) {
         this.leaderId = leaderId;
+    }
+
+    public String getCurrentStateSHA() {
+        return currentStateSHA;
+    }
+
+    public void setCurrentStateSHA(String currentStateSHA) {
+        this.currentStateSHA = currentStateSHA;
+    }
+
+    public String getPreviousStateSHA() {
+        return previousStateSHA;
+    }
+
+    public void setPreviousStateSHA(String previousStateSHA) {
+        this.previousStateSHA = previousStateSHA;
+    }
+
+    public String getLastProcessedEventUuid() {
+        return lastProcessedEventUuid;
+    }
+
+    public void setLastProcessedEventUuid(String lastProcessedEventUuid) {
+        this.lastProcessedEventUuid = lastProcessedEventUuid;
     }
 }
