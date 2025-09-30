@@ -8,6 +8,7 @@ import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
+import org.drools.ansible.rulebook.integration.ha.model.SessionStateLite;
 
 /**
  * Interface for managing High Availability state persistence.
@@ -149,5 +150,18 @@ public interface HAStateManager {
      */
     void shutdown();
 
-    void registerEventUuid(String ruleSetName, String eventUuid);
+    /**
+     * Register a lightweight session state for non-leader nodes
+     *
+     * @param sessionStateLite The lightweight session state to register
+     */
+    void registerSessionStateLite(String ruleSetName, SessionStateLite sessionStateLite);
+
+    /**
+     * Get the lightweight session state for a given ruleset
+     *
+     * @param ruleSetName The name of the ruleset
+     * @return The lightweight session state or null if not found
+     */
+    SessionStateLite getSessionStateLite(String ruleSetName);
 }
