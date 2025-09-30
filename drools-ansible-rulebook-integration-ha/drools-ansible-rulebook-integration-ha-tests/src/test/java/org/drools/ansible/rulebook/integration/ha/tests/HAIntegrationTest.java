@@ -7,7 +7,9 @@ import java.util.concurrent.TimeUnit;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
+import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
+import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,7 +121,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         // Verify that matching events were persisted to database
         // We can check this by accessing another HAStateManager directly, so this is a relatively white-box test
-        HAStateManager haStateManagerForAssertion = createSharedHAStateManager();
+        HAStateManager haStateManagerForAssertion = createHAStateManagerForAssertion();
 
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents();
@@ -131,6 +133,54 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         } finally {
             haStateManagerForAssertion.shutdown();
         }
+    }
+
+    @Test
+    void testCurrentStateSha() {
+        // Scenario: Create ruleset (done by @BeforeEach) -> Become leader
+        rulesEngine1.enableLeader("leader-1");
+
+        String eventUuid1 = "11111111-2222-3333-4444-555555555555";
+        String event1 = """
+                {
+                    "meta": {"uuid": "%s"},
+                    "temperature": 35
+                }
+                """.formatted(eventUuid1);
+
+        String result1 = rulesEngine1.assertEvent(sessionId1, event1); // matches the rule. the event is discarded
+        assertThat(result1).contains("temperature_alert");
+
+        String baseSha = HAUtils.sha256(getRuleSet());
+        String stateSha1 = HAUtils.calculateStateSHA(baseSha, eventUuid1);
+
+        HAStateManager haManagerForAssertion = createHAStateManagerForAssertion();
+        SessionState state1 = haManagerForAssertion.getSessionState();
+
+        assertThat(state1).isNotNull();
+        assertThat(state1.getLastProcessedEventUuid()).isEqualTo(eventUuid1);
+        assertThat(state1.getPreviousStateSHA()).isEqualTo(baseSha);
+        assertThat(state1.getCurrentStateSHA()).isEqualTo(stateSha1);
+
+        String eventUuid2 = "XXXXXXXX-2222-3333-4444-555555555555";
+        String event2 = """
+                {
+                    "meta": {"uuid": "%s"},
+                    "no-match": 35
+                }
+                """.formatted(eventUuid2);
+
+        String result2 = rulesEngine1.assertEvent(sessionId1, event2); // doesn't match the rule. the event is also discarded
+        System.out.println("Result2: " + result2);
+
+        String stateSha2 = HAUtils.calculateStateSHA(stateSha1, eventUuid2);
+
+        SessionState state2 = haManagerForAssertion.getSessionState();
+
+        assertThat(state2).isNotNull();
+        assertThat(state2.getLastProcessedEventUuid()).isEqualTo(eventUuid2);
+        assertThat(state2.getPreviousStateSHA()).isEqualTo(stateSha1);
+        assertThat(state2.getCurrentStateSHA()).isEqualTo(stateSha2);
     }
 
     @Test
@@ -206,7 +256,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(result2).isNotNull();
 
         // Check that both events created matching events
-        HAStateManager haStateManagerForAssertion = createSharedHAStateManager();
+        HAStateManager haStateManagerForAssertion = createHAStateManagerForAssertion();
 
         try {
             List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents();

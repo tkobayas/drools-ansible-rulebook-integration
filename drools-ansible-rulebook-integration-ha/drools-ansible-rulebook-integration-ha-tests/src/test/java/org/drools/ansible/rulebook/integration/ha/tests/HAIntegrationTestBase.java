@@ -60,8 +60,12 @@ abstract class HAIntegrationTestBase {
 
     @AfterEach
     void tearDown() {
-        consumer1.stop();
-        consumer2.stop();
+        if (consumer1 != null) {
+            consumer1.stop();
+        }
+        if (consumer2 != null) {
+            consumer2.stop();
+        }
 
         if (rulesEngine1 != null) {
             rulesEngine1.dispose(sessionId1);
@@ -129,8 +133,8 @@ abstract class HAIntegrationTestBase {
     }
 
 
-    // Helper method to create HAStateManager with shared database
-    protected HAStateManager createSharedHAStateManager() {
+    // Helper method to create HAStateManager to assert database
+    protected HAStateManager createHAStateManagerForAssertion() {
         HAStateManager manager = HAStateManagerFactory.create();
         manager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
         return manager;
