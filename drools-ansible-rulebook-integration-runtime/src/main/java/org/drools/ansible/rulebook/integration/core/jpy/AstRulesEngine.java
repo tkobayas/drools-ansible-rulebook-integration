@@ -30,6 +30,7 @@ import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
+import org.drools.ansible.rulebook.integration.ha.model.SessionStateLite;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -297,6 +298,9 @@ public class AstRulesEngine implements Closeable {
         // TODO: verify if the SessionState is the latest
         SessionState retrievedSessionState = haStateManager.getSessionState();
         if (retrievedSessionState == null) {
+            SessionStateLite sessionStateLite = haStateManager.getSessionStateLite(executor.getRuleSetName());
+            String rulebookHash = sessionStateLite.getCurrentStateSHA(); // the first currentStateSHA is the rulebook hash
+
             // The first creation of SessionState
             // TODO: Confirm the spec that the current session is clean (nothing processed yet) at the moment
             SessionState sessionState = new SessionState();
@@ -305,6 +309,8 @@ public class AstRulesEngine implements Closeable {
             long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
             sessionState.setCreatedTime(currentTime);
             sessionState.setPersistedTime(currentTime);
+            sessionState.setRulebookHash(rulebookHash);
+            sessionState.setCurrentStateSHA(rulebookHash); // the base SHA is the rulebook hash
             haStateManager.persistSessionState(sessionState);
         } else {
             // TODO: At the moment, we assume that the new leader's session is the same as the retrieved session state, so no need to restore
@@ -331,6 +337,8 @@ public class AstRulesEngine implements Closeable {
             // No existing SessionState , create a new RulesExecutor
             RulesExecutor executor = rulesExecutorContainer.register(HARulesExecutorFactory.createRulesExecutor(rulesSet));
 
+            String rulebookHash = sha256(rulesetString);
+
             if (haStateManager.isLeader()) {
                 // The first creation of SessionState
                 SessionState sessionState = new SessionState();
@@ -339,11 +347,12 @@ public class AstRulesEngine implements Closeable {
                 long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
                 sessionState.setCreatedTime(currentTime);
                 sessionState.setPersistedTime(currentTime);
-
-                sessionState.setRulebookHash(sha256(rulesetString));
-                sessionState.setCurrentStateSHA(sessionState.getRulebookHash()); // the base SHA is the rulebook hash
+                sessionState.setRulebookHash(rulebookHash);
+                sessionState.setCurrentStateSHA(rulebookHash); // the base SHA is the rulebook hash
 
                 haStateManager.persistSessionState(sessionState);
+            } else {
+                haStateManager.registerSessionStateLite(rulesSet.getName(), new SessionStateLite(rulebookHash, null));
             }
             return executor;
         } else {
