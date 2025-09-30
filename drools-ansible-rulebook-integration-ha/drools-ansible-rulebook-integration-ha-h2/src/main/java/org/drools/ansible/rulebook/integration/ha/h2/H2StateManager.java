@@ -156,6 +156,11 @@ public class H2StateManager extends AbstractHAStateManager {
                 sessionState.setCurrent(rs.getBoolean("is_current"));
                 sessionState.setLeaderId(rs.getString("leader_id"));
 
+                // Handle SHA tracking fields
+                sessionState.setCurrentStateSHA(rs.getString("current_state_sha"));
+                sessionState.setPreviousStateSHA(rs.getString("previous_state_sha"));
+                sessionState.setLastProcessedEventUuid(rs.getString("last_processed_event_uuid"));
+
                 // Handle created_time
                 Timestamp createdTime = rs.getTimestamp("created_time");
                 if (createdTime != null) {
@@ -189,8 +194,8 @@ public class H2StateManager extends AbstractHAStateManager {
 
             // Insert new version as current
             String sql = """
-                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, persisted_time, version, is_current, created_time, leader_id)
-                    VALUES (?, ?, ?, ?, 
+                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, previous_state_sha, last_processed_event_uuid, version, is_current, created_time, leader_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?,
                         COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ?), 0) + 1,
                         true, ?, ?)
                     """;
@@ -213,16 +218,21 @@ public class H2StateManager extends AbstractHAStateManager {
                     ps.setTimestamp(4, null);
                 }
 
-                ps.setString(5, sessionState.getHaUuid());
+                // Handle SHA tracking fields
+                ps.setString(5, sessionState.getCurrentStateSHA());
+                ps.setString(6, sessionState.getPreviousStateSHA());
+                ps.setString(7, sessionState.getLastProcessedEventUuid());
+
+                ps.setString(8, sessionState.getHaUuid());
 
                 // Handle created_time
                 if (sessionState.getCreatedTime() > 0) {
-                    ps.setTimestamp(6, new Timestamp(sessionState.getCreatedTime()));
+                    ps.setTimestamp(9, new Timestamp(sessionState.getCreatedTime()));
                 } else {
-                    ps.setTimestamp(6, new Timestamp(System.currentTimeMillis()));
+                    ps.setTimestamp(9, new Timestamp(System.currentTimeMillis()));
                 }
 
-                ps.setString(7, sessionState.getLeaderId());
+                ps.setString(10, sessionState.getLeaderId());
 
                 ps.executeUpdate();
             }

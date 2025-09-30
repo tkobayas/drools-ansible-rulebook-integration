@@ -23,20 +23,21 @@ import org.drools.ansible.rulebook.integration.api.io.Response;
 import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutor;
 import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutorFactory;
+import org.drools.ansible.rulebook.integration.ha.api.HASessionContext;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
-import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
+import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
-import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil.asFactMap;
-import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.calculateStateSHA;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 public class AstRulesEngine implements Closeable {
 
@@ -50,10 +51,14 @@ public class AstRulesEngine implements Closeable {
 
     public long createRuleset(String rulesetString) {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
-        return createRuleset(rulesSet);
+        return createRuleset(rulesSet, rulesetString);
     }
 
     public long createRuleset(RulesSet rulesSet) {
+        return createRuleset(rulesSet, null);
+    }
+
+    public long createRuleset(RulesSet rulesSet, String rulesetString) {
         checkAlive();
         if (rulesSet.hasTemporalConstraint()) {
             rulesSet.withOptions(RuleConfigurationOption.USE_PSEUDO_CLOCK);
@@ -66,7 +71,7 @@ public class AstRulesEngine implements Closeable {
 
         if (haMode && haStateManager != null) {
             // regardless of leader or not, try to restore session state if exists
-            executor = createHARulesExecutorWithSessionState(rulesSet);
+            executor = createHARulesExecutorWithSessionState(rulesSet, rulesetString);
         } else {
             // normal non-HA mode
             executor = RulesExecutorFactory.createRulesExecutor(rulesSet);
@@ -112,19 +117,24 @@ public class AstRulesEngine implements Closeable {
 
     private String processEventHA(long sessionId, List<Match> matches) {
         // matches is the internal representation of drools matches
-        // matchList is the simplified JSON-serializable structure
+        // matchList is the simplified Map structure for JSON-serialization
         List<Map<String, Map>> matchList = RuleMatch.asList(matches);
 
-        // In HA mode, persist event state for statistics tracking
         try {
-            // TODO: Populate full SessionState with partial matches, time windows, clock time, etc.
             HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
 
             SessionState sessionState = haStateManager.getSessionState();
 
-            LinkedHashMap<String, EventRecord> eventUuidsInMemory = rulesExecutor.getHaSessionContext().getEventUuidsInMemory();
+            HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
+            LinkedHashMap<String, EventRecord> eventUuidsInMemory = haSessionContext.getEventUuidsInMemory();
             sessionState.setPartialEvents(new ArrayList<>(eventUuidsInMemory.values()));
             sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
+
+            String currentStateSHA = sessionState.getCurrentStateSHA();
+            sessionState.setPreviousStateSHA(currentStateSHA);
+            sessionState.setCurrentStateSHA(calculateStateSHA(currentStateSHA, haSessionContext.getCurrentEventUuid()));
+            sessionState.setLastProcessedEventUuid(haSessionContext.getCurrentEventUuid());
+
             haStateManager.persistSessionState(sessionState);
 
             HAStats haStats = haStateManager.getHAStats();
@@ -310,7 +320,10 @@ public class AstRulesEngine implements Closeable {
         }
     }
 
-    private RulesExecutor createHARulesExecutorWithSessionState(RulesSet rulesSet) {
+    private RulesExecutor createHARulesExecutorWithSessionState(RulesSet rulesSet, String rulesetString) {
+        if (rulesetString == null) {
+            throw new IllegalStateException("null rulesetString is not allowed in HA mode");
+        }
 
         // TODO: verify if the SessionState is the latest
         SessionState retrievedSessionState = haStateManager.getSessionState();
@@ -326,11 +339,15 @@ public class AstRulesEngine implements Closeable {
                 long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
                 sessionState.setCreatedTime(currentTime);
                 sessionState.setPersistedTime(currentTime);
+
+                sessionState.setRulebookHash(sha256(rulesetString));
+                sessionState.setCurrentStateSHA(sessionState.getRulebookHash()); // the base SHA is the rulebook hash
+
                 haStateManager.persistSessionState(sessionState);
             }
             return executor;
         } else {
-            // restore session using SessionState
+            // restore session using SessionState. Assume the SessionState is correct one, so no need to recompute/verify
             return haStateManager.recoverSession(rulesSet, retrievedSessionState);
         }
     }
