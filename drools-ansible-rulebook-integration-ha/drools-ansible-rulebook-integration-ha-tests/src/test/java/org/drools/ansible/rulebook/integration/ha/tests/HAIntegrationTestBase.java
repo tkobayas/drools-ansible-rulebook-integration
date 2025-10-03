@@ -7,6 +7,7 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
@@ -138,5 +140,9 @@ abstract class HAIntegrationTestBase {
         HAStateManager manager = HAStateManagerFactory.create();
         manager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
         return manager;
+    }
+
+    protected String getRuleSetNameValue() {
+        return (String) readValueAsMapOfStringAndObject(getRuleSet()).get("name");
     }
 }

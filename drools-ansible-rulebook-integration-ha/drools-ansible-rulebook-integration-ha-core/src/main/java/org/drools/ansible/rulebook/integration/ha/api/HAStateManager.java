@@ -58,7 +58,7 @@ public interface HAStateManager {
      *
      * @return The current session state or null if not found
      */
-    SessionState getSessionState();
+    SessionState getSessionState(String ruleSetName);
 
     /**
      * Persist complete session state (includes matching events)
