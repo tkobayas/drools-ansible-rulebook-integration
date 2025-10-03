@@ -52,24 +52,27 @@ class HAStateManagerActionTest {
         String meUuid = stateManager.addMatchingEvent(me);
 
         // Add an action
-        String actionData = "{\"name\":\"send_alert\",\"status\":\"running\",\"start_time\":\"2024-01-01T10:00:00Z\"}";
+        String actionData = "{\"name\":\"send_alert\",\"status\":4,\"start_time\":\"2024-01-01T10:00:00Z\"}";
         stateManager.addActionInfo(meUuid, 0, actionData);
 
         // Verify action exists
         assertThat(stateManager.actionInfoExists(meUuid, 0)).isTrue();
         assertThat(stateManager.actionInfoExists(meUuid, 1)).isFalse();
 
+        assertThat(stateManager.getActionStatus(meUuid, 0)).isEqualTo("4");
+
         // Get action and verify
         String retrieved = stateManager.getActionInfo(meUuid, 0);
         assertThat(retrieved).isEqualTo(actionData);
 
         // Update action
-        String updatedData = "{\"name\":\"send_alert\",\"status\":\"success\",\"end_time\":\"2024-01-01T10:01:00Z\"}";
+        String updatedData = "{\"name\":\"send_alert\",\"status\":3,\"end_time\":\"2024-01-01T10:01:00Z\"}";
         stateManager.updateActionInfo(meUuid, 0, updatedData);
 
         // Verify update
         retrieved = stateManager.getActionInfo(meUuid, 0);
         assertThat(retrieved).isEqualTo(updatedData);
+        assertThat(stateManager.getActionStatus(meUuid, 0)).isEqualTo("3");
 
         // Delete action
         stateManager.deleteActionInfo(meUuid);
@@ -96,7 +99,7 @@ class HAStateManagerActionTest {
         String meUuid2 = stateManager.addMatchingEvent(matchingEvent2);
 
         // Add action for first ME (in progress)
-        stateManager.addActionInfo(meUuid1, 0, "{\"status\":\"running\"}");
+        stateManager.addActionInfo(meUuid1, 0, "{\"status\":4}");
 
         // Get pending events (should include both)
         List<MatchingEvent> pending = stateManager.getPendingMatchingEvents();

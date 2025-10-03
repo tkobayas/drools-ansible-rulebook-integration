@@ -44,4 +44,5 @@ public abstract class AbstractHAStateManager implements HAStateManager {
     public SessionStateLite getSessionStateLite(String ruleSetName) {
         return sessionStateLiteMap.get(ruleSetName);
     }
+
 }

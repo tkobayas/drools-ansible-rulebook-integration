@@ -25,6 +25,7 @@ import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 
 /**
@@ -382,6 +383,12 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     @Override
+    public String getActionStatus(String matchingUuid, int index) {
+        Integer status = fetchActionStatusFromDatabase(matchingUuid, index);
+        return status == null ? "" : Integer.toString(status);
+    }
+
+    @Override
     public boolean actionInfoExists(String matchingUuid, int index) {
         String sql = "SELECT COUNT(*) FROM ActionInfo WHERE me_uuid = ? AND index = ?";
 
@@ -527,4 +534,46 @@ public class H2StateManager extends AbstractHAStateManager {
             logger.error("Failed to persist HA stats", e);
         }
     }
+
+    private Integer fetchActionStatusFromDatabase(String matchingUuid, int index) {
+        String sql = "SELECT action_data FROM ActionInfo WHERE me_uuid = ? AND index = ?";
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, matchingUuid);
+            ps.setInt(2, index);
+
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return extractStatus(rs.getString("action_data"));
+            }
+        } catch (SQLException e) {
+            logger.error("Failed to fetch action status", e);
+        }
+        return null;
+    }
+
+    private Integer extractStatus(String actionJson) {
+        if (actionJson == null) {
+            return null;
+        }
+        try {
+            Object statusValue = readValueAsMapOfStringAndObject(actionJson).get("status");
+            if (statusValue instanceof Number number) {
+                return number.intValue();
+            }
+            if (statusValue instanceof String str && !str.isBlank()) {
+                try {
+                    return Integer.parseInt(str.trim());
+                } catch (NumberFormatException nfe) {
+                    logger.debug("Ignoring non-numeric status value: {}", str);
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Unable to parse action status from JSON", e);
+        }
+        return null;
+    }
+
 }
