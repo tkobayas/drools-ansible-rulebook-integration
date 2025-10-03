@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.calculateStateSHA;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.populateHAMatchResponse;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 public class AstRulesEngine implements Closeable {
@@ -110,16 +111,16 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processEvents(serializedFact).join();
 
         if (haMode && haStateManager != null && haStateManager.isLeader()) {
-            return processEventHA(sessionId, matches);
+            return processEventResponseHA(sessionId, matches);
         } else {
             return matchesToJson(matches);
         }
     }
 
-    private String processEventHA(long sessionId, List<Match> matches) {
+    private String processEventResponseHA(long sessionId, List<Match> matches) {
         // matches is the internal representation of drools matches
         // matchList is the simplified Map structure for JSON-serialization
-        List<Map<String, Map>> matchList = RuleMatch.asList(matches);
+        List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
 
         try {
             HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
@@ -148,12 +149,13 @@ public class AstRulesEngine implements Closeable {
         // In HA mode, create matching events for triggered rules and add ME UUIDs to response
         if (!matches.isEmpty()) {
             try {
+                List<Map<String, Object>> haMatches = new ArrayList<>(matchList.size());
                 // Process each match and add ME UUID
                 for (int i = 0; i < matchList.size(); i++) {
-                    Map<String, Map> matchData = matchList.get(i); // e.g. {"temperature_alert":{"m":{"critical":true,"temperature":45}}}
+                    Map<String, Map<String, Object>> matchData = matchList.get(i); // e.g. {"temperature_alert":{"m":{"critical":true,"temperature":45}}}
                     String ruleName = matchData.keySet().iterator().next(); // 1st level key is rule name
                     String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
-                    Map eventData = matchData.get(ruleName); // e.g. {"m":{"critical":true,"temperature":45}}
+                    Map<String, Object> eventData = matchData.get(ruleName); // e.g. {"m":{"critical":true,"temperature":45}}
 
                     // Create MatchingEvent object
                     MatchingEvent me = new MatchingEvent();
@@ -165,14 +167,13 @@ public class AstRulesEngine implements Closeable {
                     String meUuid = haStateManager.addMatchingEvent(me);
                     logger.debug("Created ME UUID {} for rule {}/{}", meUuid, rulesetName, ruleName);
 
-                    // Add meUuid to the rule object in JSON
-                    // Structure: [{"ruleName": {"m": {...}, "meUuid": "..."}}]
-                    Map<String, Object> eventMap = (Map<String, Object>) matchData.get(ruleName);
-                    eventMap.put("meUuid", meUuid);
-                    logger.debug("Added meUuid to result match for {}", ruleName);
+                    Map<String, Object> resultEntry = new LinkedHashMap<>();
+                    populateHAMatchResponse(resultEntry, ruleName, eventData, meUuid);
+                    haMatches.add(resultEntry);
+                    logger.debug("Prepared HA response entry for {}", ruleName);
                 }
 
-                String result = toJson(matchList);
+                String result = toJson(haMatches);
                 logger.debug("Modified response with ME UUIDs: {}", result);
                 return result;
             } catch (Exception e) {
@@ -486,24 +487,26 @@ public class AstRulesEngine implements Closeable {
             logger.warn("Async channel not available for ME recovery: {}", matchingEvent.getMeUuid());
             return;
         }
-        
-        // Create recovery payload with ME UUID
-        Map<String, Object> recoveryData = new HashMap<>();
-        recoveryData.put("type", "MATCHING_EVENT_RECOVERY");
-        recoveryData.put("me_uuid", matchingEvent.getMeUuid());
-        recoveryData.put("ruleset_name", matchingEvent.getRuleSetName());
-        recoveryData.put("rule_name", matchingEvent.getRuleName());
-        
+
         // Parse event data JSON back to object for compatibility
+        Map<String, Object> eventData = new HashMap<>();
         try {
             if (matchingEvent.getEventData() != null) {
-                Map<String, Object> eventData = readValueAsMapOfStringAndObject(matchingEvent.getEventData());
-                recoveryData.put("event_data", eventData);
+                eventData = readValueAsMapOfStringAndObject(matchingEvent.getEventData());
             }
         } catch (Exception e) {
             logger.warn("Failed to parse event data JSON for recovery", e);
-            recoveryData.put("event_data", new HashMap<>());
+            // TBD: Should throw RuntimeException here?
         }
+
+        // Create recovery payload with ME UUID
+        Map<String, Object> recoveryData = new HashMap<>();
+        populateHAMatchResponse(recoveryData,
+                                matchingEvent.getRuleName(),
+                                eventData,
+                                matchingEvent.getMeUuid()); // these 3 fields are conformed to HA match response format
+        recoveryData.put("type", "MATCHING_EVENT_RECOVERY");
+        recoveryData.put("ruleset_name", matchingEvent.getRuleSetName());
         
         // Send through async channel
         Response response = new Response(sessionId, recoveryData);

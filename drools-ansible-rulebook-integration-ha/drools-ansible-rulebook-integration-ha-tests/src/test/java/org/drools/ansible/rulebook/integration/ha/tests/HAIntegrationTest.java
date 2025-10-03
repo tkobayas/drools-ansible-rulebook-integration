@@ -85,13 +85,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(matchList).hasSize(1);
 
         Map<String, Object> matchJson = matchList.get(0);
-        assertThat(matchJson).containsKey("temperature_alert");
+        assertThat(matchJson.get("name")).isEqualTo("temperature_alert");
 
-        Map<String, Object> ruleObject = (Map<String, Object>) matchJson.get("temperature_alert");
-        assertThat(ruleObject).containsKey("m"); // Original match data
-        assertThat(ruleObject).containsKey("meUuid"); // ME UUID should be included
+        Map<String, Object> events = (Map<String, Object>) matchJson.get("events");
+        assertThat(events).containsKey("m"); // Original match data
 
-        String meUuid = (String) ruleObject.get("meUuid");
+        String meUuid = (String) matchJson.get("matching_uuid");
         assertThat(meUuid).isNotEmpty();
         assertThat(meUuid).hasSize(36); // UUID format check
 
@@ -117,7 +116,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
+        String meUuid = (String) matchList.get(0).get("matching_uuid");
 
         // Verify that matching events were persisted to database
         // We can check this by accessing another HAStateManager directly, so this is a relatively white-box test
@@ -200,7 +199,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         // Simulate that the Python side extracts the ME UUID from the result
         List<Map<String, Object>> resultMaps = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) ((Map<String, Object>) resultMaps.get(0).get("temperature_alert")).get("meUuid");
+        String meUuid = (String) resultMaps.get(0).get("matching_uuid");
         assertThat(meUuid).isNotNull();
 
         // Set ActionInfo
@@ -278,8 +277,11 @@ class HAIntegrationTest extends HAIntegrationTestBase {
                 }
                 """;
         String result = rulesEngine1.assertEvent(sessionId1, event);
+
+        System.out.println("Result: " + result);
+
         List<Map<String, Object>> resultMaps = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) ((Map<String, Object>) resultMaps.get(0).get("temperature_alert")).get("meUuid");
+        String meUuid = (String) resultMaps.get(0).get("matching_uuid");
         assertThat(meUuid).isNotNull();
 
         // Simulate engine-1 failure
@@ -298,12 +300,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(asyncResultMap).isNotNull();
         assertThat(asyncResultMap).containsKey("session_id");
         Map<String, Object> matchingEvent = (Map<String, Object>) asyncResultMap.get("result");
-        assertThat(matchingEvent).containsEntry("me_uuid", meUuid);
+        assertThat(matchingEvent).containsEntry("matching_uuid", meUuid);
         assertThat(matchingEvent).containsEntry("ruleset_name", "Test Ruleset");
-        assertThat(matchingEvent).containsEntry("rule_name", "temperature_alert");
-        Map<String, Map> eventData = (Map<String, Map>) matchingEvent.get("event_data");
-        assertThat(eventData.get("m")).containsEntry("critical", true);
-        assertThat(eventData.get("m")).containsEntry("temperature", 45);
+        assertThat(matchingEvent).containsEntry("name", "temperature_alert");
+        Map<String, Map> events = (Map<String, Map>) matchingEvent.get("events");
+        assertThat(events.get("m")).containsEntry("critical", true);
+        assertThat(events.get("m")).containsEntry("temperature", 45);
     }
 
     @Test
@@ -327,7 +329,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         // Process an event and action
         String result = rulesEngine1.assertEvent(sessionId1, "{\"temperature\": 35}");
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) ((Map<String, Object>) matchList.get(0).get("temperature_alert")).get("meUuid");
+        String meUuid = (String) matchList.get(0).get("matching_uuid");
 
         rulesEngine1.addActionInfo(sessionId1, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
 
