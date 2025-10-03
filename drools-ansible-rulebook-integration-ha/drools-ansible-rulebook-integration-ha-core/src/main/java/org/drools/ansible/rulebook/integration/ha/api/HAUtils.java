@@ -14,8 +14,9 @@ public class HAUtils {
 
     private HAUtils() {}
 
-    public static Optional<String> getEventUuid(FactHandle event) {
-        if (event instanceof HashMapEventImpl hashMapEvent) {
+    public static Optional<String> getEventUuid(FactHandle handle) {
+        Object object = handle.getObject();
+        if (object instanceof HashMapEventImpl hashMapEvent) {
             return getEventUuid(hashMapEvent.asMap());
         }
         return Optional.empty();

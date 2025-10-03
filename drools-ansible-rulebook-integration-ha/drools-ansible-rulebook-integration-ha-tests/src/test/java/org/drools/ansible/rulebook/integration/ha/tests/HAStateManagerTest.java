@@ -30,6 +30,7 @@ class HAStateManagerTest {
     private HAStateManager stateManager;
     private static final String HA_UUID = "test-ha-1";
     private static final String LEADER_ID = "test-leader-1";
+    private static final String RULE_SET_NAME = "testRuleset";
 
     @BeforeEach
     void setUp() {
@@ -65,6 +66,7 @@ class HAStateManagerTest {
         // Not setting as leader
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(HA_UUID);
+        sessionState.setRuleSetName(RULE_SET_NAME);
 
         // Should throw IllegalStateException
         assertThrows(IllegalStateException.class, () -> {
@@ -92,6 +94,7 @@ class HAStateManagerTest {
         // Process some events/actions and verify counters
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(HA_UUID);
+        sessionState.setRuleSetName(RULE_SET_NAME);
         stateManager.persistSessionState(sessionState);
 
         MatchingEvent me = createMatchingEvent(HA_UUID, "test", "rule", Map.of("test", "data"));

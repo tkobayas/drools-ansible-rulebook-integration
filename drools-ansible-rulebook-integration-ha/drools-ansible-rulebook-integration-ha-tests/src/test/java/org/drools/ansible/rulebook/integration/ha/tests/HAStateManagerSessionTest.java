@@ -31,6 +31,7 @@ class HAStateManagerSessionTest {
     private HAStateManager stateManager;
     private static final String HA_UUID = "test-ha-1";
     private static final String LEADER_ID = "test-leader-1";
+    private static final String RULE_SET_NAME = "Test Ruleset";
 
     @BeforeEach
     void setUp() {
@@ -121,6 +122,7 @@ class HAStateManagerSessionTest {
         // Create and persist session state
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(HA_UUID);
+        sessionState.setRuleSetName(RULE_SET_NAME);
         sessionState.setRulebookHash("abc123");
         sessionState.setLeaderId(LEADER_ID);
         sessionState.setPartialEvents(partialEvents);
@@ -143,7 +145,7 @@ class HAStateManagerSessionTest {
         stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK).toRulesSet(RuleFormat.JSON, ALL_CONDITION_RULE);
 
-        SessionState retrievedSessionState = stateManager2.getSessionState();
+        SessionState retrievedSessionState = stateManager2.getSessionState(rulesSet.getName());
         RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(rulesSet, retrievedSessionState);
 
         rulesExecutorRecovered.advanceTime(10, java.util.concurrent.TimeUnit.SECONDS);
@@ -160,6 +162,7 @@ class HAStateManagerSessionTest {
 
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(HA_UUID);
+        sessionState.setRuleSetName(RULE_SET_NAME);
         sessionState.setLeaderId(LEADER_ID);
         sessionState.setRulebookHash("rulebook-sha-001");
         sessionState.setPartialEvents(List.of());
@@ -179,10 +182,44 @@ class HAStateManagerSessionTest {
         stateManager = HAStateManagerFactory.create();
         stateManager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
 
-        SessionState retrieved = stateManager.getSessionState();
+        SessionState retrieved = stateManager.getSessionState(RULE_SET_NAME);
         assertThat(retrieved.getCurrentStateSHA()).isEqualTo("sha-current-001");
         assertThat(retrieved.getPreviousStateSHA()).isEqualTo("sha-prev-000");
         assertThat(retrieved.getLastProcessedEventUuid()).isEqualTo("event-uuid-001");
         assertThat(retrieved.getRulebookHash()).isEqualTo("rulebook-sha-001");
+    }
+
+    @Test
+    void testMultipleRuleSetsPersistIndependently() {
+        stateManager.enableLeader(LEADER_ID);
+
+        SessionState rulesetA = new SessionState();
+        rulesetA.setHaUuid(HA_UUID);
+        rulesetA.setRuleSetName("rulesetA");
+        rulesetA.setRulebookHash("hashA");
+        rulesetA.setCurrentStateSHA("shaA");
+        rulesetA.setPreviousStateSHA("shaPrevA");
+        rulesetA.setLastProcessedEventUuid("eventA");
+        stateManager.persistSessionState(rulesetA);
+
+        SessionState rulesetB = new SessionState();
+        rulesetB.setHaUuid(HA_UUID);
+        rulesetB.setRuleSetName("rulesetB");
+        rulesetB.setRulebookHash("hashB");
+        rulesetB.setCurrentStateSHA("shaB");
+        rulesetB.setPreviousStateSHA("shaPrevB");
+        rulesetB.setLastProcessedEventUuid("eventB");
+        stateManager.persistSessionState(rulesetB);
+
+        SessionState retrievedA = stateManager.getSessionState("rulesetA");
+        SessionState retrievedB = stateManager.getSessionState("rulesetB");
+
+        assertThat(retrievedA.getRuleSetName()).isEqualTo("rulesetA");
+        assertThat(retrievedA.getCurrentStateSHA()).isEqualTo("shaA");
+        assertThat(retrievedA.getLastProcessedEventUuid()).isEqualTo("eventA");
+
+        assertThat(retrievedB.getRuleSetName()).isEqualTo("rulesetB");
+        assertThat(retrievedB.getCurrentStateSHA()).isEqualTo("shaB");
+        assertThat(retrievedB.getLastProcessedEventUuid()).isEqualTo("eventB");
     }
 }
