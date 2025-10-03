@@ -126,6 +126,8 @@ public interface HAStateManager {
      */
     String getActionInfo(String matchingUuid, int index);
 
+    String getActionStatus(String matchingUuid, int index);
+
     /**
      * Delete all actions and matching events for a matching UUID
      *
