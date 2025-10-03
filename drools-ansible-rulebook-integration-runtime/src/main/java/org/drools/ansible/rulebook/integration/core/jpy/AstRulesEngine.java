@@ -424,10 +424,22 @@ public class AstRulesEngine implements Closeable {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
-        
+
         return haStateManager.getActionInfo(matchingUuid, index);
     }
-    
+
+    /**
+     * Get the stored status for an action
+     * Called by Python: self._api.getActionStatus(session, matching_uuid, index)
+     */
+    public String getActionStatus(long sessionId, String matchingUuid, int index) {
+        if (!haMode || haStateManager == null) {
+            throw new IllegalStateException("HA mode not initialized");
+        }
+
+        return haStateManager.getActionStatus(matchingUuid, index);
+    }
+
     /**
      * Delete all actions and matching events for a matching UUID
      * Called by Python: self._api.deleteActionInfo(session, matching_uuid)

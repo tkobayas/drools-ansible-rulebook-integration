@@ -237,8 +237,9 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(meUuid).isNotNull();
 
         // Set ActionInfo
-        String actionData = "{\"name\":\"send_alert\",\"status\":\"running\",\"reference_id\":\"job-456\"}";
+        String actionData = "{\"name\":\"send_alert\",\"status\":4,\"reference_id\":\"job-456\"}";
         rulesEngine1.addActionInfo(sessionId1, meUuid, 0, actionData);
+        assertThat(rulesEngine1.getActionStatus(sessionId1, meUuid, 0)).isEqualTo("4");
 
         // Check action exists and get it
         assertThat(rulesEngine1.actionInfoExists(sessionId1, meUuid, 0)).isTrue();
@@ -246,8 +247,9 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(retrieved).isEqualTo(actionData);
 
         // Update ActionInfo
-        String updatedActionData = "{\"name\":\"send_alert\",\"status\":\"success\",\"reference_id\":\"job-456\"}";
+        String updatedActionData = "{\"name\":\"send_alert\",\"status\":3,\"reference_id\":\"job-456\"}";
         rulesEngine1.updateActionInfo(sessionId1, meUuid, 0, updatedActionData);
+        assertThat(rulesEngine1.getActionStatus(sessionId1, meUuid, 0)).isEqualTo("3");
 
         // Delete ActionInfo and MarchingEvent when complete
         rulesEngine1.deleteActionInfo(sessionId1, meUuid);
