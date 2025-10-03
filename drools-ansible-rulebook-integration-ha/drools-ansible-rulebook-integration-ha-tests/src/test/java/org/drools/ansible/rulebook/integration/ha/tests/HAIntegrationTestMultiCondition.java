@@ -105,6 +105,8 @@ class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
         // (i=1 from recovered state + j=2 from current event)
         List<Map<String, Object>> matches = readValueAsListOfMapOfStringAndObject(result2);
         assertThat(matches).hasSize(1);
-        assertThat(matches.get(0)).containsKey("temperature_alert");
+        Map<String, Object> match = matches.get(0);
+        assertThat(match.get("name")).isEqualTo("temperature_alert");
+        assertThat(match).containsKey("matching_uuid");
     }
 }

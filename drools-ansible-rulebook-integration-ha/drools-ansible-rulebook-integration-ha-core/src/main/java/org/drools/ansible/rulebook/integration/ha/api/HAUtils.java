@@ -55,4 +55,17 @@ public class HAUtils {
         String input = (previousSHA != null ? previousSHA : "") + eventUuid;
         return sha256(input);
     }
+
+    /**
+     * Populate a HA match response as new scheme. We may apply this to non-HA use case in the future.
+     * @param matchResponse
+     * @param ruleName
+     * @param events
+     * @param meUuid
+     */
+    public static void populateHAMatchResponse(Map<String, Object> matchResponse, String ruleName, Map<String, Object> events, String meUuid) {
+        matchResponse.put("name", ruleName);
+        matchResponse.put("events", events);
+        matchResponse.put("matching_uuid", meUuid);
+    }
 }
