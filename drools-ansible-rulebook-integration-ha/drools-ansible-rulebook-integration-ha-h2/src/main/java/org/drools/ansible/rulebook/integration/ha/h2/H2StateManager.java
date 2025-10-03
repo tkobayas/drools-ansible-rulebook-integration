@@ -118,18 +118,20 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     @Override
-    public SessionState getSessionState() {
-        String sql = "SELECT * FROM SessionState WHERE ha_uuid = ? AND is_current = true";
+    public SessionState getSessionState(String ruleSetName) {
+        String sql = "SELECT * FROM SessionState WHERE ha_uuid = ? AND rule_set_name = ? AND is_current = true";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, haUuid);
+            ps.setString(2, ruleSetName);
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
                 SessionState sessionState = new SessionState();
                 sessionState.setHaUuid(rs.getString("ha_uuid"));
+                sessionState.setRuleSetName(rs.getString("rule_set_name"));
                 sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
                 // Handle partial events
@@ -182,57 +184,64 @@ public class H2StateManager extends AbstractHAStateManager {
             throw new IllegalStateException("Cannot persist SessionState - not leader");
         }
 
+        if (sessionState.getRuleSetName() == null) {
+            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
+        }
+
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
             // Mark all existing versions as not current
-            String updateSql = "UPDATE SessionState SET is_current = false WHERE ha_uuid = ?";
+            String updateSql = "UPDATE SessionState SET is_current = false WHERE ha_uuid = ? AND rule_set_name = ?";
             try (PreparedStatement ps = conn.prepareStatement(updateSql)) {
                 ps.setString(1, sessionState.getHaUuid());
+                ps.setString(2, sessionState.getRuleSetName());
                 ps.executeUpdate();
             }
 
             // Insert new version as current
             String sql = """
-                    INSERT INTO SessionState (ha_uuid, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, previous_state_sha, last_processed_event_uuid, version, is_current, created_time, leader_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?,
-                        COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ?), 0) + 1,
+                    INSERT INTO SessionState (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, previous_state_sha, last_processed_event_uuid, version, is_current, created_time, leader_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                        COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,
                         true, ?, ?)
                     """;
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, sessionState.getHaUuid());
-                ps.setString(2, sessionState.getRulebookHash());
+                ps.setString(2, sessionState.getRuleSetName());
+                ps.setString(3, sessionState.getRulebookHash());
 
                 // Handle partial events
                 String partialEventsJson = null;
                 if (sessionState.getPartialEvents() != null) {
                     partialEventsJson = toJson(sessionState.getPartialEvents());
                 }
-                ps.setString(3, partialEventsJson);
+                ps.setString(4, partialEventsJson);
 
                 // Handle persisted time
                 if (sessionState.getPersistedTime() > 0) {
-                    ps.setTimestamp(4, new Timestamp(sessionState.getPersistedTime()));
+                    ps.setTimestamp(5, new Timestamp(sessionState.getPersistedTime()));
                 } else {
-                    ps.setTimestamp(4, null);
+                    ps.setTimestamp(5, null);
                 }
 
                 // Handle SHA tracking fields
-                ps.setString(5, sessionState.getCurrentStateSHA());
-                ps.setString(6, sessionState.getPreviousStateSHA());
-                ps.setString(7, sessionState.getLastProcessedEventUuid());
+                ps.setString(6, sessionState.getCurrentStateSHA());
+                ps.setString(7, sessionState.getPreviousStateSHA());
+                ps.setString(8, sessionState.getLastProcessedEventUuid());
 
-                ps.setString(8, sessionState.getHaUuid());
+                ps.setString(9, sessionState.getHaUuid());
+                ps.setString(10, sessionState.getRuleSetName());
 
                 // Handle created_time
                 if (sessionState.getCreatedTime() > 0) {
-                    ps.setTimestamp(9, new Timestamp(sessionState.getCreatedTime()));
+                    ps.setTimestamp(11, new Timestamp(sessionState.getCreatedTime()));
                 } else {
-                    ps.setTimestamp(9, new Timestamp(System.currentTimeMillis()));
+                    ps.setTimestamp(11, new Timestamp(System.currentTimeMillis()));
                 }
 
-                ps.setString(10, sessionState.getLeaderId());
+                ps.setString(12, sessionState.getLeaderId());
 
                 ps.executeUpdate();
             }

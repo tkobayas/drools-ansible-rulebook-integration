@@ -92,7 +92,7 @@ class HAIntegrationTestEdgeCase extends HAIntegrationTestBase {
         String stateSha1 = HAUtils.calculateStateSHA(baseSha, eventUuid1);
 
         HAStateManager haManagerForAssertion = createHAStateManagerForAssertion();
-        SessionState state1 = haManagerForAssertion.getSessionState();
+        SessionState state1 = haManagerForAssertion.getSessionState(getRuleSetNameValue());
 
         assertThat(state1).isNotNull();
         assertThat(state1.getLastProcessedEventUuid()).isEqualTo(eventUuid1);
@@ -112,7 +112,7 @@ class HAIntegrationTestEdgeCase extends HAIntegrationTestBase {
 
         String stateSha2 = HAUtils.calculateStateSHA(stateSha1, eventUuid2);
 
-        SessionState state2 = haManagerForAssertion.getSessionState();
+        SessionState state2 = haManagerForAssertion.getSessionState(getRuleSetNameValue());
 
         assertThat(state2).isNotNull();
         assertThat(state2.getLastProcessedEventUuid()).isEqualTo(eventUuid2);

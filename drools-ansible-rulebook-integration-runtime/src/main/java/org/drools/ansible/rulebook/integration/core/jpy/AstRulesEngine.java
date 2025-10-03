@@ -125,7 +125,8 @@ public class AstRulesEngine implements Closeable {
         try {
             HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
 
-            SessionState sessionState = haStateManager.getSessionState();
+            String rulesetName = rulesExecutor.getRulesSet().getName();
+            SessionState sessionState = haStateManager.getSessionState(rulesetName);
 
             HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
             LinkedHashMap<String, EventRecord> eventUuidsInMemory = haSessionContext.getEventUuidsInMemory();
@@ -297,7 +298,7 @@ public class AstRulesEngine implements Closeable {
         }
 
         // TODO: verify if the SessionState is the latest
-        SessionState retrievedSessionState = haStateManager.getSessionState();
+        SessionState retrievedSessionState = haStateManager.getSessionState(((HARulesExecutor) executor).getRulesSet().getName());
         if (retrievedSessionState == null) {
             SessionStateLite sessionStateLite = haStateManager.getSessionStateLite(executor.getRuleSetName());
             String rulebookHash = sessionStateLite.getCurrentStateSHA(); // the first currentStateSHA is the rulebook hash
@@ -306,6 +307,7 @@ public class AstRulesEngine implements Closeable {
             // TODO: Confirm the spec that the current session is clean (nothing processed yet) at the moment
             SessionState sessionState = new SessionState();
             sessionState.setHaUuid(haStateManager.getHaUuid());
+            sessionState.setRuleSetName(((HARulesExecutor) executor).getRulesSet().getName());
             sessionState.setPartialEvents(List.of());
             long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
             sessionState.setCreatedTime(currentTime);
@@ -333,7 +335,7 @@ public class AstRulesEngine implements Closeable {
         }
 
         // TODO: verify if the SessionState is the latest
-        SessionState retrievedSessionState = haStateManager.getSessionState();
+        SessionState retrievedSessionState = haStateManager.getSessionState(rulesSet.getName());
         if (retrievedSessionState == null) {
             // No existing SessionState , create a new RulesExecutor
             RulesExecutor executor = rulesExecutorContainer.register(HARulesExecutorFactory.createRulesExecutor(rulesSet));
@@ -344,6 +346,7 @@ public class AstRulesEngine implements Closeable {
                 // The first creation of SessionState
                 SessionState sessionState = new SessionState();
                 sessionState.setHaUuid(haStateManager.getHaUuid());
+                sessionState.setRuleSetName(rulesSet.getName());
                 sessionState.setPartialEvents(List.of());
                 long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
                 sessionState.setCreatedTime(currentTime);

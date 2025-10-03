@@ -10,6 +10,7 @@ import java.util.List;
 public class SessionState {
 
     private String haUuid;
+    private String ruleSetName;
     private String rulebookHash;
 
     private List<EventRecord> partialEvents;
@@ -47,6 +48,14 @@ public class SessionState {
 
     public void setRulebookHash(String rulebookHash) {
         this.rulebookHash = rulebookHash;
+    }
+
+    public String getRuleSetName() {
+        return ruleSetName;
+    }
+
+    public void setRuleSetName(String ruleSetName) {
+        this.ruleSetName = ruleSetName;
     }
 
     public List<EventRecord> getPartialEvents() {

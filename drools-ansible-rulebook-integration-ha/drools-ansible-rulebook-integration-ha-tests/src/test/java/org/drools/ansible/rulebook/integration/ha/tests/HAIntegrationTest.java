@@ -60,6 +60,42 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         return RULE_SET_BASIC;
     }
 
+    private static final String RULE_SET_SECONDARY = """
+            {
+                "name": "Humidity Ruleset",
+                "sources": {"EventSource": "test"},
+                "rules": [
+                    {"Rule": {
+                        "name": "humidity_alert",
+                        "condition": {
+                            "GreaterThanExpression": {
+                                "lhs": {
+                                    "Event": "humidity"
+                                },
+                                "rhs": {
+                                    "Integer": 70
+                                }
+                            }
+                        },
+                        "action": {
+                            "run_playbook": [
+                                {
+                                    "name": "humid_alert.yml",
+                                    "extra_vars": {
+                                        "message": "High humidity detected"
+                                    }
+                                }
+                            ]
+                        }
+                    }}
+                ]
+            }
+            """;
+
+    private String getSecondaryRuleSetName() {
+        return (String) JsonMapper.readValueAsMapOfStringAndObject(RULE_SET_SECONDARY).get("name");
+    }
+
     @Test
     void testBasicBehaviorOtherThanHA() {
         // Enable leader mode
@@ -75,10 +111,6 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
-
-        System.out.println("======");
-        System.out.println("Result: " + result);
-        System.out.println("======");
 
         // Parse result to verify ME UUID is included
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
@@ -154,12 +186,13 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         String stateSha1 = HAUtils.calculateStateSHA(baseSha, eventUuid1);
 
         HAStateManager haManagerForAssertion = createHAStateManagerForAssertion();
-        SessionState state1 = haManagerForAssertion.getSessionState();
+        SessionState state1 = haManagerForAssertion.getSessionState(getRuleSetNameValue());
 
         assertThat(state1).isNotNull();
         assertThat(state1.getLastProcessedEventUuid()).isEqualTo(eventUuid1);
         assertThat(state1.getPreviousStateSHA()).isEqualTo(baseSha);
         assertThat(state1.getCurrentStateSHA()).isEqualTo(stateSha1);
+        assertThat(state1.getPartialEvents()).isEmpty();
 
         String eventUuid2 = "XXXXXXXX-2222-3333-4444-555555555555";
         String event2 = """
@@ -174,12 +207,13 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         String stateSha2 = HAUtils.calculateStateSHA(stateSha1, eventUuid2);
 
-        SessionState state2 = haManagerForAssertion.getSessionState();
+        SessionState state2 = haManagerForAssertion.getSessionState(getRuleSetNameValue());
 
         assertThat(state2).isNotNull();
         assertThat(state2.getLastProcessedEventUuid()).isEqualTo(eventUuid2);
         assertThat(state2.getPreviousStateSHA()).isEqualTo(stateSha1);
         assertThat(state2.getCurrentStateSHA()).isEqualTo(stateSha2);
+        assertThat(state1.getPartialEvents()).isEmpty();
     }
 
     @Test
@@ -376,5 +410,77 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(result2).contains("temperature_alert");
 
         consumer1restart.stop();
+    }
+
+    @Test
+    void testMultipleRuleSetsSingleRestart() {
+        rulesEngine1.enableLeader("engine-1");
+
+        long sessionIdPrimary = sessionId1;
+        long sessionIdSecondary = rulesEngine1.createRuleset(RULE_SET_SECONDARY);
+
+        // Process events that hit both rulesets before the crash
+        String eventPrimary = """
+                {
+                    "meta": {"uuid": "aaaaaaaa-1111-2222-3333-444444444444"},
+                    "temperature": 45,
+                    "critical": true
+                }
+                """;
+        List<Map<String, Object>> primaryMatches = JsonMapper.readValueAsListOfMapOfStringAndObject(
+                rulesEngine1.assertEvent(sessionIdPrimary, eventPrimary));
+        String primaryUuid = (String) primaryMatches.get(0).get("matching_uuid");
+        assertThat(primaryUuid).isNotNull();
+
+        String eventSecondary = """
+                {
+                    "meta": {"uuid": "bbbbbbbb-1111-2222-3333-555555555555"},
+                    "humidity": 80,
+                    "location": "greenhouse"
+                }
+                """;
+        List<Map<String, Object>> secondaryMatches = JsonMapper.readValueAsListOfMapOfStringAndObject(
+                rulesEngine1.assertEvent(sessionIdSecondary, eventSecondary));
+        String secondaryUuid = (String) secondaryMatches.get(0).get("matching_uuid");
+        assertThat(secondaryUuid).isNotNull();
+
+        // Simulate crash of the leader handling both rule sets
+        rulesEngine1.disableLeader("engine-1");
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+
+        // Restart the node and re-register both rule sets
+        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
+        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        long sessionIdPrimaryRestart = rulesEngine1Restart.createRuleset(getRuleSet());
+        long sessionIdSecondaryRestart = rulesEngine1Restart.createRuleset(RULE_SET_SECONDARY);
+        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
+        consumer1restart.startConsuming(rulesEngine1Restart.port());
+
+        rulesEngine1Restart.enableLeader("engine-1");
+
+        // Process new events in each ruleset to ensure they continue to function
+        List<Map<String, Object>> replayPrimary = JsonMapper.readValueAsListOfMapOfStringAndObject(
+                rulesEngine1Restart.assertEvent(sessionIdPrimaryRestart, "{\"meta\":{\"uuid\":\"cccccccc-1111-2222-3333-666666666666\"},\"temperature\":48}"));
+        assertThat(replayPrimary.get(0).get("matching_uuid")).isNotNull();
+
+        List<Map<String, Object>> replaySecondary = JsonMapper.readValueAsListOfMapOfStringAndObject(
+                rulesEngine1Restart.assertEvent(sessionIdSecondaryRestart, "{\"meta\":{\"uuid\":\"dddddddd-1111-2222-3333-777777777777\"},\"humidity\":75}"));
+        assertThat(replaySecondary.get(0).get("matching_uuid")).isNotNull();
+
+        // Confirm the database still tracks the two rule sets independently
+        HAStateManager stateManagerForAssertion = createHAStateManagerForAssertion();
+        try {
+            SessionState statePrimary = stateManagerForAssertion.getSessionState(getRuleSetNameValue());
+            SessionState stateSecondary = stateManagerForAssertion.getSessionState(getSecondaryRuleSetName());
+            assertThat(statePrimary.getRuleSetName()).isEqualTo(getRuleSetNameValue());
+            assertThat(stateSecondary.getRuleSetName()).isEqualTo(getSecondaryRuleSetName());
+            assertThat(statePrimary.getLastProcessedEventUuid()).isNotEqualTo(stateSecondary.getLastProcessedEventUuid());
+        } finally {
+            stateManagerForAssertion.shutdown();
+            consumer1restart.stop();
+            rulesEngine1Restart.close();
+        }
     }
 }
