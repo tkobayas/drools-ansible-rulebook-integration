@@ -24,14 +24,14 @@ public class RuleMatch {
         return new RuleMatch(match.getRule().getName(), matchToMap(match));
     }
 
-    public static List<Map<String, Map>> asList(Collection<Match> matches) {
+    public static List<Map<String, Map<String, Object>>> asList(Collection<Match> matches) {
         return matches.stream()
                 .map(RuleMatch::asMap)
                 .collect(Collectors.toList());
     }
 
-    private static Map<String, Map> asMap(Match match) {
-        Map<String, Map> result = new HashMap<>();
+    private static Map<String, Map<String, Object>> asMap(Match match) {
+        Map<String, Map<String, Object>> result = new HashMap<>();
         result.put(match.getRule().getName(), matchToMap(match));
         return result;
     }
