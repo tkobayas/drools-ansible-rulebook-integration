@@ -23,6 +23,7 @@ public class HASessionContext {
         return processedRecords;
     }
 
+    // TODO: consider unifying method names
     public void addEventUuidInMemory(String uuid, EventRecord eventRecord) {
         addRecord(uuid, eventRecord, null);
     }
