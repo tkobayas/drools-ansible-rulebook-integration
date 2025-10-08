@@ -7,6 +7,7 @@ import java.util.Map;
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
+import org.drools.ansible.rulebook.integration.ha.model.EventRecord.RecordType;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.SessionStateLite;
 import org.drools.core.time.impl.PseudoClockScheduler;
@@ -28,7 +29,11 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             List<EventRecord> partialEvents = sessionState.getPartialEvents();
             for (EventRecord eventRecord : partialEvents) {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
-                rulesExecutor.processEvents(eventRecord.getEventJson());
+                if (eventRecord.getRecordType() == RecordType.FACT) {
+                    rulesExecutor.processFacts(eventRecord.getEventJson());
+                } else {
+                    rulesExecutor.processEvents(eventRecord.getEventJson());
+                }
                 currentTime = eventRecord.getInsertedAt();
             }
             rulesExecutor.advanceTime(sessionState.getPersistedTime() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
