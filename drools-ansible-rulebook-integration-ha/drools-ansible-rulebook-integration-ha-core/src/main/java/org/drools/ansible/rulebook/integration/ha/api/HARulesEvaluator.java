@@ -51,6 +51,8 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
 
     @Override
     protected void processDiscardedFact(InternalFactHandle fh) {
-        getEventUuid(fh).ifPresent(uuid -> getHaSessionContext().removeEventUuidInMemory(uuid));
+        getEventUuid(fh).ifPresentOrElse(
+                uuid -> getHaSessionContext().removeEventUuidInMemory(uuid),
+                () -> getHaSessionContext().removeRecordByFactHandle(fh.getId()));
     }
 }
