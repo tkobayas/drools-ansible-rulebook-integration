@@ -26,6 +26,7 @@ import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutorFactory;
 import org.drools.ansible.rulebook.integration.ha.api.HASessionContext;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
+import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -104,7 +105,13 @@ public class AstRulesEngine implements Closeable {
     }
 
     public String assertFact(long sessionId, String serializedFact) {
-        return matchesToJson( rulesExecutorContainer.get(sessionId).processFacts(serializedFact).join() );
+        List<Match> matches = rulesExecutorContainer.get(sessionId).processFacts(serializedFact).join();
+
+        if (haMode && haStateManager != null && haStateManager.isLeader()) {
+            return processFactResponseHA(sessionId, matches, serializedFact);
+        }
+
+        return matchesToJson(matches);
     }
 
     public String assertEvent(long sessionId, String serializedFact) {
@@ -129,14 +136,12 @@ public class AstRulesEngine implements Closeable {
             SessionState sessionState = haStateManager.getSessionState(rulesetName);
 
             HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
-            LinkedHashMap<String, EventRecord> eventUuidsInMemory = haSessionContext.getEventUuidsInMemory();
-            sessionState.setPartialEvents(new ArrayList<>(eventUuidsInMemory.values()));
+            LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getEventUuidsInMemory();
+            sessionState.setPartialEvents(new ArrayList<>(recordsInMemory.values()));
             sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
 
-            String currentStateSHA = sessionState.getCurrentStateSHA();
-            sessionState.setPreviousStateSHA(currentStateSHA);
-            sessionState.setCurrentStateSHA(calculateStateSHA(currentStateSHA, haSessionContext.getCurrentEventUuid()));
-            sessionState.setLastProcessedEventUuid(haSessionContext.getCurrentEventUuid());
+            applyShaAdvance(sessionState, haSessionContext.getCurrentIdentifier());
+            sessionState.setLastProcessedEventUuid(haSessionContext.getCurrentIdentifier());
 
             haStateManager.persistSessionState(sessionState);
 
@@ -147,43 +152,77 @@ public class AstRulesEngine implements Closeable {
             logger.warn("Failed to persist event state for HA statistics", e);
         }
 
-        // In HA mode, create matching events for triggered rules and add ME UUIDs to response
-        if (!matches.isEmpty()) {
-            try {
-                List<Map<String, Object>> haMatches = new ArrayList<>(matchList.size());
-                // Process each match and add ME UUID
-                for (int i = 0; i < matchList.size(); i++) {
-                    Map<String, Map<String, Object>> matchData = matchList.get(i); // e.g. {"temperature_alert":{"m":{"critical":true,"temperature":45}}}
-                    String ruleName = matchData.keySet().iterator().next(); // 1st level key is rule name
-                    String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
-                    Map<String, Object> eventData = matchData.get(ruleName); // e.g. {"m":{"critical":true,"temperature":45}}
+        return buildHaResponse(sessionId, matchList);
+    }
 
-                    // Create MatchingEvent object
-                    MatchingEvent me = new MatchingEvent();
-                    me.setHaUuid(haStateManager.getHaUuid());
-                    me.setRuleSetName(rulesetName);
-                    me.setRuleName(ruleName);
-                    me.setEventData(toJson(eventData));
+    private String processFactResponseHA(long sessionId, List<Match> matches, String serializedFact) {
+        List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
 
-                    String meUuid = haStateManager.addMatchingEvent(me);
-                    logger.debug("Created ME UUID {} for rule {}/{}", meUuid, rulesetName, ruleName);
+        try {
+            HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
 
-                    Map<String, Object> resultEntry = new LinkedHashMap<>();
-                    populateHAMatchResponse(resultEntry, ruleName, eventData, meUuid);
-                    haMatches.add(resultEntry);
-                    logger.debug("Prepared HA response entry for {}", ruleName);
-                }
+            String rulesetName = rulesExecutor.getRulesSet().getName();
+            SessionState sessionState = haStateManager.getSessionState(rulesetName);
 
-                String result = toJson(haMatches);
-                logger.debug("Modified response with ME UUIDs: {}", result);
-                return result;
-            } catch (Exception e) {
-                logger.error("Failed to parse or modify assertEvent response for HA mode", e);
-                // Fall back to original response if JSON processing fails
-            }
+            HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
+            LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getEventUuidsInMemory();
+            sessionState.setPartialEvents(new ArrayList<>(recordsInMemory.values()));
+            sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
+
+            String factIdentifier = HAUtils.sha256(serializedFact);
+            applyShaAdvance(sessionState, factIdentifier);
+            sessionState.setLastProcessedEventUuid(factIdentifier);
+
+            haStateManager.persistSessionState(sessionState);
+
+            HAStats haStats = haStateManager.getHAStats();
+            haStats.incrementEventsProcessed();
+            haStateManager.persistHAStats();
+        } catch (Exception e) {
+            logger.warn("Failed to persist fact state for HA statistics", e);
         }
 
-        return toJson(matchList);
+        return buildHaResponse(sessionId, matchList);
+    }
+
+    private void applyShaAdvance(SessionState sessionState, String processedIdentifier) {
+        if (processedIdentifier == null) {
+            return;
+        }
+        String currentStateSHA = sessionState.getCurrentStateSHA();
+        sessionState.setPreviousStateSHA(currentStateSHA);
+        sessionState.setCurrentStateSHA(calculateStateSHA(currentStateSHA, processedIdentifier));
+    }
+
+    private String buildHaResponse(long sessionId, List<Map<String, Map<String, Object>>> matchList) {
+        if (matchList.isEmpty()) {
+            return toJson(matchList);
+        }
+
+        try {
+            String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
+            List<Map<String, Object>> haMatches = new ArrayList<>(matchList.size());
+            for (Map<String, Map<String, Object>> matchData : matchList) {
+                String ruleName = matchData.keySet().iterator().next();
+                Map<String, Object> eventData = matchData.get(ruleName);
+
+                MatchingEvent me = new MatchingEvent();
+                me.setHaUuid(haStateManager.getHaUuid());
+                me.setRuleSetName(rulesetName);
+                me.setRuleName(ruleName);
+                me.setEventData(toJson(eventData));
+
+                String meUuid = haStateManager.addMatchingEvent(me);
+
+                Map<String, Object> resultEntry = new LinkedHashMap<>();
+                populateHAMatchResponse(resultEntry, ruleName, eventData, meUuid);
+                haMatches.add(resultEntry);
+            }
+            return toJson(haMatches);
+        } catch (Exception e) {
+            logger.error("Failed to build HA response payload", e);
+            return toJson(matchList);
+        }
     }
 
     /**
