@@ -2,7 +2,6 @@ package org.drools.ansible.rulebook.integration.ha.api;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
@@ -15,6 +14,7 @@ import org.kie.api.runtime.rule.Match;
 
 import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil.asFactMap;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 public class HARulesExecutor extends RulesExecutor {
 
@@ -40,12 +40,17 @@ public class HARulesExecutor extends RulesExecutor {
         rulesEvaluator.stashFirstEventJsonForValidation(json);
 
         Map<String, Object> eventMap = asFactMap(json);
-        getEventUuid(eventMap).ifPresent(eventUuid -> {
-            EventRecord eventRecord = new EventRecord(eventUuid, json, asKieSession().getSessionClock().getCurrentTime());
-            getHaSessionContext().addEventUuidInMemory(eventUuid, eventRecord);
-        });
+        String eventUuid = getEventUuid(eventMap).orElse(null);
+        getHaSessionContext().preparePendingRecord(eventUuid, json, EventRecord.RecordType.EVENT);
 
-        return rulesEvaluator.processEvents(asFactMap(json));
+        return rulesEvaluator.processEvents(eventMap);
+    }
+
+    @Override
+    public CompletableFuture<List<Match>> processFacts(String json) {
+        MemoryMonitorUtil.checkMemoryOccupation(rulesEvaluator.getSessionStatsCollector());
+        getHaSessionContext().preparePendingRecord(sha256(json), json, EventRecord.RecordType.FACT);
+        return rulesEvaluator.processFacts(asFactMap(json));
     }
 
     public HASessionContext getHaSessionContext() {
