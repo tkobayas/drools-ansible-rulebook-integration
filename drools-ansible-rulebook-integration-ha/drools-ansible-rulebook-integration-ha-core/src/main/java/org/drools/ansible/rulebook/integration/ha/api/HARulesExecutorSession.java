@@ -22,15 +22,6 @@ public class HARulesExecutorSession extends RulesExecutorSession {
         this.haSessionContext = new HASessionContext();
     }
 
-//    @Override
-//    protected InternalFactHandle insert(Map<String, Object> factMap, boolean event) {
-//        InternalFactHandle factHandle = super.insert(factMap, event);
-//        if (event) {
-//            getEventUuid(factHandle).ifPresent(haSessionContext::addEventUuidInMemory);
-//        }
-//        return factHandle;
-//    }
-
     @Override
     protected void delete(FactHandle fh) {
         super.delete(fh);
