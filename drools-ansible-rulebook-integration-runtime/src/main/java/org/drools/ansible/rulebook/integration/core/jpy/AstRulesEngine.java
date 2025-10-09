@@ -111,7 +111,7 @@ public class AstRulesEngine implements Closeable {
             return processFactResponseHA(sessionId, matches, serializedFact);
         }
 
-        return matchesToJson(matches);
+        return matchesToJson(matches); // TODO: HA response format for non-leader? how about meUUID?
     }
 
     public String assertEvent(long sessionId, String serializedFact) {
@@ -119,9 +119,9 @@ public class AstRulesEngine implements Closeable {
 
         if (haMode && haStateManager != null && haStateManager.isLeader()) {
             return processEventResponseHA(sessionId, matches);
-        } else {
-            return matchesToJson(matches);
         }
+
+        return matchesToJson(matches); // TODO: HA response format for non-leader? how about meUUID?
     }
 
     private String processEventResponseHA(long sessionId, List<Match> matches) {
