@@ -15,12 +15,12 @@ import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createE
 /**
  * Integration tests for AstRulesEngine with HA functionality
  */
-class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
+class HAIntegrationTestMultiConditionFact extends HAIntegrationTestBase {
 
     // Multi condition rule
-    private static final String RULE_SET_MULTI_CONDITION = """
+    private static final String RULE_SET_MULTI_CONDITION_FACT = """
                 {
-                    "name": "Multi Condition Ruleset",
+                    "name": "Multi Condition Fact Ruleset",
                     "rules": [
                         {"Rule": {
                             "name": "temperature_alert",
@@ -29,7 +29,7 @@ class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
                                     {
                                         "EqualsExpression": {
                                             "lhs": {
-                                                "Event": "i"
+                                                "Fact": "i"
                                             },
                                             "rhs": {
                                                 "Integer": 1
@@ -65,17 +65,17 @@ class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
 
     @Override
     protected String getRuleSet() {
-        return RULE_SET_MULTI_CONDITION;
+        return RULE_SET_MULTI_CONDITION_FACT;
     }
 
     @Test
     void testSessionRecoveryWithPartialMatchOnTheSameNode() {
-        // Step 1: Node 1 becomes leader and processes first event (partial match)
+        // Step 1: Node 1 becomes leader and processes first fact (partial match)
         rulesEngine1.enableLeader("node-1");
 
-        // Process first event that creates partial match
-        String firstEvent = createEvent("{\"i\":1}");
-        String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
+        // Process first fact that creates partial match
+        String firstFact = "{\"i\":1}";
+        String result1 = rulesEngine1.assertFact(sessionId1, firstFact);
 
         // Should be empty since rule requires both i=1 AND j=2
         assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
@@ -99,7 +99,7 @@ class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
         consumer1restart.startConsuming(rulesEngine1Restart.port());
 
         // Step 4: Node 1 processes second event that should complete the match
-        // The recovered session should have the partial match from the first event
+        // The recovered session should have the partial match from the first fact
         String secondEvent = createEvent("{\"j\":2}");
         String result2 = rulesEngine1Restart.assertEvent(sessionId1Restart, secondEvent);
 
@@ -112,5 +112,19 @@ class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
 //        Map<String, Object> match = matches.get(0);
 //        assertThat(match.get("name")).isEqualTo("temperature_alert");
 //        assertThat(match).containsKey("matching_uuid");
+    }
+
+    @Test
+    void testHaStatsIncrementOnFactAssertion() {
+        rulesEngine1.enableLeader("node-1");
+
+        Map<String, Object> statsAfterLeader = rulesEngine1.getHAStats();
+        assertThat(statsAfterLeader.get("current_leader")).isEqualTo("node-1");
+        assertThat(((Number) statsAfterLeader.get("events_processed_in_term")).intValue()).isZero();
+
+        rulesEngine1.assertFact(sessionId1, "{\"i\":1}");
+
+        Map<String, Object> statsAfterFact = rulesEngine1.getHAStats();
+        assertThat(((Number) statsAfterFact.get("events_processed_in_term")).intValue()).isEqualTo(1);
     }
 }

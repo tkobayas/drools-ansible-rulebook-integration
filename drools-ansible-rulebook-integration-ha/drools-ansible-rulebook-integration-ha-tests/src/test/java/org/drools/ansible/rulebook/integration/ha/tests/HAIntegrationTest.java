@@ -19,7 +19,9 @@ import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 
 /**
- * Integration tests for AstRulesEngine with HA functionality
+ * Integration tests for AstRulesEngine with HA functionality.
+ * This test uses RULE_SET_BASIC for basic use cases.
+ * To test other rules, create another test class extending HAIntegrationTestBase
  */
 class HAIntegrationTest extends HAIntegrationTestBase {
 
@@ -391,6 +393,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         // Simulate engine-1 crash
         rulesEngine1 = null;
         consumer1.stop();
+        consumer1 = null;
 
         // Simulate restarting engine-1 on the same node. The old instance is gone, so we create a new one
         AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
