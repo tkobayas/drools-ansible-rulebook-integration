@@ -32,7 +32,7 @@ public class H2Schema {
                         persisted_time TIMESTAMP,
                         current_state_sha VARCHAR(64),
                         previous_state_sha VARCHAR(64),
-                        last_processed_event_uuid VARCHAR(36),
+                        last_processed_event_uuid VARCHAR(64),
                         version INT DEFAULT 1,
                         is_current BOOLEAN DEFAULT FALSE,
                         created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
