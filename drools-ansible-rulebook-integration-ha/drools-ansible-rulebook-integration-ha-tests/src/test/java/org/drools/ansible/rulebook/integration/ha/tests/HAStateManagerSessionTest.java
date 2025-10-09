@@ -8,7 +8,7 @@ import org.drools.ansible.rulebook.integration.api.RuleNotation;
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.RulesExecutorFactory;
 import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
-import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutor;
+import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.kie.api.runtime.rule.Match;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.calculateStateSHA;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
@@ -154,6 +155,95 @@ class HAStateManagerSessionTest {
 
         matchList = rulesExecutorRecovered.processEvents(eventJson2).join();
         assertThat(matchList).hasSize(1);
+    }
+
+    public static final String ALL_CONDITION_WITH_FACT_RULE =
+            """
+            {
+                "name": "Test Ruleset",
+                "rules": [
+                        {
+                            "Rule": {
+                                "condition": {
+                                    "AllCondition": [
+                                        {
+                                            "EqualsExpression": {
+                                                "lhs": {
+                                                    "Fact": "i"
+                                                },
+                                                "rhs": {
+                                                    "Integer": 1
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "EqualsExpression": {
+                                                "lhs": {
+                                                    "Event": "j"
+                                                },
+                                                "rhs": {
+                                                    "Integer": 2
+                                                }
+                                            }
+                                        }
+                                    ]
+                                },
+                                "enabled": true,
+                                "name": null
+                            }
+                        }
+                    ]
+            }
+            """;
+
+    @Test
+    void testFactRecordsReplayedOnRecovery() {
+        stateManager.enableLeader(LEADER_ID);
+
+        // This test works without HARulesExecutor
+        RulesExecutor rulesExecutor1 = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK), ALL_CONDITION_WITH_FACT_RULE);
+        long createdTime = rulesExecutor1.asKieSession().getSessionClock().getCurrentTime();
+
+        long insertedAt = createdTime + 1_000;
+        String factJson = "{\"i\":1}";
+        String factIdentifier = HAUtils.sha256(factJson);
+
+        List<Match> matchList = rulesExecutor1.processFacts(factJson).join(); // partial match
+        assertThat(matchList).isEmpty();
+
+        EventRecord factRecord = new EventRecord(factIdentifier, factJson, insertedAt, EventRecord.RecordType.FACT);
+
+        String rulebookHash = HAUtils.sha256(ALL_CONDITION_WITH_FACT_RULE);
+        SessionState sessionState = new SessionState();
+        sessionState.setHaUuid(HA_UUID);
+        sessionState.setRuleSetName(RULE_SET_NAME);
+        sessionState.setLeaderId(LEADER_ID);
+        sessionState.setRulebookHash(rulebookHash);
+        sessionState.setPartialEvents(List.of(factRecord));
+        sessionState.setCreatedTime(createdTime);
+        sessionState.setPersistedTime(insertedAt);
+        sessionState.setCurrentStateSHA(calculateStateSHA(rulebookHash, factIdentifier));
+        sessionState.setPreviousStateSHA(rulebookHash);
+        sessionState.setLastProcessedEventUuid(factIdentifier);
+        sessionState.setVersion(1);
+        sessionState.setCurrent(true);
+
+        stateManager.persistSessionState(sessionState);
+        stateManager.shutdown();
+        stateManager = null;
+
+        HAStateManager stateManager2 = HAStateManagerFactory.create();
+        stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK)
+                .toRulesSet(RuleFormat.JSON, ALL_CONDITION_WITH_FACT_RULE);
+
+        SessionState retrievedState = stateManager2.getSessionState(rulesSet.getName());
+        RulesExecutor recoveredExecutor = stateManager2.recoverSession(rulesSet, retrievedState);
+
+        String recoveredFacts = recoveredExecutor.getAllFactsAsJson();
+        assertThat(recoveredFacts).contains("\"i\":1");
+
+        stateManager2.shutdown();
     }
 
     @Test
