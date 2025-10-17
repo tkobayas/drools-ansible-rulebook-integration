@@ -20,7 +20,6 @@ public class SessionState {
 
     // Metadata
     private int version;
-    private boolean isCurrent;
     private String leaderId;
 
     // For integrity checks
@@ -31,7 +30,6 @@ public class SessionState {
     public SessionState() {
         this.createdTime = Instant.now().toEpochMilli();
         this.version = 1;
-        this.isCurrent = false;
     }
 
     public String getHaUuid() {
@@ -80,14 +78,6 @@ public class SessionState {
 
     public void setVersion(int version) {
         this.version = version;
-    }
-
-    public boolean isCurrent() {
-        return isCurrent;
-    }
-
-    public void setCurrent(boolean current) {
-        isCurrent = current;
     }
 
     public long getCreatedTime() {
