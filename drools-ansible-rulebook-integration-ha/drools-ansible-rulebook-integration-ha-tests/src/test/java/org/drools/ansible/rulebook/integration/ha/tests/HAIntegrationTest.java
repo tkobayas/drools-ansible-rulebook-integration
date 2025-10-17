@@ -283,6 +283,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         // Session state is different from the SessionState persisted by rulesEngine1. So recovery occurs.
         rulesEngine2.enableLeader("leader-2");
 
+        assertThat(rulesEngine2.mismatchRecoveryTriggered).isTrue();
+
         // Verify we can still process events
         String event2 = """
                 {
@@ -324,6 +326,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         // Promote follower to leader - should not trigger recovery
         rulesEngine2.enableLeader("leader-2");
+
+        assertThat(rulesEngine2.mismatchRecoveryTriggered).isFalse();
 
         String secondEvent = """
                 {

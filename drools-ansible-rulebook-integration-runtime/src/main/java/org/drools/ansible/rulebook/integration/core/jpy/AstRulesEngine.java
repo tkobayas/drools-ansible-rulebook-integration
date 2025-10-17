@@ -53,6 +53,9 @@ public class AstRulesEngine implements Closeable {
     private boolean haMode = false;
     private boolean shutdown = false;
 
+    // Test purpose
+    public boolean mismatchRecoveryTriggered = false;
+
     public long createRuleset(String rulesetString) {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
         return createRuleset(rulesSet, rulesetString);
@@ -304,7 +307,7 @@ public class AstRulesEngine implements Closeable {
         }
 
         String nextSha = calculateStateSHA(sessionStateLite.getCurrentStateSHA(), processedIdentifier);
-        haStateManager.registerSessionStateLite(rulesetName, new SessionStateLite(sessionStateLite.getRulebookHash(), nextSha, processedIdentifier));
+        haStateManager.registerSessionStateLite(rulesetName, new SessionStateLite(sessionStateLite.getRulebookHash(), sessionStateLite.getCurrentStateSHA(), nextSha, processedIdentifier));
     }
 
     private void checkAlive() {
@@ -412,18 +415,19 @@ public class AstRulesEngine implements Closeable {
             }
 
             boolean mismatch = false;
-            if (!Objects.equals(retrievedSessionState.getLastProcessedEventUuid(), localLite.getLastProcessedEventUuid())) {
-                // This might be caused by timing issue. The leader crushes, but the follower has processed the event(s).
-                // TODO: We can improve the root cause analysis by adding event count in SessionState and SessionStateLite
-                logger.warn("Last processed event UUID mismatch detected for {} (local {}, persisted {}); Possible data loss or divergence.",
-                        rulesetName, localLite.getLastProcessedEventUuid(), retrievedSessionState.getLastProcessedEventUuid());
-                mismatch = true;
-            }
-            if (!Objects.equals(retrievedSessionState.getCurrentStateSHA(), localLite.getCurrentStateSHA())) {
-                // This might be caused by timing issue. The leader crushes, but the follower has processed the event(s).
-                // TODO: We can indentify a valid scenario by checking if the retrievedSessionState's previousStateSHA matches localLite's currentStateSHA (vise versa)
-                logger.warn("Current state SHA mismatch detected for {} (local {}, persisted {}); Possible data loss or divergence.",
-                        rulesetName, localLite.getCurrentStateSHA(), retrievedSessionState.getCurrentStateSHA());
+
+            if (Objects.equals(retrievedSessionState.getCurrentStateSHA(), localLite.getCurrentStateSHA())) {
+                logger.info("Current state SHA of this node for {} matches the persisted SessionState." +
+                                    " No recovery needed.", rulesetName);
+                // In this case, no recovery needed. No need to check other mismatches.
+            } else if (Objects.equals(retrievedSessionState.getCurrentStateSHA(), localLite.getPreviousStateSHA())) {
+                logger.info("Previous state SHA of this node for {} matches the current state SHA of the persisted SessionState." +
+                                    " It can be explained that one event crushed the leader, but this node successfully processed it. " +
+                                    " This node has the valid state. No recovery needed.", rulesetName);
+                // In this case, no recovery needed. No need to check other mismatches.
+                // TODO: Update the SessionState with the current state --- not only SHA, but also partial events etc.?
+            } else {
+                logger.warn("State SHA mismatch detected for {} while promoting to leader. Recovery needed.", rulesetName);
                 mismatch = true;
             }
 
@@ -441,14 +445,18 @@ public class AstRulesEngine implements Closeable {
                 rulesExecutorContainer.registerWithId(previousId, recoveredRulesExecutor);
                 executor = recoveredRulesExecutor;
                 logger.info("Recovered session {} from persisted SessionState version {}", rulesetName, retrievedSessionState.getVersion());
+
+                mismatchRecoveryTriggered = true;
+
+                // Update the SessionStateLite for non-leader nodes
+                haStateManager.registerSessionStateLite(rulesetName,
+                                                        new SessionStateLite(retrievedSessionState.getRulebookHash(),
+                                                                             retrievedSessionState.getPreviousStateSHA(),
+                                                                             retrievedSessionState.getCurrentStateSHA(),
+                                                                             retrievedSessionState.getLastProcessedEventUuid()));
             } else {
                 logger.info("No recovery needed for session {} upon leader promotion", rulesetName);
             }
-
-            haStateManager.registerSessionStateLite(rulesetName,
-                    new SessionStateLite(retrievedSessionState.getRulebookHash(),
-                                         retrievedSessionState.getCurrentStateSHA(),
-                                         retrievedSessionState.getLastProcessedEventUuid()));
         }
     }
 
@@ -479,7 +487,7 @@ public class AstRulesEngine implements Closeable {
 
                 haStateManager.persistSessionState(sessionState);
             } else {
-                haStateManager.registerSessionStateLite(rulesSet.getName(), new SessionStateLite(rulebookHash, rulebookHash, null));
+                haStateManager.registerSessionStateLite(rulesSet.getName(), new SessionStateLite(rulebookHash, null, rulebookHash, null));
             }
             return executor;
         } else {
@@ -488,6 +496,7 @@ public class AstRulesEngine implements Closeable {
             if (!haStateManager.isLeader()) {
                 haStateManager.registerSessionStateLite(rulesSet.getName(),
                         new SessionStateLite(retrievedSessionState.getRulebookHash(),
+                                             retrievedSessionState.getPreviousStateSHA(),
                                              retrievedSessionState.getCurrentStateSHA(),
                                              retrievedSessionState.getLastProcessedEventUuid()));
             }
