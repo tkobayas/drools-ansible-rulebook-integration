@@ -129,7 +129,6 @@ class HAStateManagerSessionTest {
         sessionState.setPartialEvents(partialEvents);
         sessionState.setPersistedTime(persistedTime);
         sessionState.setVersion(1);
-        sessionState.setCurrent(true);
         sessionState.setCreatedTime(createdTime);
 
         stateManager.persistSessionState(sessionState);
@@ -226,7 +225,6 @@ class HAStateManagerSessionTest {
         sessionState.setPreviousStateSHA(rulebookHash);
         sessionState.setLastProcessedEventUuid(factIdentifier);
         sessionState.setVersion(1);
-        sessionState.setCurrent(true);
 
         stateManager.persistSessionState(sessionState);
         stateManager.shutdown();
