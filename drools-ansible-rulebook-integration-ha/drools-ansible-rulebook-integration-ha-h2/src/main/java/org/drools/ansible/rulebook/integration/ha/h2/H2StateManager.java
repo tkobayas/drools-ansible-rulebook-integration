@@ -120,7 +120,13 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public SessionState getSessionState(String ruleSetName) {
-        String sql = "SELECT * FROM SessionState WHERE ha_uuid = ? AND rule_set_name = ? AND is_current = true";
+        String sql = """
+                SELECT *
+                FROM SessionState
+                WHERE ha_uuid = ? AND rule_set_name = ?
+                ORDER BY version DESC
+                LIMIT 1
+                """;
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -156,7 +162,6 @@ public class H2StateManager extends AbstractHAStateManager {
 
                 // Handle metadata
                 sessionState.setVersion(rs.getInt("version"));
-                sessionState.setCurrent(rs.getBoolean("is_current"));
                 sessionState.setLeaderId(rs.getString("leader_id"));
 
                 // Handle SHA tracking fields
@@ -192,20 +197,12 @@ public class H2StateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
-            // Mark all existing versions as not current
-            String updateSql = "UPDATE SessionState SET is_current = false WHERE ha_uuid = ? AND rule_set_name = ?";
-            try (PreparedStatement ps = conn.prepareStatement(updateSql)) {
-                ps.setString(1, sessionState.getHaUuid());
-                ps.setString(2, sessionState.getRuleSetName());
-                ps.executeUpdate();
-            }
-
             // Insert new version as current
             String sql = """
-                    INSERT INTO SessionState (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, previous_state_sha, last_processed_event_uuid, version, is_current, created_time, leader_id)
+                    INSERT INTO SessionState (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, previous_state_sha, last_processed_event_uuid, version, created_time, leader_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?,
                         COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,
-                        true, ?, ?)
+                        ?, ?)
                     """;
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
