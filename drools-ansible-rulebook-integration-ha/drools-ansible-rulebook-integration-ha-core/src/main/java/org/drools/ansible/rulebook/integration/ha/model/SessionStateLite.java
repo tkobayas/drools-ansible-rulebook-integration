@@ -7,12 +7,18 @@ package org.drools.ansible.rulebook.integration.ha.model;
  */
 public class SessionStateLite {
 
-    private String currentStateSHA;      // SHA256 of current state
+    private final String rulebookHash;   // Base hash derived from rulebook content
+    private String currentStateSHA;      // SHA256 of current state (advances with processed events)
     private String lastProcessedEventUuid;
 
-    public SessionStateLite(String currentStateSHA, String lastProcessedEventUuid) {
+    public SessionStateLite(String rulebookHash, String currentStateSHA, String lastProcessedEventUuid) {
+        this.rulebookHash = rulebookHash;
         this.currentStateSHA = currentStateSHA;
         this.lastProcessedEventUuid = lastProcessedEventUuid;
+    }
+
+    public String getRulebookHash() {
+        return rulebookHash;
     }
 
     public String getCurrentStateSHA() {

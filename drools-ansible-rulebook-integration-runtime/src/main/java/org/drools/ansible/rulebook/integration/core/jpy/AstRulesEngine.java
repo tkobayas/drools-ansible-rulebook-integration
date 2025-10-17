@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -107,18 +108,27 @@ public class AstRulesEngine implements Closeable {
     public String assertFact(long sessionId, String serializedFact) {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processFacts(serializedFact).join();
 
-        if (haMode && haStateManager != null && haStateManager.isLeader()) {
-            return processFactResponseHA(sessionId, matches, serializedFact);
+        if (haMode && haStateManager != null) {
+            if (haStateManager.isLeader()) {
+                return processFactResponseHA(sessionId, matches, serializedFact);
+            } else {
+                updateSessionStateLiteAfterProcessing(sessionId, HAUtils.sha256(serializedFact));
+            }
         }
 
         return matchesToJson(matches); // TODO: HA response format for non-leader? how about meUUID?
     }
 
     public String assertEvent(long sessionId, String serializedFact) {
-        List<Match> matches = rulesExecutorContainer.get(sessionId).processEvents(serializedFact).join();
+        RulesExecutor executor = rulesExecutorContainer.get(sessionId);
+        List<Match> matches = executor.processEvents(serializedFact).join();
 
-        if (haMode && haStateManager != null && haStateManager.isLeader()) {
-            return processEventResponseHA(sessionId, matches);
+        if (haMode && haStateManager != null) {
+            if (haStateManager.isLeader()) {
+                return processEventResponseHA(sessionId, matches);
+            } else if (executor instanceof HARulesExecutor harRulesExecutor) {
+                updateSessionStateLiteAfterProcessing(sessionId, harRulesExecutor.getHaSessionContext().getCurrentIdentifier());
+            }
         }
 
         return matchesToJson(matches); // TODO: HA response format for non-leader? how about meUUID?
@@ -265,6 +275,38 @@ public class AstRulesEngine implements Closeable {
         return rulesExecutorContainer.port();
     }
 
+    private boolean rulebookHashMismatch(String rulesetName, SessionStateLite localLite, SessionState persistedState) {
+        String persistedHash = persistedState.getRulebookHash();
+        String localHash = localLite == null ? null : localLite.getRulebookHash();
+        if (persistedHash == null || localHash == null) {
+            return false;
+        }
+        if (!persistedHash.equals(localHash)) {
+            logger.warn("Rulebook hash mismatch detected for {} (local {}, persisted {}); Make sure the rulebook is identical across HA nodes.",
+                    rulesetName, localHash, persistedHash);
+            return true;
+        }
+        return false;
+    }
+
+    private void updateSessionStateLiteAfterProcessing(long sessionId, String processedIdentifier) {
+        if (!haMode || haStateManager == null || haStateManager.isLeader() || processedIdentifier == null) {
+            return;
+        }
+
+        RulesExecutor executor = rulesExecutorContainer.get(sessionId);
+        String rulesetName = executor.getRuleSetName();
+
+        SessionStateLite sessionStateLite = haStateManager.getSessionStateLite(rulesetName);
+        if (sessionStateLite == null || sessionStateLite.getCurrentStateSHA() == null) {
+            // Nothing to advance yet
+            return;
+        }
+
+        String nextSha = calculateStateSHA(sessionStateLite.getCurrentStateSHA(), processedIdentifier);
+        haStateManager.registerSessionStateLite(rulesetName, new SessionStateLite(sessionStateLite.getRulebookHash(), nextSha, processedIdentifier));
+    }
+
     private void checkAlive() {
         if (shutdown) {
             throw new IllegalStateException("This AstRulesEngine is shutting down");
@@ -336,11 +378,17 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("This method should only be called by the leader");
         }
 
-        // TODO: verify if the SessionState is the latest
-        SessionState retrievedSessionState = haStateManager.getSessionState(((HARulesExecutor) executor).getRulesSet().getName());
+        String rulesetName = executor.getRuleSetName();
+        SessionState retrievedSessionState = haStateManager.getSessionState(rulesetName);
         if (retrievedSessionState == null) {
-            SessionStateLite sessionStateLite = haStateManager.getSessionStateLite(executor.getRuleSetName());
-            String rulebookHash = sessionStateLite.getCurrentStateSHA(); // the first currentStateSHA is the rulebook hash
+            SessionStateLite sessionStateLite = haStateManager.getSessionStateLite(rulesetName);
+            if (sessionStateLite == null) {
+                throw new IllegalStateException("Missing local SessionStateLite for ruleset " + rulesetName + " while promoting to leader");
+            }
+            if (sessionStateLite.getRulebookHash() == null) {
+                throw new IllegalStateException("Missing rulebook hash for ruleset " + rulesetName + " while promoting to leader");
+            }
+            String rulebookHash = sessionStateLite.getRulebookHash();
 
             // The first creation of SessionState
             // TODO: Confirm the spec that the current session is clean (nothing processed yet) at the moment
@@ -355,16 +403,52 @@ public class AstRulesEngine implements Closeable {
             sessionState.setCurrentStateSHA(rulebookHash); // the base SHA is the rulebook hash
             haStateManager.persistSessionState(sessionState);
         } else {
-            // TODO: At the moment, we assume that the new leader's session is the same as the retrieved session state, so no need to restore
-            return;
+            SessionStateLite localLite = haStateManager.getSessionStateLite(rulesetName);
+            if (localLite == null) {
+                throw new IllegalStateException("Missing local SessionStateLite for ruleset " + rulesetName + " while promoting to leader");
+            }
+            if (rulebookHashMismatch(rulesetName, localLite, retrievedSessionState)) {
+                throw new IllegalStateException("Rulebook hash mismatch detected for " + rulesetName + " while promoting to leader");
+            }
 
-//            // restore session using SessionState
-//            // TODO: compare SessionState with the current session. If the same, no need to restore. Typically, this is more likely the case
-//            RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(executor.getRulesSet(), retrievedSessionState);
-//            // replace the existing executor with the recovered one
-//            rulesExecutorContainer.dispose(executor.getId());
-//            rulesExecutorContainer.register(recoveredRulesExecutor);
-//            // TODO: notify the new sessionId to Python side?
+            boolean mismatch = false;
+            if (!Objects.equals(retrievedSessionState.getLastProcessedEventUuid(), localLite.getLastProcessedEventUuid())) {
+                // This might be caused by timing issue. The leader crushes, but the follower has processed the event(s).
+                // TODO: We can improve the root cause analysis by adding event count in SessionState and SessionStateLite
+                logger.warn("Last processed event UUID mismatch detected for {} (local {}, persisted {}); Possible data loss or divergence.",
+                        rulesetName, localLite.getLastProcessedEventUuid(), retrievedSessionState.getLastProcessedEventUuid());
+                mismatch = true;
+            }
+            if (!Objects.equals(retrievedSessionState.getCurrentStateSHA(), localLite.getCurrentStateSHA())) {
+                // This might be caused by timing issue. The leader crushes, but the follower has processed the event(s).
+                // TODO: We can indentify a valid scenario by checking if the retrievedSessionState's previousStateSHA matches localLite's currentStateSHA (vise versa)
+                logger.warn("Current state SHA mismatch detected for {} (local {}, persisted {}); Possible data loss or divergence.",
+                        rulesetName, localLite.getCurrentStateSHA(), retrievedSessionState.getCurrentStateSHA());
+                mismatch = true;
+            }
+
+            if (mismatch) {
+                RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesSet(), retrievedSessionState);
+                long previousId = executor.getId();
+                RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
+                if (removed != null) {
+                    removed.dispose();
+                }
+                // TODO: Review this approach. Now we keep the same session ID for continuity.
+                // Other possible approaches:
+                // A) Return a Map containing previous ID - new ID mappings
+                // B) Send the previous ID - new ID mappings to Python layer via async channel
+                rulesExecutorContainer.registerWithId(previousId, recoveredRulesExecutor);
+                executor = recoveredRulesExecutor;
+                logger.info("Recovered session {} from persisted SessionState version {}", rulesetName, retrievedSessionState.getVersion());
+            } else {
+                logger.info("No recovery needed for session {} upon leader promotion", rulesetName);
+            }
+
+            haStateManager.registerSessionStateLite(rulesetName,
+                    new SessionStateLite(retrievedSessionState.getRulebookHash(),
+                                         retrievedSessionState.getCurrentStateSHA(),
+                                         retrievedSessionState.getLastProcessedEventUuid()));
         }
     }
 
@@ -395,12 +479,19 @@ public class AstRulesEngine implements Closeable {
 
                 haStateManager.persistSessionState(sessionState);
             } else {
-                haStateManager.registerSessionStateLite(rulesSet.getName(), new SessionStateLite(rulebookHash, null));
+                haStateManager.registerSessionStateLite(rulesSet.getName(), new SessionStateLite(rulebookHash, rulebookHash, null));
             }
             return executor;
         } else {
             // restore session using SessionState. Assume the SessionState is correct one, so no need to recompute/verify
-            return haStateManager.recoverSession(rulesSet, retrievedSessionState);
+            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesSet, retrievedSessionState);
+            if (!haStateManager.isLeader()) {
+                haStateManager.registerSessionStateLite(rulesSet.getName(),
+                        new SessionStateLite(retrievedSessionState.getRulebookHash(),
+                                             retrievedSessionState.getCurrentStateSHA(),
+                                             retrievedSessionState.getLastProcessedEventUuid()));
+            }
+            return recoveredExecutor;
         }
     }
 
