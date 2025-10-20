@@ -8,7 +8,6 @@ import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
-import org.drools.ansible.rulebook.integration.ha.model.SessionStateLite;
 
 /**
  * Interface for managing High Availability state persistence.
@@ -55,10 +54,11 @@ public interface HAStateManager {
 
     /**
      * Get current session state for a session
+     * This reads from the database (persisted state)
      *
      * @return The current session state or null if not found
      */
-    SessionState getSessionState(String ruleSetName);
+    SessionState getPersistedSessionState(String ruleSetName);
 
     /**
      * Persist complete session state (includes matching events)
@@ -153,17 +153,18 @@ public interface HAStateManager {
     void shutdown();
 
     /**
-     * Register a lightweight session state for non-leader nodes
-     *
-     * @param sessionStateLite The lightweight session state to register
-     */
-    void registerSessionStateLite(String ruleSetName, SessionStateLite sessionStateLite);
-
-    /**
-     * Get the lightweight session state for a given ruleset
+     * Register session state in memory (for both leader and non-leader nodes)
      *
      * @param ruleSetName The name of the ruleset
-     * @return The lightweight session state or null if not found
+     * @param sessionState The session state to register in memory
      */
-    SessionStateLite getSessionStateLite(String ruleSetName);
+    void registerSessionState(String ruleSetName, SessionState sessionState);
+
+    /**
+     * Get the in-memory session state for a given ruleset
+     *
+     * @param ruleSetName The name of the ruleset
+     * @return The in-memory session state or null if not found
+     */
+    SessionState getInMemorySessionState(String ruleSetName);
 }

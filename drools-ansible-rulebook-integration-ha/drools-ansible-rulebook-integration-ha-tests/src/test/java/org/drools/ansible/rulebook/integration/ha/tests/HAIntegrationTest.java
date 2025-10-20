@@ -188,7 +188,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         String stateSha1 = HAUtils.calculateStateSHA(baseSha, eventUuid1);
 
         HAStateManager haManagerForAssertion = createHAStateManagerForAssertion();
-        SessionState state1 = haManagerForAssertion.getSessionState(getRuleSetNameValue());
+        SessionState state1 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state1).isNotNull();
         assertThat(state1.getLastProcessedEventUuid()).isEqualTo(eventUuid1);
@@ -209,7 +209,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         String stateSha2 = HAUtils.calculateStateSHA(stateSha1, eventUuid2);
 
-        SessionState state2 = haManagerForAssertion.getSessionState(getRuleSetNameValue());
+        SessionState state2 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state2).isNotNull();
         assertThat(state2.getLastProcessedEventUuid()).isEqualTo(eventUuid2);
@@ -524,8 +524,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         // Confirm the database still tracks the two rule sets independently
         HAStateManager stateManagerForAssertion = createHAStateManagerForAssertion();
         try {
-            SessionState statePrimary = stateManagerForAssertion.getSessionState(getRuleSetNameValue());
-            SessionState stateSecondary = stateManagerForAssertion.getSessionState(getSecondaryRuleSetName());
+            SessionState statePrimary = stateManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
+            SessionState stateSecondary = stateManagerForAssertion.getPersistedSessionState(getSecondaryRuleSetName());
             assertThat(statePrimary.getRuleSetName()).isEqualTo(getRuleSetNameValue());
             assertThat(stateSecondary.getRuleSetName()).isEqualTo(getSecondaryRuleSetName());
             assertThat(statePrimary.getLastProcessedEventUuid()).isNotEqualTo(stateSecondary.getLastProcessedEventUuid());
