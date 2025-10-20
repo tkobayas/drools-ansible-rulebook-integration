@@ -32,7 +32,6 @@ import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
-import org.drools.ansible.rulebook.integration.ha.model.SessionStateLite;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,14 +111,10 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processFacts(serializedFact).join();
 
         if (haMode && haStateManager != null) {
-            if (haStateManager.isLeader()) {
-                return processFactResponseHA(sessionId, matches, serializedFact);
-            } else {
-                updateSessionStateLiteAfterProcessing(sessionId, HAUtils.sha256(serializedFact));
-            }
+            return processFactOrEventHA(sessionId, matches, HAUtils.sha256(serializedFact));
         }
 
-        return matchesToJson(matches); // TODO: HA response format for non-leader? how about meUUID?
+        return matchesToJson(matches);
     }
 
     public String assertEvent(long sessionId, String serializedFact) {
@@ -127,75 +122,72 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = executor.processEvents(serializedFact).join();
 
         if (haMode && haStateManager != null) {
-            if (haStateManager.isLeader()) {
-                return processEventResponseHA(sessionId, matches);
-            } else if (executor instanceof HARulesExecutor harRulesExecutor) {
-                updateSessionStateLiteAfterProcessing(sessionId, harRulesExecutor.getHaSessionContext().getCurrentIdentifier());
+            String identifier = (executor instanceof HARulesExecutor harRulesExecutor) ? harRulesExecutor.getHaSessionContext().getCurrentIdentifier() : null;
+            return processFactOrEventHA(sessionId, matches, identifier);
+        }
+
+        return matchesToJson(matches);
+    }
+
+    /**
+     * Common method to handle both event and fact processing in HA mode.
+     * Updates in-memory SessionState for both leader and non-leader nodes.
+     * Leader nodes also persist to database.
+     */
+    private String processFactOrEventHA(long sessionId, List<Match> matches, String identifier) {
+        List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
+
+        try {
+            HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
+            String rulesetName = rulesExecutor.getRulesSet().getName();
+
+            // Get or create in-memory SessionState
+            SessionState sessionState = haStateManager.getInMemorySessionState(rulesetName);
+            if (sessionState == null) {
+                logger.warn("No in-memory SessionState found for {}, skipping HA update", rulesetName);
+                return matchesToJson(matches);
             }
+
+            // Update in-memory SessionState (common for both leader and non-leader)
+            updateInMemorySessionState(rulesExecutor, sessionState, identifier);
+
+            // Leader: persist to database and build HA response
+            if (haStateManager.isLeader()) {
+                haStateManager.persistSessionState(sessionState);
+
+                HAStats haStats = haStateManager.getHAStats();
+                haStats.incrementEventsProcessed();
+                haStateManager.persistHAStats();
+
+                return buildHaResponse(sessionId, matchList);
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to update HA state", e);
         }
 
-        return matchesToJson(matches); // TODO: HA response format for non-leader? how about meUUID?
+        // Non-leader or on error: return standard response
+        return matchesToJson(matches);
     }
 
-    private String processEventResponseHA(long sessionId, List<Match> matches) {
-        // matches is the internal representation of drools matches
-        // matchList is the simplified Map structure for JSON-serialization
-        List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
+    /**
+     * Update in-memory SessionState with current session data.
+     * This method is called for both leader and non-leader nodes after processing an event/fact.
+     */
+    private void updateInMemorySessionState(HARulesExecutor rulesExecutor, SessionState sessionState, String identifier) {
+        HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
+        LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getEventUuidsInMemory();
 
-        try {
-            HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
+        // Update partial events from memory
+        sessionState.setPartialEvents(new ArrayList<>(recordsInMemory.values()));
 
-            String rulesetName = rulesExecutor.getRulesSet().getName();
-            SessionState sessionState = haStateManager.getSessionState(rulesetName);
+        // Update persisted time
+        sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
 
-            HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
-            LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getEventUuidsInMemory();
-            sessionState.setPartialEvents(new ArrayList<>(recordsInMemory.values()));
-            sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
-
-            applyShaAdvance(sessionState, haSessionContext.getCurrentIdentifier());
-            sessionState.setLastProcessedEventUuid(haSessionContext.getCurrentIdentifier());
-
-            haStateManager.persistSessionState(sessionState);
-
-            HAStats haStats = haStateManager.getHAStats();
-            haStats.incrementEventsProcessed(); // TODO: increment by number of events if batch processing
-            haStateManager.persistHAStats();
-        } catch (Exception e) {
-            logger.warn("Failed to persist event state for HA statistics", e);
+        // Advance SHA chain
+        if (identifier != null) {
+            applyShaAdvance(sessionState, identifier);
+            sessionState.setLastProcessedEventUuid(identifier);
         }
-
-        return buildHaResponse(sessionId, matchList);
-    }
-
-    private String processFactResponseHA(long sessionId, List<Match> matches, String serializedFact) {
-        List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
-
-        try {
-            HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
-
-            String rulesetName = rulesExecutor.getRulesSet().getName();
-            SessionState sessionState = haStateManager.getSessionState(rulesetName);
-
-            HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
-            LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getEventUuidsInMemory();
-            sessionState.setPartialEvents(new ArrayList<>(recordsInMemory.values()));
-            sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
-
-            String factIdentifier = HAUtils.sha256(serializedFact);
-            applyShaAdvance(sessionState, factIdentifier);
-            sessionState.setLastProcessedEventUuid(factIdentifier);
-
-            haStateManager.persistSessionState(sessionState);
-
-            HAStats haStats = haStateManager.getHAStats();
-            haStats.incrementEventsProcessed();
-            haStateManager.persistHAStats();
-        } catch (Exception e) {
-            logger.warn("Failed to persist fact state for HA statistics", e);
-        }
-
-        return buildHaResponse(sessionId, matchList);
     }
 
     private void applyShaAdvance(SessionState sessionState, String processedIdentifier) {
@@ -278,9 +270,9 @@ public class AstRulesEngine implements Closeable {
         return rulesExecutorContainer.port();
     }
 
-    private boolean rulebookHashMismatch(String rulesetName, SessionStateLite localLite, SessionState persistedState) {
+    private boolean rulebookHashMismatch(String rulesetName, SessionState localState, SessionState persistedState) {
         String persistedHash = persistedState.getRulebookHash();
-        String localHash = localLite == null ? null : localLite.getRulebookHash();
+        String localHash = localState == null ? null : localState.getRulebookHash();
         if (persistedHash == null || localHash == null) {
             return false;
         }
@@ -290,24 +282,6 @@ public class AstRulesEngine implements Closeable {
             return true;
         }
         return false;
-    }
-
-    private void updateSessionStateLiteAfterProcessing(long sessionId, String processedIdentifier) {
-        if (!haMode || haStateManager == null || haStateManager.isLeader() || processedIdentifier == null) {
-            return;
-        }
-
-        RulesExecutor executor = rulesExecutorContainer.get(sessionId);
-        String rulesetName = executor.getRuleSetName();
-
-        SessionStateLite sessionStateLite = haStateManager.getSessionStateLite(rulesetName);
-        if (sessionStateLite == null || sessionStateLite.getCurrentStateSHA() == null) {
-            // Nothing to advance yet
-            return;
-        }
-
-        String nextSha = calculateStateSHA(sessionStateLite.getCurrentStateSHA(), processedIdentifier);
-        haStateManager.registerSessionStateLite(rulesetName, new SessionStateLite(sessionStateLite.getRulebookHash(), sessionStateLite.getCurrentStateSHA(), nextSha, processedIdentifier));
     }
 
     private void checkAlive() {
@@ -382,81 +356,63 @@ public class AstRulesEngine implements Closeable {
         }
 
         String rulesetName = executor.getRuleSetName();
-        SessionState retrievedSessionState = haStateManager.getSessionState(rulesetName);
-        if (retrievedSessionState == null) {
-            SessionStateLite sessionStateLite = haStateManager.getSessionStateLite(rulesetName);
-            if (sessionStateLite == null) {
-                throw new IllegalStateException("Missing local SessionStateLite for ruleset " + rulesetName + " while promoting to leader");
-            }
-            if (sessionStateLite.getRulebookHash() == null) {
-                throw new IllegalStateException("Missing rulebook hash for ruleset " + rulesetName + " while promoting to leader");
-            }
-            String rulebookHash = sessionStateLite.getRulebookHash();
 
-            // The first creation of SessionState
-            // TODO: Confirm the spec that the current session is clean (nothing processed yet) at the moment
-            SessionState sessionState = new SessionState();
-            sessionState.setHaUuid(haStateManager.getHaUuid());
-            sessionState.setRuleSetName(((HARulesExecutor) executor).getRulesSet().getName());
-            sessionState.setPartialEvents(List.of());
-            long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
-            sessionState.setCreatedTime(currentTime);
-            sessionState.setPersistedTime(currentTime);
-            sessionState.setRulebookHash(rulebookHash);
-            sessionState.setCurrentStateSHA(rulebookHash); // the base SHA is the rulebook hash
-            haStateManager.persistSessionState(sessionState);
+        // Get in-memory state (current node's state)
+        SessionState inMemoryState = haStateManager.getInMemorySessionState(rulesetName);
+        if (inMemoryState == null) {
+            throw new IllegalStateException("Missing in-memory SessionState for ruleset " + rulesetName + " while promoting to leader");
+        }
+
+        // Get persisted state (from database)
+        SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
+
+        if (persistedSessionState == null) {
+            // No persisted state - persist current in-memory state
+            logger.info("No persisted state found for {}. Persisting current in-memory state.", rulesetName);
+            haStateManager.persistSessionState(inMemoryState);
+            return;
+        }
+
+        // Check for rulebook hash mismatch
+        if (rulebookHashMismatch(rulesetName, inMemoryState, persistedSessionState)) {
+            throw new IllegalStateException("Rulebook hash mismatch detected for " + rulesetName + " while promoting to leader");
+        }
+
+        // Compare SHAs to decide if recovery is needed
+        boolean needsRecovery = false;
+
+        if (Objects.equals(persistedSessionState.getCurrentStateSHA(), inMemoryState.getCurrentStateSHA())) {
+            logger.info("Current state SHA of this node for {} matches the persisted SessionState. No recovery needed.", rulesetName);
+        } else if (Objects.equals(persistedSessionState.getCurrentStateSHA(), inMemoryState.getPreviousStateSHA())) {
+            logger.info("Previous state SHA of this node for {} matches the current state SHA of the persisted SessionState." +
+                        " It can be explained that one event crashed the leader, but this node successfully processed it. " +
+                        " This node has the valid state. Persisting in-memory state.", rulesetName);
+            // Persist the in-memory state (which is ahead by one event)
+            haStateManager.persistSessionState(inMemoryState);
         } else {
-            SessionStateLite localLite = haStateManager.getSessionStateLite(rulesetName);
-            if (localLite == null) {
-                throw new IllegalStateException("Missing local SessionStateLite for ruleset " + rulesetName + " while promoting to leader");
-            }
-            if (rulebookHashMismatch(rulesetName, localLite, retrievedSessionState)) {
-                throw new IllegalStateException("Rulebook hash mismatch detected for " + rulesetName + " while promoting to leader");
-            }
+            logger.warn("State SHA mismatch detected for {} while promoting to leader. Recovery needed.", rulesetName);
+            needsRecovery = true;
+        }
 
-            boolean mismatch = false;
-
-            if (Objects.equals(retrievedSessionState.getCurrentStateSHA(), localLite.getCurrentStateSHA())) {
-                logger.info("Current state SHA of this node for {} matches the persisted SessionState." +
-                                    " No recovery needed.", rulesetName);
-                // In this case, no recovery needed. No need to check other mismatches.
-            } else if (Objects.equals(retrievedSessionState.getCurrentStateSHA(), localLite.getPreviousStateSHA())) {
-                logger.info("Previous state SHA of this node for {} matches the current state SHA of the persisted SessionState." +
-                                    " It can be explained that one event crushed the leader, but this node successfully processed it. " +
-                                    " This node has the valid state. No recovery needed.", rulesetName);
-                // In this case, no recovery needed. No need to check other mismatches.
-                // TODO: Update the SessionState with the current state --- not only SHA, but also partial events etc.?
-            } else {
-                logger.warn("State SHA mismatch detected for {} while promoting to leader. Recovery needed.", rulesetName);
-                mismatch = true;
+        if (needsRecovery) {
+            // Recover from persisted state
+            RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesSet(), persistedSessionState);
+            long previousId = executor.getId();
+            RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
+            if (removed != null) {
+                removed.dispose();
             }
 
-            if (mismatch) {
-                RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesSet(), retrievedSessionState);
-                long previousId = executor.getId();
-                RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
-                if (removed != null) {
-                    removed.dispose();
-                }
-                // TODO: Review this approach. Now we keep the same session ID for continuity.
-                // Other possible approaches:
-                // A) Return a Map containing previous ID - new ID mappings
-                // B) Send the previous ID - new ID mappings to Python layer via async channel
-                rulesExecutorContainer.registerWithId(previousId, recoveredRulesExecutor);
-                executor = recoveredRulesExecutor;
-                logger.info("Recovered session {} from persisted SessionState version {}", rulesetName, retrievedSessionState.getVersion());
+            // Keep the same session ID for continuity
+            rulesExecutorContainer.registerWithId(previousId, recoveredRulesExecutor);
 
-                mismatchRecoveryTriggered = true;
+            // Update in-memory state to match recovered state
+            haStateManager.registerSessionState(rulesetName, persistedSessionState);
 
-                // Update the SessionStateLite for non-leader nodes
-                haStateManager.registerSessionStateLite(rulesetName,
-                                                        new SessionStateLite(retrievedSessionState.getRulebookHash(),
-                                                                             retrievedSessionState.getPreviousStateSHA(),
-                                                                             retrievedSessionState.getCurrentStateSHA(),
-                                                                             retrievedSessionState.getLastProcessedEventUuid()));
-            } else {
-                logger.info("No recovery needed for session {} upon leader promotion", rulesetName);
-            }
+            logger.info("Recovered session {} from persisted SessionState version {}", rulesetName, persistedSessionState.getVersion());
+            mismatchRecoveryTriggered = true;
+        } else {
+            logger.info("No recovery needed for session {} upon leader promotion", rulesetName);
         }
     }
 
@@ -465,43 +421,45 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("null rulesetString is not allowed in HA mode");
         }
 
-        // TODO: verify if the SessionState is the latest
-        SessionState retrievedSessionState = haStateManager.getSessionState(rulesSet.getName());
-        if (retrievedSessionState == null) {
-            // No existing SessionState , create a new RulesExecutor
-            RulesExecutor executor = rulesExecutorContainer.register(HARulesExecutorFactory.createRulesExecutor(rulesSet));
+        String rulesetName = rulesSet.getName();
+        String rulebookHash = sha256(rulesetString);
 
-            String rulebookHash = sha256(rulesetString);
+        // Check for persisted state from database
+        SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
 
-            if (haStateManager.isLeader()) {
-                // The first creation of SessionState
-                SessionState sessionState = new SessionState();
-                sessionState.setHaUuid(haStateManager.getHaUuid());
-                sessionState.setRuleSetName(rulesSet.getName());
-                sessionState.setPartialEvents(List.of());
-                long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
-                sessionState.setCreatedTime(currentTime);
-                sessionState.setPersistedTime(currentTime);
-                sessionState.setRulebookHash(rulebookHash);
-                sessionState.setCurrentStateSHA(rulebookHash); // the base SHA is the rulebook hash
+        if (persistedSessionState != null) {
+            // Persisted state exists - recover from it
+            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesSet, persistedSessionState);
 
-                haStateManager.persistSessionState(sessionState);
-            } else {
-                haStateManager.registerSessionStateLite(rulesSet.getName(), new SessionStateLite(rulebookHash, null, rulebookHash, null));
-            }
-            return executor;
-        } else {
-            // restore session using SessionState. Assume the SessionState is correct one, so no need to recompute/verify
-            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesSet, retrievedSessionState);
-            if (!haStateManager.isLeader()) {
-                haStateManager.registerSessionStateLite(rulesSet.getName(),
-                        new SessionStateLite(retrievedSessionState.getRulebookHash(),
-                                             retrievedSessionState.getPreviousStateSHA(),
-                                             retrievedSessionState.getCurrentStateSHA(),
-                                             retrievedSessionState.getLastProcessedEventUuid()));
-            }
+            // Register recovered state in memory (for both leader and non-leader)
+            haStateManager.registerSessionState(rulesetName, persistedSessionState);
+
             return recoveredExecutor;
         }
+
+        // No persisted state - create fresh executor and initial SessionState
+        RulesExecutor executor = HARulesExecutorFactory.createRulesExecutor(rulesSet);
+
+        // Create initial SessionState (same for both leader and non-leader)
+        SessionState sessionState = new SessionState();
+        sessionState.setHaUuid(haStateManager.getHaUuid());
+        sessionState.setRuleSetName(rulesetName);
+        sessionState.setPartialEvents(List.of());
+        long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
+        sessionState.setCreatedTime(currentTime);
+        sessionState.setPersistedTime(currentTime);
+        sessionState.setRulebookHash(rulebookHash);
+        sessionState.setCurrentStateSHA(rulebookHash); // the base SHA is the rulebook hash
+
+        // Register in memory (for both leader and non-leader)
+        haStateManager.registerSessionState(rulesetName, sessionState);
+
+        // Leader also persists to database
+        if (haStateManager.isLeader()) {
+            haStateManager.persistSessionState(sessionState);
+        }
+
+        return executor;
     }
 
     /**

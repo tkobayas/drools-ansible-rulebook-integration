@@ -9,7 +9,6 @@ import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord.RecordType;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
-import org.drools.ansible.rulebook.integration.ha.model.SessionStateLite;
 import org.drools.core.time.impl.PseudoClockScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,7 +17,7 @@ public abstract class AbstractHAStateManager implements HAStateManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractHAStateManager.class);
 
-    private final Map<String, SessionStateLite> sessionStateLiteMap = new HashMap<>();
+    private final Map<String, SessionState> sessionStateMap = new HashMap<>();
 
     @Override
     public RulesExecutor recoverSession(RulesSet rulesSet, SessionState sessionState) {
@@ -41,13 +40,13 @@ public abstract class AbstractHAStateManager implements HAStateManager {
     }
 
     @Override
-    public void registerSessionStateLite(String ruleSetName, SessionStateLite sessionStateLite) {
-        sessionStateLiteMap.put(ruleSetName, sessionStateLite);
+    public void registerSessionState(String ruleSetName, SessionState sessionState) {
+        sessionStateMap.put(ruleSetName, sessionState);
     }
 
     @Override
-    public SessionStateLite getSessionStateLite(String ruleSetName) {
-        return sessionStateLiteMap.get(ruleSetName);
+    public SessionState getInMemorySessionState(String ruleSetName) {
+        return sessionStateMap.get(ruleSetName);
     }
 
 }

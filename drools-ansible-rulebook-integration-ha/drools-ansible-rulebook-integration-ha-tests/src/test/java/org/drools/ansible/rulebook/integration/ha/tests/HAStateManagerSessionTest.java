@@ -145,7 +145,7 @@ class HAStateManagerSessionTest {
         stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK).toRulesSet(RuleFormat.JSON, ALL_CONDITION_RULE);
 
-        SessionState retrievedSessionState = stateManager2.getSessionState(rulesSet.getName());
+        SessionState retrievedSessionState = stateManager2.getPersistedSessionState(rulesSet.getName());
         RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(rulesSet, retrievedSessionState);
 
         rulesExecutorRecovered.advanceTime(10, java.util.concurrent.TimeUnit.SECONDS);
@@ -235,7 +235,7 @@ class HAStateManagerSessionTest {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK)
                 .toRulesSet(RuleFormat.JSON, ALL_CONDITION_WITH_FACT_RULE);
 
-        SessionState retrievedState = stateManager2.getSessionState(rulesSet.getName());
+        SessionState retrievedState = stateManager2.getPersistedSessionState(rulesSet.getName());
         RulesExecutor recoveredExecutor = stateManager2.recoverSession(rulesSet, retrievedState);
 
         String recoveredFacts = recoveredExecutor.getAllFactsAsJson();
@@ -270,7 +270,7 @@ class HAStateManagerSessionTest {
         stateManager = HAStateManagerFactory.create();
         stateManager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
 
-        SessionState retrieved = stateManager.getSessionState(RULE_SET_NAME);
+        SessionState retrieved = stateManager.getPersistedSessionState(RULE_SET_NAME);
         assertThat(retrieved.getCurrentStateSHA()).isEqualTo("sha-current-001");
         assertThat(retrieved.getPreviousStateSHA()).isEqualTo("sha-prev-000");
         assertThat(retrieved.getLastProcessedEventUuid()).isEqualTo("event-uuid-001");
@@ -299,8 +299,8 @@ class HAStateManagerSessionTest {
         rulesetB.setLastProcessedEventUuid("eventB");
         stateManager.persistSessionState(rulesetB);
 
-        SessionState retrievedA = stateManager.getSessionState("rulesetA");
-        SessionState retrievedB = stateManager.getSessionState("rulesetB");
+        SessionState retrievedA = stateManager.getPersistedSessionState("rulesetA");
+        SessionState retrievedB = stateManager.getPersistedSessionState("rulesetB");
 
         assertThat(retrievedA.getRuleSetName()).isEqualTo("rulesetA");
         assertThat(retrievedA.getCurrentStateSHA()).isEqualTo("shaA");
