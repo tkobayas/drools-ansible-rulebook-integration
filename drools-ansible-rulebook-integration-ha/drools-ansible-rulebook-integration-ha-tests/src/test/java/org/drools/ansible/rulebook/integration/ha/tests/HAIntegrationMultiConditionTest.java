@@ -15,7 +15,7 @@ import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createE
 /**
  * Integration tests for AstRulesEngine with HA functionality
  */
-class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
+class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
 
     // Multi condition rule
     private static final String RULE_SET_MULTI_CONDITION = """

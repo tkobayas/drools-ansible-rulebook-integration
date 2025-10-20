@@ -62,6 +62,12 @@ public class AstRulesEngine implements Closeable {
         return createRuleset(rulesSet, rulesetString);
     }
 
+    // for test convenience
+    public long createRuleset(String rulesetString, RuleConfigurationOption... options) {
+        RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(options).toRulesSet(RuleFormat.JSON, rulesetString);
+        return createRuleset(rulesSet, rulesetString);
+    }
+
     public long createRuleset(RulesSet rulesSet) {
         return createRuleset(rulesSet, null);
     }
