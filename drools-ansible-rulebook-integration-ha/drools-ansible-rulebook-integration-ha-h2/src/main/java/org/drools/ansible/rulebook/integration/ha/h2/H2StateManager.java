@@ -119,7 +119,7 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     @Override
-    public SessionState getSessionState(String ruleSetName) {
+    public SessionState getPersistedSessionState(String ruleSetName) {
         String sql = """
                 SELECT *
                 FROM SessionState
