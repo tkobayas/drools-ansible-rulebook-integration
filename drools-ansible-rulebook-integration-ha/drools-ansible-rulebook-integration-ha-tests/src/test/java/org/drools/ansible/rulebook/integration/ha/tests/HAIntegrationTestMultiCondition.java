@@ -108,9 +108,8 @@ class HAIntegrationTestMultiCondition extends HAIntegrationTestBase {
         List<Map<String, Object>> matches = readValueAsListOfMapOfStringAndObject(result2);
         assertThat(matches).hasSize(1);
 
-        // TODO: HA response format for non-leader. meUUID
-//        Map<String, Object> match = matches.get(0);
-//        assertThat(match.get("name")).isEqualTo("temperature_alert");
-//        assertThat(match).containsKey("matching_uuid");
+        Map<String, Object> match = matches.get(0);
+        assertThat(match).containsEntry("name", "temperature_alert")
+                .containsEntry("matching_uuid", "");
     }
 }
