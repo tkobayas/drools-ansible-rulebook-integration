@@ -12,6 +12,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
@@ -47,14 +48,14 @@ abstract class HAIntegrationTestBase {
     void setUp() {
         rulesEngine1 = new AstRulesEngine();
         rulesEngine1.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
-        sessionId1 = rulesEngine1.createRuleset(getRuleSet());
+        sessionId1 = rulesEngine1.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         consumer1 = new AsyncConsumer("consumer1");
         consumer1.startConsuming(rulesEngine1.port());
 
         rulesEngine2 = new AstRulesEngine();
         rulesEngine2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
-        sessionId2 = rulesEngine2.createRuleset(getRuleSet());
+        sessionId2 = rulesEngine2.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         consumer2 = new AsyncConsumer("consumer2");
         consumer2.startConsuming(rulesEngine2.port());
