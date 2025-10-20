@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -45,6 +46,7 @@ import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 public class AstRulesEngine implements Closeable {
 
     private static final Logger logger = LoggerFactory.getLogger(AstRulesEngine.class);
+    private static final String EMPTY_ME_UUID = "";
 
     private final RulesExecutorContainer rulesExecutorContainer = new RulesExecutorContainer();
     
@@ -151,21 +153,22 @@ public class AstRulesEngine implements Closeable {
             // Update in-memory SessionState (common for both leader and non-leader)
             updateInMemorySessionState(rulesExecutor, sessionState, identifier);
 
-            // Leader: persist to database and build HA response
+            // Leader: persist to database
             if (haStateManager.isLeader()) {
                 haStateManager.persistSessionState(sessionState);
 
                 HAStats haStats = haStateManager.getHAStats();
                 haStats.incrementEventsProcessed();
                 haStateManager.persistHAStats();
-
-                return buildHaResponse(sessionId, matchList);
             }
+
+            // Both leader and non-leader: build HA response format
+            return buildHaResponse(sessionId, matchList, haStateManager.isLeader());
         } catch (Exception e) {
             logger.warn("Failed to update HA state", e);
         }
 
-        // Non-leader or on error: return standard response
+        // On error: return standard response
         return matchesToJson(matches);
     }
 
@@ -199,7 +202,7 @@ public class AstRulesEngine implements Closeable {
         sessionState.setCurrentStateSHA(calculateStateSHA(currentStateSHA, processedIdentifier));
     }
 
-    private String buildHaResponse(long sessionId, List<Map<String, Map<String, Object>>> matchList) {
+    private String buildHaResponse(long sessionId, List<Map<String, Map<String, Object>>> matchList, boolean persistMatchingEvents) {
         if (matchList.isEmpty()) {
             return toJson(matchList);
         }
@@ -217,7 +220,12 @@ public class AstRulesEngine implements Closeable {
                 me.setRuleName(ruleName);
                 me.setEventData(toJson(eventData));
 
-                String meUuid = haStateManager.addMatchingEvent(me);
+                String meUuid;
+                if (persistMatchingEvents) {
+                    meUuid = haStateManager.addMatchingEvent(me);
+                } else {
+                    meUuid = EMPTY_ME_UUID; // Non-leader nodes do not execute actions with ME UUIDs, so empty UUID
+                }
 
                 Map<String, Object> resultEntry = new LinkedHashMap<>();
                 populateHAMatchResponse(resultEntry, ruleName, eventData, meUuid);
