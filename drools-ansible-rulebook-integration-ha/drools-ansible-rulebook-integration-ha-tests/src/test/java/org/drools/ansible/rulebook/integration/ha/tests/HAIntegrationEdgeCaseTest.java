@@ -1,28 +1,21 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-
-import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
-import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
-import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality
  */
-class HAIntegrationTestEdgeCase extends HAIntegrationTestBase {
+class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
 
     // Basic rule
     private static final String RULE_SET_BASIC = """
