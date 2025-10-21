@@ -1,0 +1,203 @@
+package org.drools.ansible.rulebook.integration.ha.tests;
+
+import java.util.List;
+import java.util.Map;
+
+import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
+
+/**
+ * Integration tests for TimeWindow with HA functionality.
+ * TimeWindow requires multiple events to match within a time window.
+ */
+class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
+
+    // TimeWindow rule - requires 3 different events within 10 seconds
+    private static final String RULE_SET_TIME_WINDOW = """
+                {
+                    "name": "TimeWindow Ruleset",
+                    "rules": [
+                        {
+                            "Rule": {
+                                "name": "multi_event_correlation",
+                                "condition": {
+                                    "AllCondition": [
+                                        {
+                                            "EqualsExpression": {
+                                                "lhs": {
+                                                    "Event": "ping.timeout"
+                                                },
+                                                "rhs": {
+                                                    "Boolean": true
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "EqualsExpression": {
+                                                "lhs": {
+                                                    "Event": "sensu.process.status"
+                                                },
+                                                "rhs": {
+                                                    "String": "stopped"
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "GreaterThanExpression": {
+                                                "lhs": {
+                                                    "Event": "sensu.storage.percent"
+                                                },
+                                                "rhs": {
+                                                    "Integer": 95
+                                                }
+                                            }
+                                        }
+                                    ],
+                                    "timeout": "10 seconds"
+                                }
+                            }
+                        }
+                    ]
+                }
+                """;
+
+    @Override
+    protected String getRuleSet() {
+        return RULE_SET_TIME_WINDOW;
+    }
+
+    @Test
+    void testSessionRecoveryWithTimeWindow() {
+        // Step 1: Node 1 becomes leader and processes events
+        rulesEngine1.enableLeader("node-1");
+
+        // Process first event (t=0): sensu.process.status == "stopped"
+        String firstEvent = createEvent("{\"sensu\":{\"process\":{\"status\":\"stopped\"}}}");
+        String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
+
+        // Should NOT match - need all 3 events within window
+        assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        // Advance time by 3 seconds (t=3)
+        rulesEngine1.advanceTime(sessionId1, 3, "SECONDS");
+
+        // Process second event (t=3): ping.timeout == true
+        String secondEvent = createEvent("{\"ping\":{\"timeout\":true}}");
+        String result2 = rulesEngine1.assertEvent(sessionId1, secondEvent);
+
+        // Should still NOT match - need all 3 events
+        assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
+
+        // Advance time by 2 more seconds (t=5)
+        rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
+
+        // Step 2: Simulate Node 1 crash/shutdown
+        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        // Step 3: Node 1 restarted. Not a leader.
+        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
+        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        // recovery happens here. advance 3 seconds to t=3
+        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
+        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
+        consumer1restart.startConsuming(rulesEngine1Restart.port());
+
+        // Advance to the simulated current time (t=5)
+        rulesEngine1Restart.advanceTime(sessionId1Restart, 2, "SECONDS");
+
+        // Step 4: Process third event (t=5): sensu.storage.percent > 95
+        // All 3 events are now within the 10-second window
+        String thirdEvent = createEvent("{\"sensu\":{\"storage\":{\"percent\":97}}}");
+        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+
+        // Should MATCH - all 3 events are within the window
+        List<Map<String, Object>> matches3 = readValueAsListOfMapOfStringAndObject(result3);
+        assertThat(matches3).hasSize(1);
+        assertThat(matches3.get(0))
+                .containsEntry("name", "multi_event_correlation");
+
+        // Verify all 3 events are bound
+        assertThat(((Map)matches3.get(0).get("events"))).containsKeys("m_0", "m_1", "m_2");
+
+        // Clean up
+        rulesEngine1Restart.close();
+        consumer1restart.stop();
+    }
+
+    @Test
+    void testSessionRecoveryWithEventsOutsideTimeWindow() {
+        // This test verifies that temporal constraints are correctly enforced across recovery
+        // when events are spread too far apart in time
+
+        // Step 1: Node 1 becomes leader and processes first event
+        rulesEngine1.enableLeader("node-1");
+
+        // Process first event (t=0): sensu.process.status == "stopped"
+        String firstEvent = createEvent("{\"sensu\":{\"process\":{\"status\":\"stopped\"}}}");
+        String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
+
+        // Should NOT match - need all 3 events within window
+        assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        // Advance time by 3 seconds (t=3)
+        rulesEngine1.advanceTime(sessionId1, 3, "SECONDS");
+
+        // Process second event (t=3): ping.timeout == true
+        String secondEvent = createEvent("{\"ping\":{\"timeout\":true}}");
+        String result2 = rulesEngine1.assertEvent(sessionId1, secondEvent);
+
+        // Should still NOT match - need all 3 events
+        assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
+
+        // Advance time by 2 more seconds (t=5)
+        rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
+
+        // Step 2: Simulate Node 1 crash/shutdown
+        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        // Step 3: Node 1 restarted. Not a leader.
+        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
+        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        // recovery happens here, advances to t=3 (last persisted time)
+        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
+        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
+        consumer1restart.startConsuming(rulesEngine1Restart.port());
+
+        // Advance to t=5 (catch up to simulated current time before crash)
+        rulesEngine1Restart.advanceTime(sessionId1Restart, 2, "SECONDS");
+
+        // Step 4: Advance time significantly (t=5 + 9 = t=14)
+        // This puts us more than 10 seconds away from the first event (t=0)
+        rulesEngine1Restart.advanceTime(sessionId1Restart, 9, "SECONDS");
+
+        // Process third event (t=14): sensu.storage.percent > 95
+        String thirdEvent = createEvent("{\"sensu\":{\"storage\":{\"percent\":97}}}");
+        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+
+        // Should NOT match - Event 1 (t=0) and Event 3 (t=14) are 14 seconds apart (> 10 second window)
+        // Even though we have all 3 event types in working memory:
+        // - Event 1 (sensu.process.status, t=0)
+        // - Event 2 (ping.timeout, t=3)
+        // - Event 3 (sensu.storage.percent, t=14)
+        // The time window constraint requires all events to be within 10 seconds of each other
+        assertThat(readValueAsListOfMapOfStringAndObject(result3)).isEmpty();
+
+        // Clean up
+        rulesEngine1Restart.close();
+        consumer1restart.stop();
+    }
+}
