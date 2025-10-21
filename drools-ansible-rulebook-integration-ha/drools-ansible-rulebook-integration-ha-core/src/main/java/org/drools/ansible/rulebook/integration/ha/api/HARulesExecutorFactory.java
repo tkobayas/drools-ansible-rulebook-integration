@@ -1,5 +1,9 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.function.Consumer;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
@@ -29,6 +33,7 @@ public class HARulesExecutorFactory extends RulesExecutorFactory {
         recovery.accept(rulesExecutor);
         rulesExecutor.setOnRecovery(false);
         LOG.info("Session recovery completed");
+        configurePseudoClock(rulesSet, rulesExecutor); // now configure the pseudo-clock as per normal
         return rulesExecutor;
     }
 
