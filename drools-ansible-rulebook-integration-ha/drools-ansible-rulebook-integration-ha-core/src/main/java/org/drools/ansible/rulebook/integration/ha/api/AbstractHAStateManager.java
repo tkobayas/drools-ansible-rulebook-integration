@@ -6,7 +6,7 @@ import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
-import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceWithinDefinition;
+import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceAbstractTimeConstraint;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord.RecordType;
@@ -34,11 +34,10 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
 
                 RecordType recordType = eventRecord.getRecordType();
-                if (recordType == RecordType.CONTROL_ONCE_WITHIN) {
-                    // TODO: We may need an unified way to recreate control events
+                if (recordType == RecordType.CONTROL_ONCE_WITHIN || recordType == RecordType.CONTROL_ACCUMULATE_WITHIN) {
                     // Directly insert control event with proper prototype and expiration
                     Map<String, Object> eventData = JsonMapper.readValueAsMapOfStringAndObject(eventRecord.getEventJson());
-                    PrototypeEventInstance controlEvent = OnceWithinDefinition.recreateControlEvent(
+                    PrototypeEventInstance controlEvent = OnceAbstractTimeConstraint.recreateControlEvent(
                             eventData, eventRecord.getExpirationDuration());
                     rulesExecutor.asKieSession().insert(controlEvent);
                     LOG.debug("Recovered control event at time {}, expiration duration: {} ms", eventRecord.getInsertedAt(), eventRecord.getExpirationDuration());

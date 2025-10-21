@@ -1,20 +1,40 @@
 package org.drools.ansible.rulebook.integration.ha.model;
 
+import org.drools.ansible.rulebook.integration.api.domain.temporal.AccumulateWithinDefinition;
+import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceWithinDefinition;
+
 public class EventRecord {
 
     public enum RecordType {
-        EVENT(false),
-        FACT(false),
-        CONTROL_ONCE_WITHIN(true);
+        EVENT(false, null),
+        FACT(false, null),
+        CONTROL_ONCE_WITHIN(true, OnceWithinDefinition.ONCE_WITHIN_CONTROL),
+        CONTROL_ACCUMULATE_WITHIN(true, AccumulateWithinDefinition.ACCUMULATE_WITHIN_CONTROL);
 
         private final boolean synthetic;
 
-        RecordType(boolean synthetic) {
+        private final String controlName;
+
+        RecordType(boolean synthetic, String controlName) {
             this.synthetic = synthetic;
+            this.controlName = controlName;
         }
 
         public boolean isSynthetic() {
             return synthetic;
+        }
+
+        public String getControlName() {
+            return controlName;
+        }
+
+        public static RecordType getByControlName(String controlName) {
+            for (RecordType type : values()) {
+                if (type.getControlName() != null && type.getControlName().equals(controlName)) {
+                    return type;
+                }
+            }
+            throw new IllegalArgumentException("Cannot find RecordType associated with " + controlName);
         }
     }
 
