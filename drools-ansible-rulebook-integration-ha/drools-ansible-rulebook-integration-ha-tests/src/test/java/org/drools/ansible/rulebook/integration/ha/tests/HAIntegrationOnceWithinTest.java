@@ -91,6 +91,7 @@ class HAIntegrationOnceWithinTest extends HAIntegrationTestBase {
         assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
 
         // Advance time by 2 more seconds (t=5, still within window)
+        // Note: this advance is not persisted in SessionState
         rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
 
         // Step 2: Simulate Node 1 crash/shutdown
@@ -107,6 +108,10 @@ class HAIntegrationOnceWithinTest extends HAIntegrationTestBase {
         long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
         AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
         consumer1restart.startConsuming(rulesEngine1Restart.port());
+
+        // Need to advance time to catch up with the simulated "current time" (3 seconds was already advanced during recovery, but the 2 seconds was not persisted)
+        // This is just a hack for test. In real scenario, the new session should be fine with System.currentTimeMillis() in RulesExecutorSession.initClock()
+        rulesEngine1Restart.advanceTime(sessionId1Restart, 2, "SECONDS");
 
         // Step 4: Process third event for same host (t=5, still within window from t=0)
         // The recovered session should maintain the once_within control event
