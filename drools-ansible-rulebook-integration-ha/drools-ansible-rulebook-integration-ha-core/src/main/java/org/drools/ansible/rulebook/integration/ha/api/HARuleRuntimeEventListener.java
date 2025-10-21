@@ -53,6 +53,7 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
             String identifier;
             String json;
             EventRecord.RecordType recordType;
+            Long expirationDuration = null;
 
             if (pending != null) {
                 // User event/fact: use PendingRecord info
@@ -74,7 +75,13 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
                 recordType = isEvent ? EventRecord.RecordType.EVENT : EventRecord.RecordType.FACT;
 
                 if (isSyntheticControlEvent) {
+                    // TODO: will need identify various types of control events
+                    // This is a control event - extract expiration and use CONTROL_ONCE_WITHIN type
+                    recordType = EventRecord.RecordType.CONTROL_ONCE_WITHIN;
+                    PrototypeEventInstance controlEvent = (PrototypeEventInstance) object;
+                    expirationDuration = controlEvent.getExpiration();
                     logger.debug("Tracking synthetic control event with identifier: {}", identifier);
+                    logger.debug("Control event expiration duration: {} ms", expirationDuration);
                 }
             }
 
@@ -84,7 +91,7 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
             }
 
             long timestamp = kieSession.getSessionClock().getCurrentTime();
-            EventRecord record = new EventRecord(identifier, json, timestamp, recordType);
+            EventRecord record = new EventRecord(identifier, json, timestamp, recordType, expirationDuration);
             haSessionContext.addRecord(identifier, record, factHandle.getId());
 
         } catch (Exception e) {

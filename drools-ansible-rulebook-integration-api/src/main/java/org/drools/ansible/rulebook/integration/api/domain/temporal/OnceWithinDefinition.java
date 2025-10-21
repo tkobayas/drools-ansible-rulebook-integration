@@ -1,5 +1,7 @@
 package org.drools.ansible.rulebook.integration.api.domain.temporal;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.api.domain.RuleGenerationContext;
 import org.drools.model.Drools;
 import org.drools.model.DroolsEntryPoint;
@@ -15,6 +17,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static java.util.stream.Collectors.toList;
 import static org.drools.ansible.rulebook.integration.api.domain.temporal.TimeAmount.parseTimeAmount;
@@ -131,5 +134,25 @@ public class OnceWithinDefinition extends OnceAbstractTimeConstraint {
                 .map(GroupByAttribute::from)
                 .collect(toList());
         return new OnceWithinDefinition(parseTimeAmount(onceWithin), sanitizedAttributes);
+    }
+
+    /**
+     * Recreates a control event from stored data during session recovery.
+     * This method reconstructs the synthetic control event with the same expiration
+     * duration and properties as the original.
+     *
+     * @param eventData A map of event properties to restore
+     * @param expirationDurationMs The expiration duration in milliseconds
+     * @return A reconstructed PrototypeEventInstance with expiration and properties
+     */
+    public static PrototypeEventInstance recreateControlEvent(Map<String, Object> eventData, long expirationDurationMs) {
+        // Create control event with the original expiration duration
+        PrototypeEventInstance controlEvent = getPrototypeEvent(SYNTHETIC_PROTOTYPE_NAME).newInstance()
+                .withExpiration(expirationDurationMs, TimeUnit.MILLISECONDS);
+
+        // Restore all properties (group_by attributes and drools_rule_name)
+        eventData.forEach(controlEvent::put);
+
+        return controlEvent;
     }
 }
