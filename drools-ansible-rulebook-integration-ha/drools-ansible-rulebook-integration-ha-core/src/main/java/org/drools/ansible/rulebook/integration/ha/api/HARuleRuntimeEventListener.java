@@ -1,5 +1,6 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import org.drools.ansible.rulebook.integration.api.domain.temporal.TimeConstraint;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.core.common.InternalFactHandle;
@@ -75,12 +76,10 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
                 recordType = isEvent ? EventRecord.RecordType.EVENT : EventRecord.RecordType.FACT;
 
                 if (isSyntheticControlEvent) {
-                    // TODO: will need identify various types of control events
-                    // This is a control event - extract expiration and use CONTROL_ONCE_WITHIN type
-                    recordType = EventRecord.RecordType.CONTROL_ONCE_WITHIN;
+                    recordType = EventRecord.RecordType.getByControlName((String) protoFact.get(TimeConstraint.CONTROL_NAME));
                     PrototypeEventInstance controlEvent = (PrototypeEventInstance) object;
                     expirationDuration = controlEvent.getExpiration();
-                    logger.debug("Tracking synthetic control event with identifier: {}", identifier);
+                    logger.debug("Tracking synthetic control event {} with identifier: {}", recordType, identifier);
                     logger.debug("Control event expiration duration: {} ms", expirationDuration);
                 }
             }
