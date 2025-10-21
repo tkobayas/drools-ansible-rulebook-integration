@@ -87,6 +87,8 @@ public class AccumulateWithinDefinition extends OnceAbstractTimeConstraint {
 
     public static final String KEYWORD = "accumulate_within";
 
+    public static final String ACCUMULATE_WITHIN_CONTROL = "accumulate_within_control";
+
     private final int threshold;
 
     static {
@@ -178,6 +180,7 @@ public class AccumulateWithinDefinition extends OnceAbstractTimeConstraint {
                                     // Create control event for accumulation
                                     PrototypeEventInstance controlEvent = getPrototypeEvent(SYNTHETIC_PROTOTYPE_NAME).newInstance()
                                             .withExpiration(timeAmount.getAmount(), timeAmount.getTimeUnit());
+                                    controlEvent.put(CONTROL_NAME, ACCUMULATE_WITHIN_CONTROL);
 
                                     // Set group-by attributes
                                     for (GroupByAttribute unique : groupByAttributes) {

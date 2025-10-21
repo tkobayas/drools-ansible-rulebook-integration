@@ -1,0 +1,197 @@
+package org.drools.ansible.rulebook.integration.ha.tests;
+
+import java.util.List;
+import java.util.Map;
+
+import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
+
+/**
+ * Integration tests for AccumulateWithin with HA functionality.
+ * AccumulateWithin accumulates events until a threshold is met within a time window.
+ */
+class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
+
+    // AccumulateWithin rule - fires when 3 events arrive within 10 seconds for the same host
+    private static final String RULE_SET_ACCUMULATE_WITHIN = """
+                {
+                    "name": "AccumulateWithin Ruleset",
+                    "rules": [
+                        {
+                            "Rule": {
+                                "name": "alert_accumulator",
+                                "condition": {
+                                    "AllCondition": [
+                                        {
+                                            "EqualsExpression": {
+                                                "lhs": {
+                                                    "Event": "sensu.process.type"
+                                                },
+                                                "rhs": {
+                                                    "String": "alert"
+                                                }
+                                            }
+                                        }
+                                    ]
+                                },
+                                "throttle": {
+                                    "group_by_attributes": [
+                                        "event.sensu.host",
+                                        "event.sensu.process.type"
+                                    ],
+                                    "accumulate_within": "10 seconds",
+                                    "threshold": 3
+                                },
+                                "action": {
+                                    "run_playbook": [
+                                        {
+                                            "name": "alert_handler.yml"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                }
+                """;
+
+    @Override
+    protected String getRuleSet() {
+        return RULE_SET_ACCUMULATE_WITHIN;
+    }
+
+    @Test
+    void testSessionRecoveryWithAccumulateWithin() {
+        // This test verifies that the accumulation counter is correctly restored across recovery
+
+        // Step 1: Node 1 becomes leader and processes events
+        rulesEngine1.enableLeader("node-1");
+
+        // Process first event (t=0, count=0->1)
+        String firstEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":1}");
+        String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
+
+        // Should NOT match - count is 1, need 3
+        assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        // Advance time by 2 seconds (t=2)
+        rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
+
+        // Process second event (t=2, count=1->2)
+        String secondEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":2}");
+        String result2 = rulesEngine1.assertEvent(sessionId1, secondEvent);
+
+        // Should still NOT match - count is 2, need 3
+        assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
+
+        // Advance time by 1 more second (t=3)
+        rulesEngine1.advanceTime(sessionId1, 1, "SECONDS");
+
+        // Step 2: Simulate Node 1 crash/shutdown
+        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        // Step 3: Node 1 restarted. Not a leader.
+        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
+        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        // recovery happens here, restores control event with current_count=2, advances to t=2
+        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
+        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
+        consumer1restart.startConsuming(rulesEngine1Restart.port());
+
+        // Advance to the simulated current time (t=3)
+        rulesEngine1Restart.advanceTime(sessionId1Restart, 1, "SECONDS");
+
+        // Step 4: Process third event (t=3, count=2->3)
+        // This should trigger the rule because threshold (3) is reached
+        String thirdEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":3}");
+        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+
+        // Should MATCH - count reached threshold of 3
+        List<Map<String, Object>> matches3 = readValueAsListOfMapOfStringAndObject(result3);
+        assertThat(matches3).hasSize(1);
+        assertThat(matches3.get(0))
+                .containsEntry("name", "alert_accumulator")
+                .containsEntry("matching_uuid", "");
+
+        // Verify the returned event is the triggering event (sequence=3)
+        Map<String, Object> eventData = (Map<String, Object>) matches3.get(0).get("events");
+        Map<String, Object> matchedEvent = (Map<String, Object>) eventData.get("m");
+        assertThat(matchedEvent).containsEntry("sequence", 3);
+
+        // Clean up
+        rulesEngine1Restart.close();
+        consumer1restart.stop();
+    }
+
+    @Test
+    void testSessionRecoveryWithAccumulateWindowExpiration() {
+        // This test verifies that the control event expiration is correctly restored across recovery
+
+        // Step 1: Node 1 becomes leader and processes events
+        rulesEngine1.enableLeader("node-1");
+
+        // Process first event (t=0, count=0->1)
+        String firstEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":1}");
+        String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
+
+        // Should NOT match - count is 1, need 3
+        assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        // Advance time by 3 seconds (t=3)
+        rulesEngine1.advanceTime(sessionId1, 3, "SECONDS");
+
+        // Process second event (t=3, count=1->2)
+        String secondEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":2}");
+        String result2 = rulesEngine1.assertEvent(sessionId1, secondEvent);
+
+        // Should still NOT match - count is 2, need 3
+        assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
+
+        // Advance time by 2 more seconds (t=5)
+        rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
+
+        // Step 2: Simulate Node 1 crash/shutdown
+        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        // Step 3: Node 1 restarted. Not a leader.
+        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
+        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        // recovery happens here, restores control event with current_count=2 and expiration=10s from t=0
+        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
+        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
+        consumer1restart.startConsuming(rulesEngine1Restart.port());
+
+        // Advance to the simulated current time (t=5)
+        rulesEngine1Restart.advanceTime(sessionId1Restart, 2, "SECONDS");
+
+        // Step 4: Advance time past the window expiration (t=5 + 6 = t=11)
+        // Control event expires at t=10 (created at t=0 with 10-second expiration)
+        rulesEngine1Restart.advanceTime(sessionId1Restart, 6, "SECONDS");
+
+        // Process third event (t=11)
+        // The control event should have expired, so accumulation resets
+        String thirdEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":3}");
+        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+
+        // Should NOT match - control event expired, count reset to 1
+        assertThat(readValueAsListOfMapOfStringAndObject(result3)).isEmpty();
+
+        // Clean up
+        rulesEngine1Restart.close();
+        consumer1restart.stop();
+    }
+}
