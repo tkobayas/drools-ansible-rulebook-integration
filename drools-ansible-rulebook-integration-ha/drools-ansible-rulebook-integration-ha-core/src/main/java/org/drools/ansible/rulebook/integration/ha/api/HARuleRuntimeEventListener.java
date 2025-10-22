@@ -58,14 +58,20 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
             Long expirationDuration = null;
 
             if (pending != null) {
+                if (isSyntheticControlEvent) {
+                    throw new IllegalStateException("Synthetic control events must not be inserted before processing user event/fact" );
+                }
+
                 // User event/fact: use PendingRecord info
                 identifier = pending.getIdentifier();
                 json = pending.getJson();
                 recordType = pending.getType();
 
                 if (isEvent) {
-                    // Override with actual UUID from the inserted event if available
-                    identifier = getEventUuid(factHandle).orElse(identifier);
+                    String eventUuid = getEventUuid(factHandle).orElse(null);
+                    if (eventUuid != null && !eventUuid.equals(identifier)) {
+                        throw new IllegalStateException("user event/fact must be inserted first. Expected identifier " + identifier + " but got event UUID " + eventUuid);
+                    }
                 }
                 if (json == null) {
                     json = JsonMapper.toJson(protoFact.asMap());
