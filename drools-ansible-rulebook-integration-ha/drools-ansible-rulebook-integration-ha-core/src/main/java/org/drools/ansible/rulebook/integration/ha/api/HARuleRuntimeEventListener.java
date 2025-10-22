@@ -7,6 +7,7 @@ import org.drools.core.common.InternalFactHandle;
 import org.kie.api.event.rule.DefaultRuleRuntimeEventListener;
 import org.kie.api.event.rule.ObjectDeletedEvent;
 import org.kie.api.event.rule.ObjectInsertedEvent;
+import org.kie.api.event.rule.ObjectUpdatedEvent;
 import org.kie.api.prototype.PrototypeEventInstance;
 import org.kie.api.prototype.PrototypeFactInstance;
 import org.kie.api.runtime.KieSession;
@@ -111,6 +112,39 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
 
         } catch (Exception e) {
             logger.warn("Failed to track deletion in HA context", e);
+        }
+    }
+
+    @Override
+    public void objectUpdated(ObjectUpdatedEvent event) {
+        try {
+            Object object = event.getObject();
+            InternalFactHandle factHandle = (InternalFactHandle) event.getFactHandle();
+
+            // Only track PrototypeFactInstance updates
+            if (!(object instanceof PrototypeFactInstance)) {
+                return;
+            }
+
+            PrototypeFactInstance protoFact = (PrototypeFactInstance) object;
+            boolean isSyntheticControlEvent = SYNTHETIC_PROTOTYPE_NAME.equals(protoFact.getPrototype().getName());
+
+            // Only track control event updates (e.g., AccumulateWithin increments current_count)
+            if (isSyntheticControlEvent) {
+                // Serialize updated control event
+                String updatedJson = JsonMapper.toJson(protoFact.asMap());
+
+                // Update the stored EventRecord with new state
+                // Note: expirationDuration doesn't change on update, only the JSON content changes
+                haSessionContext.updateRecordByFactHandle(factHandle.getId(), updatedJson);
+
+                logger.debug("Updated control event with fact handle ID: {}", factHandle.getId());
+                if (logger.isTraceEnabled()) {
+                    logger.trace("Updated control event JSON: {}", updatedJson);
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to track update in HA context", e);
         }
     }
 }

@@ -78,6 +78,10 @@ public class EventRecord {
         return eventJson;
     }
 
+    public void setEventJson(String eventJson) {
+        this.eventJson = eventJson;
+    }
+
     public long getInsertedAt() {
         return insertedAt;
     }
