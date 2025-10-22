@@ -5,8 +5,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class HASessionContext {
+
+    private static final Logger logger = LoggerFactory.getLogger(HASessionContext.class);
 
     // TODO: consider thread-safety. processEvent is called by single client. But AutomaticPseudoClock can run on another thread
 
@@ -55,6 +59,28 @@ public class HASessionContext {
         String identifier = factHandleIndex.remove(factHandleId);
         if (identifier != null) {
             processedRecords.remove(identifier);
+        }
+    }
+
+    /**
+     * Updates an existing EventRecord's JSON content.
+     * Used when a control event is modified (e.g., AccumulateWithin increments current_count).
+     *
+     * @param factHandleId The fact handle ID of the object being updated
+     * @param updatedJson The new JSON representation of the object
+     */
+    public void updateRecordByFactHandle(long factHandleId, String updatedJson) {
+        String identifier = factHandleIndex.get(factHandleId);
+        if (identifier != null) {
+            EventRecord record = processedRecords.get(identifier);
+            if (record != null) {
+                record.setEventJson(updatedJson);
+                logger.debug("Updated EventRecord for identifier: {}, factHandleId: {}", identifier, factHandleId);
+            } else {
+                logger.warn("No EventRecord found for identifier: {} during update", identifier);
+            }
+        } else {
+            logger.warn("No identifier mapping found for factHandleId: {} during update", factHandleId);
         }
     }
 
