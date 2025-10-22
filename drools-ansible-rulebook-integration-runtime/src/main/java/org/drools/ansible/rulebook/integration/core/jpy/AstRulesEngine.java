@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -184,7 +183,7 @@ public class AstRulesEngine implements Closeable {
      */
     private void updateInMemorySessionState(HARulesExecutor rulesExecutor, SessionState sessionState, String identifier) {
         HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
-        LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getEventUuidsInMemory();
+        LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getTrackedRecords();
 
         // Update partial events from memory
         sessionState.setPartialEvents(new ArrayList<>(recordsInMemory.values()));

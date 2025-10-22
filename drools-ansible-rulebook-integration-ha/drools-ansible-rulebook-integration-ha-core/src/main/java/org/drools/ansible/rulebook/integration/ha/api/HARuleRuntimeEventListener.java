@@ -92,7 +92,7 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
 
             long timestamp = kieSession.getSessionClock().getCurrentTime();
             EventRecord record = new EventRecord(identifier, json, timestamp, recordType, expirationDuration);
-            haSessionContext.addRecord(identifier, record, factHandle.getId());
+            haSessionContext.addTrackedRecord(identifier, record, factHandle.getId());
 
         } catch (Exception e) {
             logger.warn("Failed to track insertion in HA context", e);
@@ -106,8 +106,8 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
 
             // Try to remove by event UUID first, then by fact handle ID
             getEventUuid(factHandle).ifPresentOrElse(
-                    haSessionContext::removeEventUuidInMemory,
-                    () -> haSessionContext.removeRecordByFactHandle(factHandle.getId())
+                    haSessionContext::removeTrackedRecord,
+                    () -> haSessionContext.removeTrackedRecordByFactHandle(factHandle.getId())
             );
 
         } catch (Exception e) {
@@ -136,7 +136,7 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
 
                 // Update the stored EventRecord with new state
                 // Note: expirationDuration doesn't change on update, only the JSON content changes
-                haSessionContext.updateRecordByFactHandle(factHandle.getId(), updatedJson);
+                haSessionContext.updateTrackedRecordByFactHandle(factHandle.getId(), updatedJson);
 
                 logger.debug("Updated control event with fact handle ID: {}", factHandle.getId());
                 if (logger.isTraceEnabled()) {
