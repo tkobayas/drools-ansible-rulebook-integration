@@ -40,7 +40,7 @@ public class HARulesExecutor extends RulesExecutor {
         rulesEvaluator.stashFirstEventJsonForValidation(json);
 
         Map<String, Object> eventMap = asFactMap(json);
-        String eventUuid = getEventUuid(eventMap).orElse(null);
+        String eventUuid = getEventUuid(eventMap).orElse(null); // TODO: clarify how to handle an event without uuid! (add sha to map?)
         getHaSessionContext().preparePendingRecord(eventUuid, json, EventRecord.RecordType.EVENT);
 
         return rulesEvaluator.processEvents(eventMap);

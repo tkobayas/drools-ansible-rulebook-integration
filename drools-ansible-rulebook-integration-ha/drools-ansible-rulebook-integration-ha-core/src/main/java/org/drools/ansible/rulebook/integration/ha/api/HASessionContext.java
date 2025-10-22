@@ -12,11 +12,20 @@ public class HASessionContext {
 
     private static final Logger logger = LoggerFactory.getLogger(HASessionContext.class);
 
+    // No concurrency expected, AbstractRulesEvaluator.atomicRuleEvaluation ensures synchronized access
+
     // Track events/facts existing in the session. Eventually persisted as SessionState.partialEvents
     private final LinkedHashMap<String, EventRecord> trackedRecords = new LinkedHashMap<>();
 
+    // Associate factHandleIds to identifiers for efficient lookup during updates/deletions
     private final Map<Long, String> factHandleIndex = new HashMap<>();
+
+    // Keep the incoming record from the client to preserve the original json (important for SHA generation) and pre-calculated identifier
+    // Note: if we will not need to maintain SHA, we may remove this and directly create EventRecord on insertion
     private PendingRecord pendingRecord;
+
+    // Keep track of the last inserted identifier from the client. Eventually persisted as SessionState.lastProcessedEventUuid
+    // Note: if we will not need to maintain SHA and lastProcessedEventUuid, we may remove this
     private String currentIdentifier;
 
     public LinkedHashMap<String, EventRecord> getTrackedRecords() {
@@ -32,7 +41,6 @@ public class HASessionContext {
         if (factHandleId != null) {
             factHandleIndex.put(factHandleId, identifier);
         }
-        currentIdentifier = identifier;
     }
 
     public void removeTrackedRecord(String identifier) {

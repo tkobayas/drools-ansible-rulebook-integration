@@ -17,6 +17,7 @@ import static org.awaitility.Awaitility.await;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality.
@@ -104,12 +105,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1.enableLeader("engine-leader-1");
 
         // Process an event that triggers a rule
-        String event = """
+        String event = createEvent("""
                 {
                     "temperature": 35,
                     "timestamp": "2024-01-01T10:00:00Z"
                 }
-                """;
+                """);
 
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
@@ -140,12 +141,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1.enableLeader("leader-1");
 
         // Process an event that triggers a rule
-        String event = """
+        String event = createEvent("""
                 {
                     "temperature": 35,
                     "sensor": "temp_01"
                 }
-                """;
+                """);
 
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
@@ -223,12 +224,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1.enableLeader("leader-1");
 
         // First trigger a rule to create a matching event
-        String event = """
+        String event = createEvent("""
                 {
                     "temperature": 35,
                     "location": "server_room"
                 }
-                """;
+                """);
 
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
@@ -268,12 +269,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1.enableLeader("leader-1");
 
         // Process some events
-        String event = """
+        String event = createEvent("""
                 {
                     "temperature": 35,
                     "zone": "production"
                 }
-                """;
+                """);
         rulesEngine1.assertEvent(sessionId1, event);
 
         // Simulate leader failure - unset leader
@@ -286,12 +287,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(rulesEngine2.mismatchRecoveryTriggered).isTrue();
 
         // Verify we can still process events
-        String event2 = """
+        String event2 = createEvent("""
                 {
                     "temperature": 40,
                     "zone": "production"
                 }
-                """;
+                """);
         String result2 = rulesEngine2.assertEvent(sessionId2, event2);
         assertThat(result2).isNotNull();
 
@@ -355,12 +356,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1.enableLeader("engine-1");
 
         // Process an event
-        String event = """
+        String event = createEvent("""
                 {
                     "temperature": 45,
                     "critical": true
                 }
-                """;
+                """);
         String result = rulesEngine1.assertEvent(sessionId1, event);
 
         System.out.println("Result: " + result);
@@ -412,7 +413,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(stats.get("current_term_started_at")).isNotNull();
 
         // Process an event and action
-        String result = rulesEngine1.assertEvent(sessionId1, "{\"temperature\": 35}");
+        String result = rulesEngine1.assertEvent(sessionId1, createEvent("{\"temperature\": 35}"));
         List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
         String meUuid = (String) matchList.get(0).get("matching_uuid");
 
@@ -428,12 +429,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1.enableLeader("engine-1");
 
         // Process an event
-        String event = """
+        String event = createEvent("""
                 {
                     "temperature": 45,
                     "critical": true
                 }
-                """;
+                """);
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).contains("temperature_alert");
 
@@ -452,12 +453,12 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1Restart.enableLeader("engine-1");
 
         // Process another event
-        String event2 = """
+        String event2 = createEvent("""
                 {
                     "temperature": 50,
                     "critical": true
                 }
-                """;
+                """);
         String result2 = rulesEngine1Restart.assertEvent(sessionId1Restart, event2);
         assertThat(result2).contains("temperature_alert");
 
