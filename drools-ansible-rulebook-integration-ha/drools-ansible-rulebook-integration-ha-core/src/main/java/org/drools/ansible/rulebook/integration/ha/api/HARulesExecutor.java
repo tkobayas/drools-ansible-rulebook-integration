@@ -24,6 +24,11 @@ public class HARulesExecutor extends RulesExecutor {
     public HARulesExecutor(RulesExecutorSession rulesExecutorSession) {
         super(createRulesEvaluator(rulesExecutorSession));
         this.containerLookupId = rulesEvaluator.getSessionId(); // Initially set to internal session ID
+
+        // Pass container lookup ID to evaluator so it can use it for SessionStats, async responses, etc.
+        if (rulesEvaluator instanceof HARulesEvaluator) {
+            ((HARulesEvaluator) rulesEvaluator).setContainerLookupId(this.containerLookupId);
+        }
     }
 
     private static RulesEvaluator createRulesEvaluator(RulesExecutorSession rulesExecutorSession) {
@@ -37,6 +42,11 @@ public class HARulesExecutor extends RulesExecutor {
 
     public void setContainerLookupId(long containerLookupId) {
         this.containerLookupId = containerLookupId;
+
+        // Update evaluator's container lookup ID as well
+        if (rulesEvaluator instanceof HARulesEvaluator) {
+            ((HARulesEvaluator) rulesEvaluator).setContainerLookupId(containerLookupId);
+        }
     }
 
     public void setOnRecovery(boolean onRecovery) {
