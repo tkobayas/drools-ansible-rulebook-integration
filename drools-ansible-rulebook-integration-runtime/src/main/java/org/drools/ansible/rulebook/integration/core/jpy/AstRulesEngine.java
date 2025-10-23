@@ -417,7 +417,7 @@ public class AstRulesEngine implements Closeable {
             }
 
             // Keep the same session ID for python client
-            ((HARulesExecutor)recoveredRulesExecutor).setContainerLookupId(previousId);
+            ((HARulesExecutor)recoveredRulesExecutor).setExternalSessionId(previousId);
 
             rulesExecutorContainer.register(recoveredRulesExecutor);
 

@@ -18,16 +18,17 @@ import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 public class HARulesExecutor extends RulesExecutor {
 
-    // In HA mode, ID should be consistent across session recoveries, and is essentially used to lookup rulesExecutor from container
-    private long containerLookupId;
+    // In HA mode, ID should be consistent across session recoveries for python client.
+    // The ID is essentially used to lookup rulesExecutor from container
+    private long externalSessionId;
 
     public HARulesExecutor(RulesExecutorSession rulesExecutorSession) {
         super(createRulesEvaluator(rulesExecutorSession));
-        this.containerLookupId = rulesEvaluator.getSessionId(); // Initially set to internal session ID
+        this.externalSessionId = rulesEvaluator.getSessionId(); // Initially set to internal session ID
 
         // Pass container lookup ID to evaluator so it can use it for SessionStats, async responses, etc.
         if (rulesEvaluator instanceof HARulesEvaluator) {
-            ((HARulesEvaluator) rulesEvaluator).setContainerLookupId(this.containerLookupId);
+            ((HARulesEvaluator) rulesEvaluator).setExternalSessionId(this.externalSessionId);
         }
     }
 
@@ -37,15 +38,15 @@ public class HARulesExecutor extends RulesExecutor {
 
     @Override
     public long getId() {
-        return containerLookupId;  // Returns container key, not internal ID
+        return externalSessionId;  // Returns container key, not internal ID
     }
 
-    public void setContainerLookupId(long containerLookupId) {
-        this.containerLookupId = containerLookupId;
+    public void setExternalSessionId(long externalSessionId) {
+        this.externalSessionId = externalSessionId;
 
         // Update evaluator's container lookup ID as well
         if (rulesEvaluator instanceof HARulesEvaluator) {
-            ((HARulesEvaluator) rulesEvaluator).setContainerLookupId(containerLookupId);
+            ((HARulesEvaluator) rulesEvaluator).setExternalSessionId(externalSessionId);
         }
     }
 
