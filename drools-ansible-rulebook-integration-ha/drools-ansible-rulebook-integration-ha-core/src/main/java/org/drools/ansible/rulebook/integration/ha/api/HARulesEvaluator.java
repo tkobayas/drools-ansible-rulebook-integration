@@ -21,8 +21,8 @@ import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUui
  */
 public class HARulesEvaluator extends SyncRulesEvaluator {
 
-    // Container lookup ID for HA mode - may differ from internal session ID after recovery
-    private Long containerLookupId;
+    // External session ID for HA mode - may differ from internal session ID after recovery
+    private Long externalSessionId;
 
     private volatile boolean onRecovery = false;
 
@@ -45,18 +45,18 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
     }
 
     /**
-     * Sets the container lookup ID for this evaluator.
+     * Sets the external session ID for this evaluator.
      * This ID is used for container lookups and should match what Python client uses.
      *
-     * @param containerLookupId The container lookup ID
+     * @param externalSessionId The container lookup ID
      */
-    public void setContainerLookupId(Long containerLookupId) {
-        this.containerLookupId = containerLookupId;
+    public void setExternalSessionId(Long externalSessionId) {
+        this.externalSessionId = externalSessionId;
     }
 
     @Override
     public long getSessionId() {
-        return containerLookupId != null ? containerLookupId : super.getSessionId();
+        return externalSessionId != null ? externalSessionId : super.getSessionId();
     }
 
     public RulesSet getRulesSet() {
