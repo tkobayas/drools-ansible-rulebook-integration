@@ -416,8 +416,10 @@ public class AstRulesEngine implements Closeable {
                 removed.dispose();
             }
 
-            // Keep the same session ID for continuity
-            rulesExecutorContainer.registerWithId(previousId, recoveredRulesExecutor);
+            // Keep the same session ID for python client
+            ((HARulesExecutor)recoveredRulesExecutor).setContainerLookupId(previousId);
+
+            rulesExecutorContainer.register(recoveredRulesExecutor);
 
             // Update in-memory state to match recovered state
             haStateManager.registerSessionState(rulesetName, persistedSessionState);

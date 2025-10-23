@@ -33,12 +33,6 @@ public class RulesExecutorContainer {
         return rulesExecutor;
     }
 
-    public RulesExecutor registerWithId(long rulesExecutorId, RulesExecutor rulesExecutor) {
-        rulesExecutors.put(rulesExecutorId, rulesExecutor);
-        rulesExecutor.setRulesExecutorContainer(this);
-        return rulesExecutor;
-    }
-
     public SessionStats dispose(long rulesExecutorId) {
         return removeExecutor(rulesExecutorId).dispose();
     }
