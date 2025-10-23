@@ -52,6 +52,11 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
      */
     public void setExternalSessionId(Long externalSessionId) {
         this.externalSessionId = externalSessionId;
+
+        // Also set it on the session so SessionStats will use it
+        if (rulesExecutorSession instanceof HARulesExecutorSession) {
+            ((HARulesExecutorSession) rulesExecutorSession).setExternalSessionId(externalSessionId);
+        }
     }
 
     @Override

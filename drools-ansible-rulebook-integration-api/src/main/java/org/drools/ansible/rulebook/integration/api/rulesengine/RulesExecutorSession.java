@@ -54,7 +54,7 @@ public class RulesExecutorSession {
         getPseudoClock().advanceTime(System.currentTimeMillis(), TimeUnit.MILLISECONDS);
     }
 
-    long getId() {
+    protected long getId() {
         return id;
     }
 
