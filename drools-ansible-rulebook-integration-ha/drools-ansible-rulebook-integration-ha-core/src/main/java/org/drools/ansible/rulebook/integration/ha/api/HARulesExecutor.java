@@ -18,12 +18,25 @@ import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 public class HARulesExecutor extends RulesExecutor {
 
+    // In HA mode, ID should be consistent across session recoveries, and is essentially used to lookup rulesExecutor from container
+    private long containerLookupId;
+
     public HARulesExecutor(RulesExecutorSession rulesExecutorSession) {
         super(createRulesEvaluator(rulesExecutorSession));
+        this.containerLookupId = rulesEvaluator.getSessionId(); // Initially set to internal session ID
     }
 
     private static RulesEvaluator createRulesEvaluator(RulesExecutorSession rulesExecutorSession) {
         return new HARulesEvaluator(rulesExecutorSession);
+    }
+
+    @Override
+    public long getId() {
+        return containerLookupId;  // Returns container key, not internal ID
+    }
+
+    public void setContainerLookupId(long containerLookupId) {
+        this.containerLookupId = containerLookupId;
     }
 
     public void setOnRecovery(boolean onRecovery) {
