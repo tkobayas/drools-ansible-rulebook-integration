@@ -21,6 +21,9 @@ import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUui
  */
 public class HARulesEvaluator extends SyncRulesEvaluator {
 
+    // Container lookup ID for HA mode - may differ from internal session ID after recovery
+    private Long containerLookupId;
+
     private volatile boolean onRecovery = false;
 
     public HARulesEvaluator(RulesExecutorSession rulesExecutorSession) {
@@ -39,6 +42,21 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
 
     public void setOnRecovery(boolean onRecovery) {
         this.onRecovery = onRecovery;
+    }
+
+    /**
+     * Sets the container lookup ID for this evaluator.
+     * This ID is used for container lookups and should match what Python client uses.
+     *
+     * @param containerLookupId The container lookup ID
+     */
+    public void setContainerLookupId(Long containerLookupId) {
+        this.containerLookupId = containerLookupId;
+    }
+
+    @Override
+    public long getSessionId() {
+        return containerLookupId != null ? containerLookupId : super.getSessionId();
     }
 
     public RulesSet getRulesSet() {
