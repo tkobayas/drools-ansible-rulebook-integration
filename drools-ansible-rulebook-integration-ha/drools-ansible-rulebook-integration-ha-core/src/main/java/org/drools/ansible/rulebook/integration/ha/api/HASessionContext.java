@@ -20,20 +20,21 @@ public class HASessionContext {
     // Associate factHandleIds to identifiers for efficient lookup during updates/deletions
     private final Map<Long, String> factHandleIndex = new HashMap<>();
 
-    // Keep the incoming record from the client to preserve the original json (important for SHA generation) and pre-calculated identifier
-    // Note: if we will not need to maintain SHA, we may remove this and directly create EventRecord on insertion
+    // Temporarily hold incoming event/fact metadata during insertion flow.
+    // Preserves original JSON and identifier from client before Drools processing.
+    // Used to distinguish user events/facts from synthetic control events.
     private PendingRecord pendingRecord;
 
     public LinkedHashMap<String, EventRecord> getTrackedRecords() {
         return trackedRecords;
     }
 
-    public void addTrackedRecord(String identifier, EventRecord record, Long factHandleId) {
-        if (identifier == null || record == null) {
+    public void addTrackedRecord(String identifier, EventRecord eventRecord, Long factHandleId) {
+        if (identifier == null || eventRecord == null) {
             return;
         }
 
-        trackedRecords.put(identifier, record);
+        trackedRecords.put(identifier, eventRecord);
         if (factHandleId != null) {
             factHandleIndex.put(factHandleId, identifier);
         }
@@ -63,9 +64,9 @@ public class HASessionContext {
     public void updateTrackedRecordByFactHandle(long factHandleId, String updatedJson) {
         String identifier = factHandleIndex.get(factHandleId);
         if (identifier != null) {
-            EventRecord record = trackedRecords.get(identifier);
-            if (record != null) {
-                record.setEventJson(updatedJson);
+            EventRecord eventRecord = trackedRecords.get(identifier);
+            if (eventRecord != null) {
+                eventRecord.setEventJson(updatedJson);
                 logger.debug("Updated EventRecord for identifier: {}, factHandleId: {}", identifier, factHandleId);
             } else {
                 logger.warn("No EventRecord found for identifier: {} during update", identifier);
@@ -76,13 +77,17 @@ public class HASessionContext {
     }
 
     public void preparePendingRecord(String identifier, String json, EventRecord.RecordType type) {
+        if (identifier == null || json == null || type == null) {
+            throw new IllegalArgumentException("Invalid arguments passed to preparePendingRecord : " +
+                                                       "identifier=" + identifier + ", json=" + json + ", type=" + type);
+        }
         pendingRecord = new PendingRecord(identifier, json, type);
     }
 
     public PendingRecord consumePendingRecord() {
-        PendingRecord record = pendingRecord;
+        PendingRecord theRecord = pendingRecord;
         pendingRecord = null;
-        return record;
+        return theRecord;
     }
 
     public static final class PendingRecord {

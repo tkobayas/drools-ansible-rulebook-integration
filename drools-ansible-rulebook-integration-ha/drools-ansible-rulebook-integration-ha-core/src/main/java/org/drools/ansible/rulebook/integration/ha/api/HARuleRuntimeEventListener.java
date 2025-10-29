@@ -91,11 +91,6 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
                 }
             }
 
-            // Final fallback for identifier
-            if (identifier == null) {
-                identifier = sha256(json);
-            }
-
             long timestamp = kieSession.getSessionClock().getCurrentTime();
             EventRecord record = new EventRecord(json, timestamp, recordType, expirationDuration);
             haSessionContext.addTrackedRecord(identifier, record, factHandle.getId());
