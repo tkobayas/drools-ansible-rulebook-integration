@@ -7,6 +7,7 @@ import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 
+import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.model.prototype.impl.HashMapEventImpl;
 import org.kie.api.runtime.rule.FactHandle;
 
@@ -52,9 +53,20 @@ public class HAUtils {
         return HEX.formatHex(hash);
     }
 
-    public static String calculateStateSHA(String previousSHA, String eventUuid) {
-        String input = (previousSHA != null ? previousSHA : "") + eventUuid;
-        return sha256(input);
+    /**
+     * Calculate SHA256 of the SessionState content for integrity verification.
+     * This can detect corruption or tampering of persisted data.
+     *
+     * @param sessionState The session state to hash
+     * @return SHA256 hex string of the state content
+     */
+    public static String calculateStateSHA(SessionState sessionState) {
+        if (sessionState == null) {
+            return null;
+        }
+
+        String hashableContent = sessionState.toHashableContent();
+        return sha256(hashableContent);
     }
 
     /**
