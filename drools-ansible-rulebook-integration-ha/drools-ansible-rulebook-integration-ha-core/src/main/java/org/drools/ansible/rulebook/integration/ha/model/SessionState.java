@@ -116,13 +116,14 @@ public class SessionState {
 
     /**
      * Returns a canonical representation of this SessionState for SHA calculation.
-     * Excludes the SHA field itself (currentStateSHA) to avoid circular dependency.
-     * Includes all other fields to detect any corruption or tampering.
+     * Excludes fields that are not part of the semantic working memory state:
+     * - currentStateSHA: can't hash itself (circular dependency)
+     * - version: database-managed persistence version counter, not working memory state
      *
      * @return JSON string with deterministic field ordering for consistent hashing
      */
     public String toHashableContent() {
-        // Create a map with all fields EXCEPT currentStateSHA
+        // Create a map with fields that represent working memory state
         Map<String, Object> contentMap = new LinkedHashMap<>();
 
         contentMap.put("haUuid", haUuid);
@@ -131,7 +132,7 @@ public class SessionState {
         contentMap.put("partialEvents", partialEvents);
         contentMap.put("createdTime", createdTime);
         contentMap.put("persistedTime", persistedTime);
-        contentMap.put("version", version);
+        // version is excluded - it's a database artifact, not working memory state
         contentMap.put("leaderId", leaderId);
         contentMap.put("lastProcessedEventUuid", lastProcessedEventUuid);
 
