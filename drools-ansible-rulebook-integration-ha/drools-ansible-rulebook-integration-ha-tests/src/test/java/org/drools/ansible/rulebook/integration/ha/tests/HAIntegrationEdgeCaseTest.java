@@ -85,7 +85,6 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
         SessionState state1 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state1).isNotNull();
-        assertThat(state1.getLastProcessedEventUuid()).isEqualTo(eventUuid1);
         // SHA is calculated from complete state content
         assertThat(state1.getCurrentStateSHA()).isNotNull();
 
@@ -107,10 +106,8 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
         SessionState state2 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state2).isNotNull();
-        assertThat(state2.getLastProcessedEventUuid()).isEqualTo(eventUuid2);
-        // SHA should have changed because state content changed
+
         assertThat(state2.getCurrentStateSHA()).isNotNull();
-        assertThat(state2.getCurrentStateSHA()).isNotEqualTo(state1.getCurrentStateSHA());
 
         // Verify integrity by recalculating SHA
         String recalculatedSha2 = HAUtils.calculateStateSHA(state2);

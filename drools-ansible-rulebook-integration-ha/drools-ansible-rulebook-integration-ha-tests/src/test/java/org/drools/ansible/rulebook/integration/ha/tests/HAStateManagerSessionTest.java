@@ -221,7 +221,6 @@ class HAStateManagerSessionTest {
         sessionState.setPartialEvents(List.of(factRecord));
         sessionState.setCreatedTime(createdTime);
         sessionState.setPersistedTime(insertedAt);
-        sessionState.setLastProcessedEventUuid(factIdentifier);
         sessionState.setVersion(1);
         // Calculate SHA from complete state
         sessionState.setCurrentStateSHA(calculateStateSHA(sessionState));
@@ -259,7 +258,6 @@ class HAStateManagerSessionTest {
         sessionState.setCreatedTime(now);
         sessionState.setPersistedTime(now);
 
-        sessionState.setLastProcessedEventUuid("event-uuid-001");
         // Calculate SHA from complete state
         sessionState.setCurrentStateSHA(calculateStateSHA(sessionState));
 
@@ -274,7 +272,6 @@ class HAStateManagerSessionTest {
 
         SessionState retrieved = stateManager.getPersistedSessionState(RULE_SET_NAME);
         assertThat(retrieved.getCurrentStateSHA()).isEqualTo(expectedSha);
-        assertThat(retrieved.getLastProcessedEventUuid()).isEqualTo("event-uuid-001");
         assertThat(retrieved.getRulebookHash()).isEqualTo("rulebook-sha-001");
 
         // Verify integrity by recalculating SHA
@@ -291,7 +288,6 @@ class HAStateManagerSessionTest {
         rulesetA.setRuleSetName("rulesetA");
         rulesetA.setRulebookHash("hashA");
         rulesetA.setPartialEvents(List.of());
-        rulesetA.setLastProcessedEventUuid("eventA");
         rulesetA.setCurrentStateSHA(calculateStateSHA(rulesetA));
         stateManager.persistSessionState(rulesetA);
 
@@ -300,7 +296,6 @@ class HAStateManagerSessionTest {
         rulesetB.setRuleSetName("rulesetB");
         rulesetB.setRulebookHash("hashB");
         rulesetB.setPartialEvents(List.of());
-        rulesetB.setLastProcessedEventUuid("eventB");
         rulesetB.setCurrentStateSHA(calculateStateSHA(rulesetB));
         stateManager.persistSessionState(rulesetB);
 
@@ -310,11 +305,9 @@ class HAStateManagerSessionTest {
         assertThat(retrievedA.getRuleSetName()).isEqualTo("rulesetA");
         // SHA should match the calculated value from rulesetA
         assertThat(retrievedA.getCurrentStateSHA()).isEqualTo(calculateStateSHA(rulesetA));
-        assertThat(retrievedA.getLastProcessedEventUuid()).isEqualTo("eventA");
 
         assertThat(retrievedB.getRuleSetName()).isEqualTo("rulesetB");
         // SHA should match the calculated value from rulesetB
         assertThat(retrievedB.getCurrentStateSHA()).isEqualTo(calculateStateSHA(rulesetB));
-        assertThat(retrievedB.getLastProcessedEventUuid()).isEqualTo("eventB");
     }
 }
