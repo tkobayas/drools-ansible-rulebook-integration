@@ -97,7 +97,7 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
             }
 
             long timestamp = kieSession.getSessionClock().getCurrentTime();
-            EventRecord record = new EventRecord(identifier, json, timestamp, recordType, expirationDuration);
+            EventRecord record = new EventRecord(json, timestamp, recordType, expirationDuration);
             haSessionContext.addTrackedRecord(identifier, record, factHandle.getId());
 
         } catch (Exception e) {

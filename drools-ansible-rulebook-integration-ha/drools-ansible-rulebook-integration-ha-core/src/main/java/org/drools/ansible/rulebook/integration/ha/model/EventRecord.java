@@ -38,8 +38,6 @@ public class EventRecord {
         }
     }
 
-    private String eventUuid; // TODO: consider if we exclude this field for persistece for performance
-
     private String eventJson;
 
     private long insertedAt;
@@ -49,29 +47,14 @@ public class EventRecord {
     // For control events: expiration duration in milliseconds (not absolute time)
     private Long expirationDuration;
 
-    // TODO: Probably need to have ID and track the associated event to handle deletions
-
     public EventRecord() {
     }
 
-    public EventRecord(String eventUuid, String eventJson, long insertedAt) {
-        this.eventUuid = eventUuid;
+    public EventRecord(String eventJson, long insertedAt, RecordType recordType, Long expirationDuration) {
         this.eventJson = eventJson;
         this.insertedAt = insertedAt;
-    }
-
-    public EventRecord(String eventUuid, String eventJson, long insertedAt, RecordType recordType) {
-        this(eventUuid, eventJson, insertedAt);
         this.recordType = recordType;
-    }
-
-    public EventRecord(String eventUuid, String eventJson, long insertedAt, RecordType recordType, Long expirationDuration) {
-        this(eventUuid, eventJson, insertedAt, recordType);
         this.expirationDuration = expirationDuration;
-    }
-
-    public String getEventUuid() {
-        return eventUuid;
     }
 
     public String getEventJson() {
