@@ -181,11 +181,6 @@ public class H2StateManager extends AbstractHAStateManager {
 
                 logger.info("Loaded SessionState from database: {}", ruleSetName);
 
-                // Verify integrity
-                if (!verifyStateIntegrity(sessionState)) {
-                    logger.error("Continuing with potentially corrupted SessionState for {}", ruleSetName);
-                }
-
                 return sessionState;
             }
         } catch (SQLException e) {

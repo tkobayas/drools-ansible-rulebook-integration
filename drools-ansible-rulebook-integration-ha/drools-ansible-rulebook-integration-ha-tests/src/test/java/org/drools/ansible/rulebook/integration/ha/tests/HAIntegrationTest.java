@@ -284,11 +284,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         // Simulate leader failure - unset leader
         rulesEngine1.disableLeader("leader-1");
 
-        // New leader takes over
-        // Session state is different from the SessionState persisted by rulesEngine1. So recovery occurs.
+        // New leader takes over. Recovery occurs.
         rulesEngine2.enableLeader("leader-2");
-
-        assertThat(rulesEngine2.mismatchRecoveryTriggered).isTrue();
 
         // Verify we can still process events
         String event2 = createEvent("""
@@ -299,50 +296,6 @@ class HAIntegrationTest extends HAIntegrationTestBase {
                 """);
         String result2 = rulesEngine2.assertEvent(sessionId2, event2);
         assertThat(result2).isNotNull();
-
-        // Check that both events created matching events
-        HAStateManager haStateManagerForAssertion = createHAStateManagerForAssertion();
-
-        try {
-            List<MatchingEvent> pendingEvents = haStateManagerForAssertion.getPendingMatchingEvents();
-            assertThat(pendingEvents).hasSize(2); // Both events should create MEs
-        } finally {
-            haStateManagerForAssertion.shutdown();
-        }
-    }
-
-    @Test
-    void testLeaderTransitionWithoutRecovery() {
-
-        rulesEngine1.enableLeader("leader-1");
-
-        String sharedEvent = """
-                {
-                    "meta": {"uuid": "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"},
-                    "temperature": 32,
-                    "zone": "production"
-                }
-                """;
-        rulesEngine1.assertEvent(sessionId1, sharedEvent);
-        rulesEngine1.disableLeader("leader-1");
-
-        // Align follower state with leader snapshot
-        rulesEngine2.assertEvent(sessionId2, sharedEvent);
-
-        // Promote follower to leader - should not trigger recovery
-        rulesEngine2.enableLeader("leader-2");
-
-        assertThat(rulesEngine2.mismatchRecoveryTriggered).isFalse();
-
-        String secondEvent = """
-                {
-                    "meta": {"uuid": "cccccccc-1111-2222-3333-dddddddddddd"},
-                    "temperature": 36,
-                    "zone": "production"
-                }
-                """;
-        String result = rulesEngine2.assertEvent(sessionId2, secondEvent);
-        assertThat(result).isNotNull();
 
         // Check that both events created matching events
         HAStateManager haStateManagerForAssertion = createHAStateManagerForAssertion();

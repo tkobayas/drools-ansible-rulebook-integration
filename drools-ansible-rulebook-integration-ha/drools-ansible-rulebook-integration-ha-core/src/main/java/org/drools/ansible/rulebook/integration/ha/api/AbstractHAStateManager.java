@@ -67,14 +67,8 @@ public abstract class AbstractHAStateManager implements HAStateManager {
         return sessionStateMap.get(ruleSetName);
     }
 
-    /**
-     * Verify the integrity of a loaded SessionState.
-     * Compares stored SHA with recalculated SHA to detect corruption/tampering.
-     *
-     * @param sessionState The state loaded from persistence
-     * @return true if integrity check passes, false if corruption detected
-     */
-    protected boolean verifyStateIntegrity(SessionState sessionState) {
+    @Override
+    public boolean verifySessionState(SessionState sessionState) {
         if (sessionState == null) {
             return false;
         }

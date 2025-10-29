@@ -10,8 +10,12 @@ import java.util.Optional;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.model.prototype.impl.HashMapEventImpl;
 import org.kie.api.runtime.rule.FactHandle;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class HAUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(HAUtils.class);
 
     private HAUtils() {}
 
