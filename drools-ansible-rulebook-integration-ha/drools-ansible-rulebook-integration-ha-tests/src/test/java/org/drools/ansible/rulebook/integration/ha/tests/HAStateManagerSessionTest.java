@@ -112,7 +112,7 @@ class HAStateManagerSessionTest {
         String eventJson = "{\"i\":1}";
         long insertedAt = createdTime + 10 * 1000; // 10 seconds later
 
-        EventRecord event1 = new EventRecord("1", eventJson, insertedAt);
+        EventRecord event1 = new EventRecord(eventJson, insertedAt, EventRecord.RecordType.EVENT, null);
         List<EventRecord> partialEvents = List.of(event1);
 
         List<Match> matchList = rulesExecutor1.processEvents(eventJson).join(); // partial match
@@ -210,7 +210,7 @@ class HAStateManagerSessionTest {
         List<Match> matchList = rulesExecutor1.processFacts(factJson).join(); // partial match
         assertThat(matchList).isEmpty();
 
-        EventRecord factRecord = new EventRecord(factIdentifier, factJson, insertedAt, EventRecord.RecordType.FACT);
+        EventRecord factRecord = new EventRecord(factJson, insertedAt, EventRecord.RecordType.FACT, null);
 
         String rulebookHash = HAUtils.sha256(ALL_CONDITION_WITH_FACT_RULE);
         SessionState sessionState = new SessionState();
