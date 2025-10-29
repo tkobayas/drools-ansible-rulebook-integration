@@ -81,16 +81,17 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
         String result1 = rulesEngine1.assertEvent(sessionId1, event1); // matches the rule. the event is discarded
         assertThat(result1).contains("temperature_alert");
 
-        String baseSha = HAUtils.sha256(getRuleSet());
-        String stateSha1 = HAUtils.calculateStateSHA(baseSha, eventUuid1);
-
         HAStateManager haManagerForAssertion = createHAStateManagerForAssertion();
         SessionState state1 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state1).isNotNull();
         assertThat(state1.getLastProcessedEventUuid()).isEqualTo(eventUuid1);
-        assertThat(state1.getPreviousStateSHA()).isEqualTo(baseSha);
-        assertThat(state1.getCurrentStateSHA()).isEqualTo(stateSha1);
+        // SHA is calculated from complete state content
+        assertThat(state1.getCurrentStateSHA()).isNotNull();
+
+        // Verify integrity by recalculating SHA
+        String recalculatedSha1 = HAUtils.calculateStateSHA(state1);
+        assertThat(state1.getCurrentStateSHA()).isEqualTo(recalculatedSha1);
 
         String eventUuid2 = "XXXXXXXX-2222-3333-4444-555555555555";
         String event2 = """
@@ -103,13 +104,16 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
         String result2 = rulesEngine1.assertEvent(sessionId1, event2); // doesn't match the rule. the event is also discarded
         System.out.println("Result2: " + result2);
 
-        String stateSha2 = HAUtils.calculateStateSHA(stateSha1, eventUuid2);
-
         SessionState state2 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state2).isNotNull();
         assertThat(state2.getLastProcessedEventUuid()).isEqualTo(eventUuid2);
-        assertThat(state2.getPreviousStateSHA()).isEqualTo(stateSha1);
-        assertThat(state2.getCurrentStateSHA()).isEqualTo(stateSha2);
+        // SHA should have changed because state content changed
+        assertThat(state2.getCurrentStateSHA()).isNotNull();
+        assertThat(state2.getCurrentStateSHA()).isNotEqualTo(state1.getCurrentStateSHA());
+
+        // Verify integrity by recalculating SHA
+        String recalculatedSha2 = HAUtils.calculateStateSHA(state2);
+        assertThat(state2.getCurrentStateSHA()).isEqualTo(recalculatedSha2);
     }
 }

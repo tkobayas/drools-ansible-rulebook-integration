@@ -67,4 +67,39 @@ public abstract class AbstractHAStateManager implements HAStateManager {
         return sessionStateMap.get(ruleSetName);
     }
 
+    /**
+     * Verify the integrity of a loaded SessionState.
+     * Compares stored SHA with recalculated SHA to detect corruption/tampering.
+     *
+     * @param sessionState The state loaded from persistence
+     * @return true if integrity check passes, false if corruption detected
+     */
+    protected boolean verifyStateIntegrity(SessionState sessionState) {
+        if (sessionState == null) {
+            return false;
+        }
+
+        String storedSHA = sessionState.getCurrentStateSHA();
+        if (storedSHA == null) {
+            LOG.warn("SessionState has no SHA - cannot verify integrity for {}", sessionState.getRuleSetName());
+            return true;  // Allow states without SHA (e.g., old persisted states before this feature)
+        }
+
+        // Recalculate SHA from content
+        String recalculatedSHA = HAUtils.calculateStateSHA(sessionState);
+
+        boolean valid = storedSHA.equals(recalculatedSHA);
+
+        if (!valid) {
+            LOG.error("SessionState integrity check FAILED! Stored SHA: {}, Recalculated SHA: {}",
+                      storedSHA, recalculatedSHA);
+            LOG.error("SessionState may be corrupted or tampered. RuleSetName: {}, HaUuid: {}, Version: {}",
+                      sessionState.getRuleSetName(), sessionState.getHaUuid(), sessionState.getVersion());
+        } else {
+            LOG.debug("SessionState integrity check passed for {}", sessionState.getRuleSetName());
+        }
+
+        return valid;
+    }
+
 }
