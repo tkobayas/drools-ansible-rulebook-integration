@@ -119,6 +119,11 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     @Override
+    public String getLeaderId() {
+        return leaderId;
+    }
+
+    @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
         String sql = """
                 SELECT *
@@ -166,13 +171,19 @@ public class H2StateManager extends AbstractHAStateManager {
 
                 // Handle SHA tracking fields
                 sessionState.setCurrentStateSHA(rs.getString("current_state_sha"));
-                sessionState.setPreviousStateSHA(rs.getString("previous_state_sha"));
                 sessionState.setLastProcessedEventUuid(rs.getString("last_processed_event_uuid"));
 
                 // Handle created_time
                 Timestamp createdTime = rs.getTimestamp("created_time");
                 if (createdTime != null) {
                     sessionState.setCreatedTime(createdTime.getTime());
+                }
+
+                logger.info("Loaded SessionState from database: {}", ruleSetName);
+
+                // Verify integrity
+                if (!verifyStateIntegrity(sessionState)) {
+                    logger.error("Continuing with potentially corrupted SessionState for {}", ruleSetName);
                 }
 
                 return sessionState;
@@ -198,9 +209,10 @@ public class H2StateManager extends AbstractHAStateManager {
             conn.setAutoCommit(false);
 
             // Insert new version as current
+            // Note: SHA is already calculated in updateInMemorySessionState() before this is called
             String sql = """
-                    INSERT INTO SessionState (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, previous_state_sha, last_processed_event_uuid, version, created_time, leader_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+                    INSERT INTO SessionState (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, last_processed_event_uuid, version, created_time, leader_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?,
                         COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,
                         ?, ?)
                     """;
@@ -226,20 +238,19 @@ public class H2StateManager extends AbstractHAStateManager {
 
                 // Handle SHA tracking fields
                 ps.setString(6, sessionState.getCurrentStateSHA());
-                ps.setString(7, sessionState.getPreviousStateSHA());
-                ps.setString(8, sessionState.getLastProcessedEventUuid());
+                ps.setString(7, sessionState.getLastProcessedEventUuid());
 
-                ps.setString(9, sessionState.getHaUuid());
-                ps.setString(10, sessionState.getRuleSetName());
+                ps.setString(8, sessionState.getHaUuid());
+                ps.setString(9, sessionState.getRuleSetName());
 
                 // Handle created_time
                 if (sessionState.getCreatedTime() > 0) {
-                    ps.setTimestamp(11, new Timestamp(sessionState.getCreatedTime()));
+                    ps.setTimestamp(10, new Timestamp(sessionState.getCreatedTime()));
                 } else {
-                    ps.setTimestamp(11, new Timestamp(System.currentTimeMillis()));
+                    ps.setTimestamp(10, new Timestamp(System.currentTimeMillis()));
                 }
 
-                ps.setString(12, sessionState.getLeaderId());
+                ps.setString(11, sessionState.getLeaderId());
 
                 ps.executeUpdate();
             }

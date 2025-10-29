@@ -1,7 +1,10 @@
 package org.drools.ansible.rulebook.integration.ha.model;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 
 /**
  * Represents the state of events in the HA system.
@@ -24,7 +27,6 @@ public class SessionState {
 
     // For integrity checks
     private String currentStateSHA;      // SHA256 of current state
-    private String previousStateSHA;     // SHA256 of previous state
     private String lastProcessedEventUuid;
 
     public SessionState() {
@@ -104,19 +106,35 @@ public class SessionState {
         this.currentStateSHA = currentStateSHA;
     }
 
-    public String getPreviousStateSHA() {
-        return previousStateSHA;
-    }
-
-    public void setPreviousStateSHA(String previousStateSHA) {
-        this.previousStateSHA = previousStateSHA;
-    }
-
     public String getLastProcessedEventUuid() {
         return lastProcessedEventUuid;
     }
 
     public void setLastProcessedEventUuid(String lastProcessedEventUuid) {
         this.lastProcessedEventUuid = lastProcessedEventUuid;
+    }
+
+    /**
+     * Returns a canonical representation of this SessionState for SHA calculation.
+     * Excludes the SHA field itself (currentStateSHA) to avoid circular dependency.
+     * Includes all other fields to detect any corruption or tampering.
+     *
+     * @return JSON string with deterministic field ordering for consistent hashing
+     */
+    public String toHashableContent() {
+        // Create a map with all fields EXCEPT currentStateSHA
+        Map<String, Object> contentMap = new LinkedHashMap<>();
+
+        contentMap.put("haUuid", haUuid);
+        contentMap.put("ruleSetName", ruleSetName);
+        contentMap.put("rulebookHash", rulebookHash);
+        contentMap.put("partialEvents", partialEvents);
+        contentMap.put("createdTime", createdTime);
+        contentMap.put("persistedTime", persistedTime);
+        contentMap.put("version", version);
+        contentMap.put("leaderId", leaderId);
+        contentMap.put("lastProcessedEventUuid", lastProcessedEventUuid);
+
+        return JsonMapper.toJson(contentMap);
     }
 }

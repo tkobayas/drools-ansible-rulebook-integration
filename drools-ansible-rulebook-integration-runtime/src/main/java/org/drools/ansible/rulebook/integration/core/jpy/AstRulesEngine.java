@@ -191,20 +191,27 @@ public class AstRulesEngine implements Closeable {
         // Update persisted time
         sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
 
-        // Advance SHA chain
+        // Update lastProcessedEventUuid
         if (identifier != null) {
-            applyShaAdvance(sessionState, identifier);
             sessionState.setLastProcessedEventUuid(identifier);
         }
+
+        // Calculate integrity SHA from complete state
+        updateStateSHA(sessionState);
     }
 
-    private void applyShaAdvance(SessionState sessionState, String processedIdentifier) {
-        if (processedIdentifier == null) {
+    /**
+     * Update SHA for integrity verification.
+     * Calculate SHA from complete state content to detect corruption/tampering.
+     */
+    private void updateStateSHA(SessionState sessionState) {
+        if (sessionState == null) {
             return;
         }
-        String currentStateSHA = sessionState.getCurrentStateSHA();
-        sessionState.setPreviousStateSHA(currentStateSHA);
-        sessionState.setCurrentStateSHA(calculateStateSHA(currentStateSHA, processedIdentifier));
+
+        // Calculate SHA from complete state content
+        String newSHA = calculateStateSHA(sessionState);
+        sessionState.setCurrentStateSHA(newSHA);
     }
 
     private String buildHaResponse(long sessionId, List<Map<String, Map<String, Object>>> matchList, boolean persistMatchingEvents) {
@@ -396,12 +403,6 @@ public class AstRulesEngine implements Closeable {
 
         if (Objects.equals(persistedSessionState.getCurrentStateSHA(), inMemoryState.getCurrentStateSHA())) {
             logger.info("Current state SHA of this node for {} matches the persisted SessionState. No recovery needed.", rulesetName);
-        } else if (Objects.equals(persistedSessionState.getCurrentStateSHA(), inMemoryState.getPreviousStateSHA())) {
-            logger.info("Previous state SHA of this node for {} matches the current state SHA of the persisted SessionState." +
-                        " It can be explained that one event crashed the leader, but this node successfully processed it. " +
-                        " This node has the valid state. Persisting in-memory state.", rulesetName);
-            // Persist the in-memory state (which is ahead by one event)
-            haStateManager.persistSessionState(inMemoryState);
         } else {
             logger.warn("State SHA mismatch detected for {} while promoting to leader. Recovery needed.", rulesetName);
             needsRecovery = true;
@@ -459,12 +460,15 @@ public class AstRulesEngine implements Closeable {
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(haStateManager.getHaUuid());
         sessionState.setRuleSetName(rulesetName);
-        sessionState.setPartialEvents(List.of());
+        sessionState.setPartialEvents(new ArrayList<>());
         long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
         sessionState.setCreatedTime(currentTime);
         sessionState.setPersistedTime(currentTime);
         sessionState.setRulebookHash(rulebookHash);
-        sessionState.setCurrentStateSHA(rulebookHash); // the base SHA is the rulebook hash
+        sessionState.setLeaderId(haStateManager.getLeaderId());
+
+        // Calculate initial SHA from complete state
+        sessionState.setCurrentStateSHA(calculateStateSHA(sessionState));
 
         // Register in memory (for both leader and non-leader)
         haStateManager.registerSessionState(rulesetName, sessionState);

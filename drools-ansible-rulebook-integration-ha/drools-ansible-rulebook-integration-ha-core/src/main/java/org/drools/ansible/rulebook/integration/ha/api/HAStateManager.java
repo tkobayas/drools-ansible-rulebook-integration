@@ -53,6 +53,13 @@ public interface HAStateManager {
     String getHaUuid();
 
     /**
+     * Get the leader ID
+     *
+     * @return The leader ID or null if no leader
+     */
+    String getLeaderId();
+
+    /**
      * Get current session state for a session
      * This reads from the database (persisted state)
      *
