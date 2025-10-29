@@ -24,10 +24,6 @@ public class HASessionContext {
     // Note: if we will not need to maintain SHA, we may remove this and directly create EventRecord on insertion
     private PendingRecord pendingRecord;
 
-    // Keep track of the last inserted identifier from the client. Eventually persisted as SessionState.lastProcessedEventUuid
-    // Note: if we will not need to maintain SHA and lastProcessedEventUuid, we may remove this
-    private String currentIdentifier;
-
     public LinkedHashMap<String, EventRecord> getTrackedRecords() {
         return trackedRecords;
     }
@@ -79,13 +75,8 @@ public class HASessionContext {
         }
     }
 
-    public String getCurrentIdentifier() {
-        return currentIdentifier;
-    }
-
     public void preparePendingRecord(String identifier, String json, EventRecord.RecordType type) {
         pendingRecord = new PendingRecord(identifier, json, type);
-        currentIdentifier = identifier;
     }
 
     public PendingRecord consumePendingRecord() {

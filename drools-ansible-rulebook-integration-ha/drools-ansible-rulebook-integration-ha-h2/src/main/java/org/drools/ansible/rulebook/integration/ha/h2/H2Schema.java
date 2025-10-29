@@ -31,7 +31,6 @@ public class H2Schema {
                         time_windows CLOB,
                         persisted_time TIMESTAMP,
                         current_state_sha VARCHAR(64),
-                        last_processed_event_uuid VARCHAR(64),
                         version INT DEFAULT 1,
                         created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         leader_id VARCHAR(255),

@@ -115,7 +115,7 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = rulesExecutorContainer.get(sessionId).processFacts(serializedFact).join();
 
         if (haMode && haStateManager != null) {
-            return processFactOrEventHA(sessionId, matches, HAUtils.sha256(serializedFact));
+            return processFactOrEventHA(sessionId, matches);
         }
 
         return matchesToJson(matches);
@@ -126,8 +126,7 @@ public class AstRulesEngine implements Closeable {
         List<Match> matches = executor.processEvents(serializedFact).join();
 
         if (haMode && haStateManager != null) {
-            String identifier = (executor instanceof HARulesExecutor harRulesExecutor) ? harRulesExecutor.getHaSessionContext().getCurrentIdentifier() : null;
-            return processFactOrEventHA(sessionId, matches, identifier);
+            return processFactOrEventHA(sessionId, matches);
         }
 
         return matchesToJson(matches);
@@ -138,7 +137,7 @@ public class AstRulesEngine implements Closeable {
      * Updates in-memory SessionState for both leader and non-leader nodes.
      * Leader nodes also persist to database.
      */
-    private String processFactOrEventHA(long sessionId, List<Match> matches, String identifier) {
+    private String processFactOrEventHA(long sessionId, List<Match> matches) {
         List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
 
         try {
@@ -153,7 +152,7 @@ public class AstRulesEngine implements Closeable {
             }
 
             // Update in-memory SessionState (common for both leader and non-leader)
-            updateInMemorySessionState(rulesExecutor, sessionState, identifier);
+            updateInMemorySessionState(rulesExecutor, sessionState);
 
             // Leader: persist to database
             if (haStateManager.isLeader()) {
@@ -178,7 +177,7 @@ public class AstRulesEngine implements Closeable {
      * Update in-memory SessionState with current session data.
      * This method is called for both leader and non-leader nodes after processing an event/fact.
      */
-    private void updateInMemorySessionState(HARulesExecutor rulesExecutor, SessionState sessionState, String identifier) {
+    private void updateInMemorySessionState(HARulesExecutor rulesExecutor, SessionState sessionState) {
         HASessionContext haSessionContext = rulesExecutor.getHaSessionContext();
         LinkedHashMap<String, EventRecord> recordsInMemory = haSessionContext.getTrackedRecords();
 
@@ -187,11 +186,6 @@ public class AstRulesEngine implements Closeable {
 
         // Update persisted time
         sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
-
-        // Update lastProcessedEventUuid
-        if (identifier != null) {
-            sessionState.setLastProcessedEventUuid(identifier);
-        }
 
         // Calculate integrity SHA from complete state
         updateStateSHA(sessionState);

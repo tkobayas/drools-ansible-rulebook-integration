@@ -189,7 +189,6 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         SessionState state1 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state1).isNotNull();
-        assertThat(state1.getLastProcessedEventUuid()).isEqualTo(eventUuid1);
         // SHA is calculated from complete state content
         assertThat(state1.getCurrentStateSHA()).isNotNull();
         assertThat(state1.getPartialEvents()).isEmpty();
@@ -207,15 +206,13 @@ class HAIntegrationTest extends HAIntegrationTestBase {
                 """.formatted(eventUuid2);
 
         String result2 = rulesEngine1.assertEvent(sessionId1, event2); // doesn't match the rule. the event is also discarded
-        System.out.println("Result2: " + result2);
+        assertThat(result2).doesNotContain("temperature_alert");
 
         SessionState state2 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
 
         assertThat(state2).isNotNull();
-        assertThat(state2.getLastProcessedEventUuid()).isEqualTo(eventUuid2);
-        // SHA should have changed because state content changed
+
         assertThat(state2.getCurrentStateSHA()).isNotNull();
-        assertThat(state2.getCurrentStateSHA()).isNotEqualTo(state1.getCurrentStateSHA());
         assertThat(state1.getPartialEvents()).isEmpty();
 
         // Verify integrity by recalculating SHA
@@ -486,7 +483,6 @@ class HAIntegrationTest extends HAIntegrationTestBase {
             SessionState stateSecondary = stateManagerForAssertion.getPersistedSessionState(getSecondaryRuleSetName());
             assertThat(statePrimary.getRuleSetName()).isEqualTo(getRuleSetNameValue());
             assertThat(stateSecondary.getRuleSetName()).isEqualTo(getSecondaryRuleSetName());
-            assertThat(statePrimary.getLastProcessedEventUuid()).isNotEqualTo(stateSecondary.getLastProcessedEventUuid());
         } finally {
             stateManagerForAssertion.shutdown();
             consumer1restart.stop();
