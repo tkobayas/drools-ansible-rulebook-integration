@@ -11,12 +11,16 @@ import org.drools.ansible.rulebook.integration.api.rulesengine.RulesEvaluator;
 import org.drools.ansible.rulebook.integration.api.rulesengine.RulesExecutorSession;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.kie.api.runtime.rule.Match;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil.asFactMap;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 public class HARulesExecutor extends RulesExecutor {
+
+    private static final Logger LOG = LoggerFactory.getLogger(HARulesExecutor.class);
 
     // In HA mode, ID should be consistent across session recoveries for python client.
     // The ID is essentially used to lookup rulesExecutor from container
@@ -64,9 +68,12 @@ public class HARulesExecutor extends RulesExecutor {
         rulesEvaluator.stashFirstEventJsonForValidation(json);
 
         Map<String, Object> eventMap = asFactMap(json);
-        String eventUuid = getEventUuid(eventMap).orElse(null); // TODO: clarify how to handle an event without uuid! (add sha to map?)
+        String eventUuid = getEventUuid(eventMap)
+                .orElseGet(() -> {
+                    LOG.warn("Event UUID not found in event data, computing SHA-256 hash as fallback");
+                    return sha256(json);
+                });
         getHaSessionContext().preparePendingRecord(eventUuid, json, EventRecord.RecordType.EVENT);
-
         return rulesEvaluator.processEvents(eventMap);
     }
 
