@@ -27,7 +27,6 @@ public class SessionState {
 
     // For integrity checks
     private String currentStateSHA;      // SHA256 of current state
-    private String lastProcessedEventUuid;
 
     public SessionState() {
         this.createdTime = Instant.now().toEpochMilli();
@@ -106,13 +105,6 @@ public class SessionState {
         this.currentStateSHA = currentStateSHA;
     }
 
-    public String getLastProcessedEventUuid() {
-        return lastProcessedEventUuid;
-    }
-
-    public void setLastProcessedEventUuid(String lastProcessedEventUuid) {
-        this.lastProcessedEventUuid = lastProcessedEventUuid;
-    }
 
     /**
      * Returns a canonical representation of this SessionState for SHA calculation.
@@ -134,7 +126,6 @@ public class SessionState {
         contentMap.put("persistedTime", persistedTime);
         // version is excluded - it's a database artifact, not working memory state
         contentMap.put("leaderId", leaderId);
-        contentMap.put("lastProcessedEventUuid", lastProcessedEventUuid);
 
         return JsonMapper.toJson(contentMap);
     }
