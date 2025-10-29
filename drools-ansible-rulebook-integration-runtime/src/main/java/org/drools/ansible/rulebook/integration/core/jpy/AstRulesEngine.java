@@ -53,9 +53,6 @@ public class AstRulesEngine implements Closeable {
     private boolean haMode = false;
     private boolean shutdown = false;
 
-    // Test purpose
-    public boolean mismatchRecoveryTriggered = false;
-
     public long createRuleset(String rulesetString) {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
         return createRuleset(rulesSet, rulesetString);
@@ -377,59 +374,35 @@ public class AstRulesEngine implements Closeable {
 
         String rulesetName = executor.getRuleSetName();
 
-        // Get in-memory state (current node's state)
-        SessionState inMemoryState = haStateManager.getInMemorySessionState(rulesetName);
-        if (inMemoryState == null) {
-            throw new IllegalStateException("Missing in-memory SessionState for ruleset " + rulesetName + " while promoting to leader");
-        }
-
         // Get persisted state (from database)
         SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
 
         if (persistedSessionState == null) {
-            // No persisted state - persist current in-memory state
-            logger.info("No persisted state found for {}. Persisting current in-memory state.", rulesetName);
-            haStateManager.persistSessionState(inMemoryState);
+            // No persisted state - this is the first time for this ruleset
             return;
         }
 
-        // Check for rulebook hash mismatch
-        if (rulebookHashMismatch(rulesetName, inMemoryState, persistedSessionState)) {
-            throw new IllegalStateException("Rulebook hash mismatch detected for " + rulesetName + " while promoting to leader");
+        // Verify integrity
+        if (!haStateManager.verifySessionState(persistedSessionState)) {
+            logger.error("Continuing with potentially corrupted SessionState for {}", rulesetName);
         }
 
-        // Compare SHAs to decide if recovery is needed
-        boolean needsRecovery = false;
-
-        if (Objects.equals(persistedSessionState.getCurrentStateSHA(), inMemoryState.getCurrentStateSHA())) {
-            logger.info("Current state SHA of this node for {} matches the persisted SessionState. No recovery needed.", rulesetName);
-        } else {
-            logger.warn("State SHA mismatch detected for {} while promoting to leader. Recovery needed.", rulesetName);
-            needsRecovery = true;
+        RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesSet(), persistedSessionState);
+        long previousId = executor.getId();
+        RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
+        if (removed != null) {
+            removed.dispose();
         }
 
-        if (needsRecovery) {
-            // Recover from persisted state
-            RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesSet(), persistedSessionState);
-            long previousId = executor.getId();
-            RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
-            if (removed != null) {
-                removed.dispose();
-            }
+        // Keep the same session ID for python client
+        ((HARulesExecutor) recoveredRulesExecutor).setExternalSessionId(previousId);
 
-            // Keep the same session ID for python client
-            ((HARulesExecutor)recoveredRulesExecutor).setExternalSessionId(previousId);
+        rulesExecutorContainer.register(recoveredRulesExecutor);
 
-            rulesExecutorContainer.register(recoveredRulesExecutor);
+        // Update in-memory state to match recovered state
+        haStateManager.registerSessionState(rulesetName, persistedSessionState);
 
-            // Update in-memory state to match recovered state
-            haStateManager.registerSessionState(rulesetName, persistedSessionState);
-
-            logger.info("Recovered session {} from persisted SessionState version {}", rulesetName, persistedSessionState.getVersion());
-            mismatchRecoveryTriggered = true;
-        } else {
-            logger.info("No recovery needed for session {} upon leader promotion", rulesetName);
-        }
+        logger.info("Recovered session {} from persisted SessionState version {}", rulesetName, persistedSessionState.getVersion());
     }
 
     private RulesExecutor createHARulesExecutorWithSessionState(RulesSet rulesSet, String rulesetString) {

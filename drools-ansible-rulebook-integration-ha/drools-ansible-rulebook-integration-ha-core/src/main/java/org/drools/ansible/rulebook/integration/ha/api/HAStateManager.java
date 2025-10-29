@@ -174,4 +174,13 @@ public interface HAStateManager {
      * @return The in-memory session state or null if not found
      */
     SessionState getInMemorySessionState(String ruleSetName);
+
+    /**
+     * Verify the integrity of a loaded SessionState.
+     * Compares stored SHA with recalculated SHA to detect corruption/tampering.
+     *
+     * @param sessionState The state loaded from persistence
+     * @return true if integrity check passes, false if corruption detected
+     */
+    boolean verifySessionState(SessionState sessionState);
 }
