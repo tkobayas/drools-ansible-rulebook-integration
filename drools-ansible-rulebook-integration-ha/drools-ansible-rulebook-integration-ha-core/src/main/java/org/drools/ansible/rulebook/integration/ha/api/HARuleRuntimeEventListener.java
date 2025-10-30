@@ -1,5 +1,7 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import java.util.UUID;
+
 import org.drools.ansible.rulebook.integration.api.domain.temporal.TimeConstraint;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
@@ -16,7 +18,6 @@ import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.rulesmodel.PrototypeFactory.SYNTHETIC_PROTOTYPE_NAME;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
-import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 /**
  * KieSession event listener that tracks all fact/event insertions and deletions for HA persistence.
@@ -79,7 +80,7 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
             } else {
                 // Control event or other synthetic insertion: auto-generate tracking info
                 json = JsonMapper.toJson(protoFact.asMap());
-                identifier = isEvent ? getEventUuid(factHandle).orElse(sha256(json)) : sha256(json);
+                identifier = isEvent ? getEventUuid(factHandle).orElse(UUID.randomUUID().toString()) : UUID.randomUUID().toString();
                 recordType = isEvent ? EventRecord.RecordType.EVENT : EventRecord.RecordType.FACT;
 
                 if (isSyntheticControlEvent) {
