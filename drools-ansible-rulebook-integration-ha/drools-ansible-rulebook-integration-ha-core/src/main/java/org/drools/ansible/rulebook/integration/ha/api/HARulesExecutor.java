@@ -2,6 +2,7 @@ package org.drools.ansible.rulebook.integration.ha.api;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
@@ -16,7 +17,6 @@ import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil.asFactMap;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
-import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256;
 
 public class HARulesExecutor extends RulesExecutor {
 
@@ -78,8 +78,8 @@ public class HARulesExecutor extends RulesExecutor {
         Map<String, Object> eventMap = asFactMap(json);
         String eventUuid = getEventUuid(eventMap)
                 .orElseGet(() -> {
-                    LOG.warn("Event UUID not found in event data, computing SHA-256 hash as fallback");
-                    return sha256(json);
+                    LOG.warn("Event UUID not found in event data, generating random UUID as fallback");
+                    return UUID.randomUUID().toString();
                 });
         getHaSessionContext().preparePendingRecord(eventUuid, json, EventRecord.RecordType.EVENT);
         return rulesEvaluator.processEvents(eventMap);
@@ -88,7 +88,7 @@ public class HARulesExecutor extends RulesExecutor {
     @Override
     public CompletableFuture<List<Match>> processFacts(String json) {
         MemoryMonitorUtil.checkMemoryOccupation(rulesEvaluator.getSessionStatsCollector());
-        getHaSessionContext().preparePendingRecord(sha256(json), json, EventRecord.RecordType.FACT);
+        getHaSessionContext().preparePendingRecord(UUID.randomUUID().toString(), json, EventRecord.RecordType.FACT);
         return rulesEvaluator.processFacts(asFactMap(json));
     }
 
