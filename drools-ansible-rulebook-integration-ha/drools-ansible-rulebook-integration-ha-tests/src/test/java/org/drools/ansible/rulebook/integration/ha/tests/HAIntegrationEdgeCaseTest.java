@@ -8,9 +8,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
+import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality
@@ -112,5 +112,50 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
         // Verify integrity by recalculating SHA
         String recalculatedSha2 = HAUtils.calculateStateSHA(state2);
         assertThat(state2.getCurrentStateSHA()).isEqualTo(recalculatedSha2);
+    }
+
+    // This is a little tricky scenario. Usually we expect a leader is taken over by another node.
+    // But this HA implementation allows the same node to restart the engine process and become leader again.
+    // Not a real requirement, but probably good to keep this capability.
+    @Test
+    void testSingleRestart() {
+        sessionId1 = rulesEngine1.createRuleset(getRuleSet());
+        rulesEngine1.enableLeader("engine-1");
+
+        // Process an event
+        String event = createEvent("""
+                {
+                    "temperature": 45,
+                    "critical": true
+                }
+                """);
+        String result = rulesEngine1.assertEvent(sessionId1, event);
+        assertThat(result).contains("temperature_alert");
+
+        // Simulate engine-1 crash
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        // Simulate restarting engine-1 on the same node. The old instance is gone, so we create a new one
+        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
+        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
+        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
+        consumer1restart.startConsuming(rulesEngine1Restart.port());
+
+        rulesEngine1Restart.enableLeader("engine-1");
+
+        // Process another event
+        String event2 = createEvent("""
+                {
+                    "temperature": 50,
+                    "critical": true
+                }
+                """);
+        String result2 = rulesEngine1Restart.assertEvent(sessionId1Restart, event2);
+        assertThat(result2).contains("temperature_alert");
+
+        consumer1restart.stop();
     }
 }

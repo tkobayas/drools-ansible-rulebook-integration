@@ -3,13 +3,10 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 import java.util.List;
 import java.util.Map;
 
-import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
@@ -100,38 +97,33 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
         consumer1.stop();
         consumer1 = null;
 
-        // Step 3: Node 1 restarted. Not a leader.
-        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
-        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        // Step 3: Node 2 takes over and recovers session
         // recovery happens here, restores control event with current_count=2, advances to t=2
-        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
-        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
-        consumer1restart.startConsuming(rulesEngine1Restart.port());
+        rulesEngine2.enableLeader("node-2");
 
         // Advance to the simulated current time (t=3)
-        rulesEngine1Restart.advanceTime(sessionId1Restart, 1, "SECONDS");
+        rulesEngine2.advanceTime(sessionId2, 1, "SECONDS");
 
         // Step 4: Process third event (t=3, count=2->3)
         // This should trigger the rule because threshold (3) is reached
         String thirdEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":3}");
-        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+        String result3 = rulesEngine2.assertEvent(sessionId2, thirdEvent);
 
         // Should MATCH - count reached threshold of 3
         List<Map<String, Object>> matches3 = readValueAsListOfMapOfStringAndObject(result3);
         assertThat(matches3).hasSize(1);
         assertThat(matches3.get(0))
                 .containsEntry("name", "alert_accumulator")
-                .containsEntry("matching_uuid", "");
+                .containsKey("matching_uuid");
 
         // Verify the returned event is the triggering event (sequence=3)
         Map<String, Object> eventData = (Map<String, Object>) matches3.get(0).get("events");
         Map<String, Object> matchedEvent = (Map<String, Object>) eventData.get("m");
         assertThat(matchedEvent).containsEntry("sequence", 3);
-
-        // Clean up
-        rulesEngine1Restart.close();
-        consumer1restart.stop();
     }
+
+
+
 
     @Test
     void testSessionRecoveryWithAccumulateWindowExpiration() {
@@ -167,31 +159,23 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
         consumer1.stop();
         consumer1 = null;
 
-        // Step 3: Node 1 restarted. Not a leader.
-        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
-        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        // recovery happens here, restores control event with current_count=2 and expiration=10s from t=0
-        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
-        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
-        consumer1restart.startConsuming(rulesEngine1Restart.port());
+        // Step 3: Node 2 takes over and recovers session
+        // recovery happens here, restores control event with current_count=2, advances to t=3
+        rulesEngine2.enableLeader("node-2");
 
         // Advance to the simulated current time (t=5)
-        rulesEngine1Restart.advanceTime(sessionId1Restart, 2, "SECONDS");
+        rulesEngine2.advanceTime(sessionId2, 2, "SECONDS");
 
         // Step 4: Advance time past the window expiration (t=5 + 6 = t=11)
         // Control event expires at t=10 (created at t=0 with 10-second expiration)
-        rulesEngine1Restart.advanceTime(sessionId1Restart, 6, "SECONDS");
+        rulesEngine2.advanceTime(sessionId2, 6, "SECONDS");
 
         // Process third event (t=11)
         // The control event should have expired, so accumulation resets
         String thirdEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":3}");
-        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+        String result3 = rulesEngine2.assertEvent(sessionId2, thirdEvent);
 
         // Should NOT match - control event expired, count reset to 1
         assertThat(readValueAsListOfMapOfStringAndObject(result3)).isEmpty();
-
-        // Clean up
-        rulesEngine1Restart.close();
-        consumer1restart.stop();
     }
 }

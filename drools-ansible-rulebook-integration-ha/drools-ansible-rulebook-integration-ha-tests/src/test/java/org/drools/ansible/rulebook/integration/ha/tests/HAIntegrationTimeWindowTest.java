@@ -104,21 +104,17 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         consumer1.stop();
         consumer1 = null;
 
-        // Step 3: Node 1 restarted. Not a leader.
-        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
-        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        // recovery happens here. advance 3 seconds to t=3
-        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
-        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
-        consumer1restart.startConsuming(rulesEngine1Restart.port());
+        // Step 3: Node 2 takes over and recovers session
+        // recovery happens here, advances to t=3
+        rulesEngine2.enableLeader("node-2");
 
         // Advance to the simulated current time (t=5)
-        rulesEngine1Restart.advanceTime(sessionId1Restart, 2, "SECONDS");
+        rulesEngine2.advanceTime(sessionId2, 2, "SECONDS");
 
         // Step 4: Process third event (t=5): sensu.storage.percent > 95
         // All 3 events are now within the 10-second window
         String thirdEvent = createEvent("{\"sensu\":{\"storage\":{\"percent\":97}}}");
-        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+        String result3 = rulesEngine2.assertEvent(sessionId2, thirdEvent);
 
         // Should MATCH - all 3 events are within the window
         List<Map<String, Object>> matches3 = readValueAsListOfMapOfStringAndObject(result3);
@@ -128,10 +124,6 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
 
         // Verify all 3 events are bound
         assertThat(((Map)matches3.get(0).get("events"))).containsKeys("m_0", "m_1", "m_2");
-
-        // Clean up
-        rulesEngine1Restart.close();
-        consumer1restart.stop();
     }
 
     @Test
@@ -169,24 +161,20 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         consumer1.stop();
         consumer1 = null;
 
-        // Step 3: Node 1 restarted. Not a leader.
-        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
-        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        // recovery happens here, advances to t=3 (last persisted time)
-        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
-        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
-        consumer1restart.startConsuming(rulesEngine1Restart.port());
+        // Step 3: Node 2 takes over and recovers session
+        // recovery happens here, advances to t=3
+        rulesEngine2.enableLeader("node-2");
 
         // Advance to t=5 (catch up to simulated current time before crash)
-        rulesEngine1Restart.advanceTime(sessionId1Restart, 2, "SECONDS");
+        rulesEngine2.advanceTime(sessionId2, 2, "SECONDS");
 
         // Step 4: Advance time significantly (t=5 + 9 = t=14)
         // This puts us more than 10 seconds away from the first event (t=0)
-        rulesEngine1Restart.advanceTime(sessionId1Restart, 9, "SECONDS");
+        rulesEngine2.advanceTime(sessionId2, 9, "SECONDS");
 
         // Process third event (t=14): sensu.storage.percent > 95
         String thirdEvent = createEvent("{\"sensu\":{\"storage\":{\"percent\":97}}}");
-        String result3 = rulesEngine1Restart.assertEvent(sessionId1Restart, thirdEvent);
+        String result3 = rulesEngine2.assertEvent(sessionId2, thirdEvent);
 
         // Should NOT match - Event 1 (t=0) and Event 3 (t=14) are 14 seconds apart (> 10 second window)
         // Even though we have all 3 event types in working memory:
@@ -195,9 +183,5 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         // - Event 3 (sensu.storage.percent, t=14)
         // The time window constraint requires all events to be within 10 seconds of each other
         assertThat(readValueAsListOfMapOfStringAndObject(result3)).isEmpty();
-
-        // Clean up
-        rulesEngine1Restart.close();
-        consumer1restart.stop();
     }
 }

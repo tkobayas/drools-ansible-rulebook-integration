@@ -1,22 +1,16 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
-import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
-import org.drools.ansible.rulebook.integration.ha.h2.H2Schema;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createMatchingEvent;
@@ -25,7 +19,7 @@ import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTab
 /**
  * Tests for HA failover scenarios
  */
-class HAFailoverTest {
+class HAStateManagerFailoverTest {
 
     private static final String HA_UUID = "failover-ha-1";
 
