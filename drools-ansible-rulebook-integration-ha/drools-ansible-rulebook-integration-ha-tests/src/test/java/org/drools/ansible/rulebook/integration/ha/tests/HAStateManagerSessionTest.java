@@ -3,14 +3,12 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 import java.util.List;
 
 import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
-import org.drools.ansible.rulebook.integration.api.RuleFormat;
 import org.drools.ansible.rulebook.integration.api.RuleNotation;
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.RulesExecutorFactory;
-import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
-import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
+import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.junit.jupiter.api.AfterEach;
@@ -143,10 +141,9 @@ class HAStateManagerSessionTest {
         // This test simulates that the restarted node recovers the session, assuming that the leader is taken over by another node
         HAStateManager stateManager2 = HAStateManagerFactory.create();
         stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK).toRulesSet(RuleFormat.JSON, ALL_CONDITION_RULE);
 
-        SessionState retrievedSessionState = stateManager2.getPersistedSessionState(rulesSet.getName());
-        RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(rulesSet, retrievedSessionState);
+        SessionState retrievedSessionState = stateManager2.getPersistedSessionState("Test Ruleset");
+        RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(ALL_CONDITION_RULE, retrievedSessionState);
 
         rulesExecutorRecovered.advanceTime(10, java.util.concurrent.TimeUnit.SECONDS);
 
@@ -205,7 +202,6 @@ class HAStateManagerSessionTest {
 
         long insertedAt = createdTime + 1_000;
         String factJson = "{\"i\":1}";
-        String factIdentifier = HAUtils.sha256(factJson);
 
         List<Match> matchList = rulesExecutor1.processFacts(factJson).join(); // partial match
         assertThat(matchList).isEmpty();
@@ -231,11 +227,9 @@ class HAStateManagerSessionTest {
 
         HAStateManager stateManager2 = HAStateManagerFactory.create();
         stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
-        RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK)
-                .toRulesSet(RuleFormat.JSON, ALL_CONDITION_WITH_FACT_RULE);
 
-        SessionState retrievedState = stateManager2.getPersistedSessionState(rulesSet.getName());
-        RulesExecutor recoveredExecutor = stateManager2.recoverSession(rulesSet, retrievedState);
+        SessionState retrievedState = stateManager2.getPersistedSessionState("Test Ruleset");
+        RulesExecutor recoveredExecutor = stateManager2.recoverSession(ALL_CONDITION_WITH_FACT_RULE, retrievedState);
 
         String recoveredFacts = recoveredExecutor.getAllFactsAsJson();
         assertThat(recoveredFacts).contains("\"i\":1");

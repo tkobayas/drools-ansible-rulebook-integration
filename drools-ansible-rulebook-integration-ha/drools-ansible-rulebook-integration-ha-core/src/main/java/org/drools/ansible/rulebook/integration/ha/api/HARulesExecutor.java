@@ -26,9 +26,13 @@ public class HARulesExecutor extends RulesExecutor {
     // The ID is essentially used to lookup rulesExecutor from container
     private long externalSessionId;
 
-    public HARulesExecutor(RulesExecutorSession rulesExecutorSession) {
+    // Retain ruleset string for clean KieBase generation during recovery
+    private String rulesetString;
+
+    public HARulesExecutor(RulesExecutorSession rulesExecutorSession, String rulesetString) {
         super(createRulesEvaluator(rulesExecutorSession));
         this.externalSessionId = rulesEvaluator.getSessionId(); // Initially set to internal session ID
+        this.rulesetString = rulesetString;
 
         // Pass container lookup ID to evaluator so it can use it for SessionStats, async responses, etc.
         if (rulesEvaluator instanceof HARulesEvaluator) {
@@ -38,6 +42,10 @@ public class HARulesExecutor extends RulesExecutor {
 
     private static RulesEvaluator createRulesEvaluator(RulesExecutorSession rulesExecutorSession) {
         return new HARulesEvaluator(rulesExecutorSession);
+    }
+
+    public String getRulesetString() {
+        return rulesetString;
     }
 
     @Override
