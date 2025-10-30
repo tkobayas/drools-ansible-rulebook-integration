@@ -44,7 +44,7 @@ public class TestUtils {
         hikariConfig.setPassword("");
         hikariConfig.setMaximumPoolSize(10);
 
-        try (HikariDataSource dataSource = new HikariDataSource(hikariConfig);) {
+        try (HikariDataSource dataSource = new HikariDataSource(hikariConfig)) {
             H2Schema.dropSchema(dataSource);
         } catch (SQLException e) {
             throw new RuntimeException(e);

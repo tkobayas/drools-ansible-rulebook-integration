@@ -8,7 +8,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -27,7 +26,6 @@ import org.drools.ansible.rulebook.integration.ha.api.HARulesExecutorFactory;
 import org.drools.ansible.rulebook.integration.ha.api.HASessionContext;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
-import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -381,7 +379,7 @@ public class AstRulesEngine implements Closeable {
             logger.error("Continuing with potentially corrupted SessionState for {}", rulesetName);
         }
 
-        RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesSet(), persistedSessionState);
+        RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesetString(), persistedSessionState);
         long previousId = executor.getId();
         RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
         if (removed != null) {
@@ -412,7 +410,7 @@ public class AstRulesEngine implements Closeable {
 
         if (persistedSessionState != null) {
             // Persisted state exists - recover from it
-            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesSet, persistedSessionState);
+            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState);
 
             // Register recovered state in memory (for both leader and non-leader)
             haStateManager.registerSessionState(rulesetName, persistedSessionState);
@@ -421,7 +419,7 @@ public class AstRulesEngine implements Closeable {
         }
 
         // No persisted state - create fresh executor and initial SessionState
-        RulesExecutor executor = HARulesExecutorFactory.createRulesExecutor(rulesSet);
+        RulesExecutor executor = HARulesExecutorFactory.createRulesExecutor(rulesSet, rulesetString);
 
         // Create initial SessionState (same for both leader and non-leader)
         SessionState sessionState = new SessionState();

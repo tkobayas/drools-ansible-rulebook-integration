@@ -23,8 +23,8 @@ public abstract class AbstractHAStateManager implements HAStateManager {
     private final Map<String, SessionState> sessionStateMap = new HashMap<>();
 
     @Override
-    public RulesExecutor recoverSession(RulesSet rulesSet, SessionState sessionState) {
-        return HARulesExecutorFactory.createRulesExecutorWithRecovery(rulesSet, rulesExecutor -> {
+    public RulesExecutor recoverSession(String rulesetString, SessionState sessionState) {
+        return HARulesExecutorFactory.createRulesExecutorWithRecovery(rulesetString, rulesExecutor -> {
             // Replay events to bring session up-to-date
             long currentTimeAtNewNode = ((PseudoClockScheduler) rulesExecutor.asKieSession().getSessionClock()).getCurrentTime();
             ((PseudoClockScheduler) rulesExecutor.asKieSession().getSessionClock()).setStartupTime(sessionState.getCreatedTime());

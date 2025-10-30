@@ -1,6 +1,5 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
-import java.util.HashMap;
 import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;

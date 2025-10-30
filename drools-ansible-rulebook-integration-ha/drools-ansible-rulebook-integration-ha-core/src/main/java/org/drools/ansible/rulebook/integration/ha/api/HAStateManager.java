@@ -80,7 +80,7 @@ public interface HAStateManager {
      *
      * @return
      */
-    RulesExecutor recoverSession(RulesSet rulesSet, SessionState sessionState);
+    RulesExecutor recoverSession(String rulesetString, SessionState sessionState);
 
     /**
      * Add a matching event to the database

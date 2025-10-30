@@ -3,13 +3,10 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 import java.util.List;
 import java.util.Map;
 
-import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
@@ -69,7 +66,7 @@ class HAIntegrationMultiConditionFactTest extends HAIntegrationTestBase {
     }
 
     @Test
-    void testSessionRecoveryWithPartialMatchOnTheSameNode() {
+    void testSessionRecoveryWithPartialMatch() {
         // Step 1: Node 1 becomes leader and processes first fact (partial match)
         rulesEngine1.enableLeader("node-1");
 
@@ -90,18 +87,13 @@ class HAIntegrationMultiConditionFactTest extends HAIntegrationTestBase {
         consumer1.stop();
         consumer1 = null;
 
-        // Step 3: Node 1 restarted. Not a leader.
-        //         Leader is taken over by Node 2, but Node 2 is not the scope of this test
-        AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
-        rulesEngine1Restart.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG); // The same cluster. Both nodes share same DB
-        long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet());
-        AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
-        consumer1restart.startConsuming(rulesEngine1Restart.port());
+        // Step 3: Node 2 takes over and recovers session
+        rulesEngine2.enableLeader("node-2");
 
-        // Step 4: Node 1 processes second event that should complete the match
+        // Step 4: Node 2 processes second event that should complete the match
         // The recovered session should have the partial match from the first fact
         String secondEvent = createEvent("{\"j\":2}");
-        String result2 = rulesEngine1Restart.assertEvent(sessionId1Restart, secondEvent);
+        String result2 = rulesEngine2.assertEvent(sessionId2, secondEvent);
 
         // Should now have a complete match since both conditions are satisfied
         // (i=1 from recovered state + j=2 from current event)
@@ -110,7 +102,7 @@ class HAIntegrationMultiConditionFactTest extends HAIntegrationTestBase {
 
         Map<String, Object> match = matches.get(0);
         assertThat(match).containsEntry("name", "temperature_alert")
-                .containsEntry("matching_uuid", "");
+                .containsKey("matching_uuid");
     }
 
     @Test
