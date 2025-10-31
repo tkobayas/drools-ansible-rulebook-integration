@@ -12,15 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createMatchingEvent;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
 
 /**
  * Action and MatchingEvent related tests for HAStateManager
  */
-class HAStateManagerActionTest {
+class HAStateManagerActionTest extends HAStateManagerTestBase {
 
     private HAStateManager stateManager;
 
@@ -30,7 +27,7 @@ class HAStateManagerActionTest {
     @BeforeEach
     void setUp() {
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        stateManager.initializeHA(HA_UUID, dbParams, dbHAConfig);
     }
 
     @AfterEach
@@ -39,7 +36,7 @@ class HAStateManagerActionTest {
             stateManager.shutdown();
         }
 
-        dropTables();
+        cleanupDatabase();
     }
 
     @Test
