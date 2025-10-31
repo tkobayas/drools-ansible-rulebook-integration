@@ -17,19 +17,38 @@ public class HAStateManagerFactory {
      * Create an HAStateManager instance without initialization
      * Used for new initializeHA API where initialization happens separately
      *
+     * Database type is determined by system property "ha.db.type":
+     * - "postgres" or "postgresql": Uses PostgreSQLStateManager
+     * - "h2" or any other value: Uses H2StateManager (default)
+     *
+     * Example: java -Dha.db.type=postgres ...
+     *
      * @return HAStateManager instance
      */
     public static HAStateManager create() {
+        String dbType = System.getProperty("ha.db.type", "h2");
+
         try {
-            // TODO: At the moment, only H2 is supported. Extend to support portgres.
-            Class<?> h2Class = Class.forName(
-                    "org.drools.ansible.rulebook.integration.ha.h2.H2StateManager"
-            );
-            HAStateManager manager = (HAStateManager) h2Class.getDeclaredConstructor().newInstance();
-            logger.info("Created H2StateManager instance");
+            String className;
+            String managerName;
+
+            if ("postgres".equalsIgnoreCase(dbType) || "postgresql".equalsIgnoreCase(dbType)) {
+                className = "org.drools.ansible.rulebook.integration.ha.postgres.PostgreSQLStateManager";
+                managerName = "PostgreSQLStateManager";
+            } else {
+                className = "org.drools.ansible.rulebook.integration.ha.h2.H2StateManager";
+                managerName = "H2StateManager";
+            }
+
+            Class<?> managerClass = Class.forName(className);
+            HAStateManager manager = (HAStateManager) managerClass.getDeclaredConstructor().newInstance();
+            logger.info("Created {} instance (ha.db.type={})", managerName, dbType);
             return manager;
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException("Failed to find HAStateManager implementation for type '" + dbType + "': " + e.getMessage() +
+                ". Make sure the appropriate module (ha-h2 or ha-postgres) is on the classpath.", e);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to create H2StateManager: " + e.getMessage(), e);
+            throw new RuntimeException("Failed to create HAStateManager for type '" + dbType + "': " + e.getMessage(), e);
         }
     }
 }

@@ -26,7 +26,12 @@
             <artifactId>drools-ansible-rulebook-integration-ha-h2</artifactId>
             <version>${project.version}</version>
         </dependency>
-        
+        <dependency>
+            <groupId>org.drools</groupId>
+            <artifactId>drools-ansible-rulebook-integration-ha-postgres</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Runtime module for AstRulesEngine -->
         <dependency>
             <groupId>org.drools</groupId>
