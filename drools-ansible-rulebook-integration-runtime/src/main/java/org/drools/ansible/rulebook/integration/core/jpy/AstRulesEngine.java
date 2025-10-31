@@ -106,7 +106,17 @@ public class AstRulesEngine implements Closeable {
     }
 
     public String retractMatchingFacts(long sessionId, String serializedFact, boolean allowPartialMatch, String... keysToExclude) {
-        return matchesToJson( rulesExecutorContainer.get(sessionId).processRetractMatchingFacts(serializedFact, allowPartialMatch, keysToExclude).join() );
+        List<Match> matches = rulesExecutorContainer.get(sessionId).processRetractMatchingFacts(serializedFact, allowPartialMatch, keysToExclude).join();
+
+        // HA mode: persist state changes from retraction
+        // Note: Retractions can trigger rule matches (e.g., IsNotDefinedExpression, negation patterns)
+        // so we reuse processFactOrEventHA to handle both state persistence and potential MatchingEvents.
+        // Side effect: increments eventsProcessedInTerm counter even though this is a retraction operation.
+        if (haMode && haStateManager != null) {
+            return processFactOrEventHA(sessionId, matches);
+        }
+
+        return matchesToJson(matches);
     }
 
     public String assertFact(long sessionId, String serializedFact) {
