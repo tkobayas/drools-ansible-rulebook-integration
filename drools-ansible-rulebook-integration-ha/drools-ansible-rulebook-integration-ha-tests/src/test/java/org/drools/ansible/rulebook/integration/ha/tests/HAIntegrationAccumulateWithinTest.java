@@ -122,9 +122,6 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
         assertThat(matchedEvent).containsEntry("sequence", 3);
     }
 
-
-
-
     @Test
     void testSessionRecoveryWithAccumulateWindowExpiration() {
         // This test verifies that the control event expiration is correctly restored across recovery
