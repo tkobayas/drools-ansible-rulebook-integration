@@ -11,15 +11,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createMatchingEvent;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
 
 /**
  * Tests for HA failover scenarios
  */
-class HAStateManagerFailoverTest {
+class HAStateManagerFailoverTest extends HAStateManagerTestBase {
 
     private static final String HA_UUID = "failover-ha-1";
 
@@ -36,7 +33,7 @@ class HAStateManagerFailoverTest {
 
     private HAStateManager createNode() {
         HAStateManager manager = HAStateManagerFactory.create();
-        manager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        manager.initializeHA(HA_UUID, dbParams, dbHAConfig);
         return manager;
     }
 
@@ -47,7 +44,7 @@ class HAStateManagerFailoverTest {
         node2.shutdown();
         node3.shutdown();
 
-        dropTables();
+        cleanupDatabase();
     }
 
 

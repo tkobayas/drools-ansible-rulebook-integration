@@ -88,7 +88,7 @@ public class TestUtils {
         hikariConfig.setJdbcUrl(jdbcUrl);
         hikariConfig.setUsername(username);
         hikariConfig.setPassword(password);
-        hikariConfig.setMaximumPoolSize(10);
+        hikariConfig.setMaximumPoolSize(1);  // Only need 1 connection for dropping tables
 
         try (HikariDataSource dataSource = new HikariDataSource(hikariConfig)) {
             PostgreSQLSchema.dropSchema(dataSource);

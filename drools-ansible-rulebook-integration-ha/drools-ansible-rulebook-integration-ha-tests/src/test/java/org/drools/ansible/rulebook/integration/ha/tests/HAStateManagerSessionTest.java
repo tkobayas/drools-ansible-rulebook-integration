@@ -18,14 +18,11 @@ import org.kie.api.runtime.rule.Match;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.calculateStateSHA;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.dropTables;
 
 /**
  * Session related tests for HAStateManager
  */
-class HAStateManagerSessionTest {
+class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
     private HAStateManager stateManager;
     private static final String HA_UUID = "test-ha-1";
@@ -35,7 +32,7 @@ class HAStateManagerSessionTest {
     @BeforeEach
     void setUp() {
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        stateManager.initializeHA(HA_UUID, dbParams, dbHAConfig);
     }
 
     @AfterEach
@@ -44,7 +41,7 @@ class HAStateManagerSessionTest {
             stateManager.shutdown();
         }
 
-        dropTables();
+        cleanupDatabase();
     }
 
     // Revisit this test. Scenario is:
@@ -140,7 +137,7 @@ class HAStateManagerSessionTest {
         // Recovery----
         // This test simulates that the restarted node recovers the session, assuming that the leader is taken over by another node
         HAStateManager stateManager2 = HAStateManagerFactory.create();
-        stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        stateManager2.initializeHA(HA_UUID, dbParams, dbHAConfig);
 
         SessionState retrievedSessionState = stateManager2.getPersistedSessionState("Test Ruleset");
         RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(ALL_CONDITION_RULE, retrievedSessionState);
@@ -226,7 +223,7 @@ class HAStateManagerSessionTest {
         stateManager = null;
 
         HAStateManager stateManager2 = HAStateManagerFactory.create();
-        stateManager2.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        stateManager2.initializeHA(HA_UUID, dbParams, dbHAConfig);
 
         SessionState retrievedState = stateManager2.getPersistedSessionState("Test Ruleset");
         RulesExecutor recoveredExecutor = stateManager2.recoverSession(ALL_CONDITION_WITH_FACT_RULE, retrievedState);
@@ -262,7 +259,7 @@ class HAStateManagerSessionTest {
         stateManager.shutdown();
 
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(HA_UUID, TEST_PG_CONFIG, TEST_HA_CONFIG);
+        stateManager.initializeHA(HA_UUID, dbParams, dbHAConfig);
 
         SessionState retrieved = stateManager.getPersistedSessionState(RULE_SET_NAME);
         assertThat(retrieved.getCurrentStateSHA()).isEqualTo(expectedSha);

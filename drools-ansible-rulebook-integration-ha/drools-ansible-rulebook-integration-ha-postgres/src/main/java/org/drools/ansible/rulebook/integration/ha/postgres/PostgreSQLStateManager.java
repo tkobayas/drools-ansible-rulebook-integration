@@ -78,7 +78,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         hikariConfig.setJdbcUrl(jdbcUrl);
         hikariConfig.setUsername(username);
         hikariConfig.setPassword(password);
-        hikariConfig.setMaximumPoolSize(10);
+        hikariConfig.setMaximumPoolSize(3);  // Reduced from 10 to avoid "too many clients" in tests
         hikariConfig.setConnectionTimeout(30000);
         hikariConfig.setIdleTimeout(600000);
 
