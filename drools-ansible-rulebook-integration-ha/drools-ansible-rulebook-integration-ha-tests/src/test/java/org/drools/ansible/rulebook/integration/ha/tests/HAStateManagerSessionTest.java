@@ -129,6 +129,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         stateManager.persistSessionState(sessionState);
 
         //--------
+        long currentTime = rulesExecutor1.asKieSession().getSessionClock().getCurrentTime();
 
         // Simulate that a node crashes
         rulesExecutor1 = null;
@@ -140,7 +141,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         stateManager2.initializeHA(HA_UUID, dbParams, dbHAConfig);
 
         SessionState retrievedSessionState = stateManager2.getPersistedSessionState("Test Ruleset");
-        RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(ALL_CONDITION_RULE, retrievedSessionState);
+        RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(ALL_CONDITION_RULE, retrievedSessionState, currentTime);
 
         rulesExecutorRecovered.advanceTime(10, java.util.concurrent.TimeUnit.SECONDS);
 
@@ -222,11 +223,13 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         stateManager.shutdown();
         stateManager = null;
 
+        long currentTime = rulesExecutor1.asKieSession().getSessionClock().getCurrentTime();
+
         HAStateManager stateManager2 = HAStateManagerFactory.create();
         stateManager2.initializeHA(HA_UUID, dbParams, dbHAConfig);
 
         SessionState retrievedState = stateManager2.getPersistedSessionState("Test Ruleset");
-        RulesExecutor recoveredExecutor = stateManager2.recoverSession(ALL_CONDITION_WITH_FACT_RULE, retrievedState);
+        RulesExecutor recoveredExecutor = stateManager2.recoverSession(ALL_CONDITION_WITH_FACT_RULE, retrievedState, currentTime);
 
         String recoveredFacts = recoveredExecutor.getAllFactsAsJson();
         assertThat(recoveredFacts).contains("\"i\":1");

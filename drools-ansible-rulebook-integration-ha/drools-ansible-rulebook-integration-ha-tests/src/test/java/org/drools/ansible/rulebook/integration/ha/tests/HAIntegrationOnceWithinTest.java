@@ -91,6 +91,10 @@ class HAIntegrationOnceWithinTest extends HAIntegrationTestBase {
         // Note: this advance is not persisted in SessionState
         rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
 
+        // Node2 should have the same time as Node1
+        // This is important to advance time correctly during recoverSession
+        rulesEngine2.advanceTime(sessionId2, 5, "SECONDS");
+
         // Step 2: Simulate Node 1 crash/shutdown
         rulesEngine1.disableLeader("node-1");
         rulesEngine1.close();
@@ -100,10 +104,6 @@ class HAIntegrationOnceWithinTest extends HAIntegrationTestBase {
 
         // Step 3: Node 2 takes over and recovers session
         rulesEngine2.enableLeader("node-2");
-
-        // Need to advance time to catch up with the simulated "current time" (3 seconds was already advanced during recovery, but the 2 seconds was not persisted)
-        // This is just a hack for test. In real scenario, the new session should be fine with System.currentTimeMillis() in RulesExecutorSession.initClock()
-        rulesEngine2.advanceTime(sessionId2, 2, "SECONDS");
 
         // Step 4: Process third event for same host (t=5, still within window from t=0)
         // The recovered session should maintain the once_within control event
