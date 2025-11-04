@@ -6,9 +6,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -19,7 +17,6 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.testcontainers.containers.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -33,26 +30,14 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValu
  * - Default (H2): mvn test
  * - PostgreSQL: mvn test -Dtest.db.type=postgres
  */
-abstract class HAIntegrationTestBase {
+abstract class HAIntegrationTestBase extends AbstractHATestBase {
 
     protected static final String HA_UUID = "integration-ha-1";
-
-    // Determine database type from system property
-    protected static final String TEST_DB_TYPE = System.getProperty("test.db.type", "h2");
-    protected static final boolean USE_POSTGRES = "postgres".equalsIgnoreCase(TEST_DB_TYPE) ||
-                                                "postgresql".equalsIgnoreCase(TEST_DB_TYPE);
-
-    // PostgreSQL container (only initialized if USE_POSTGRES is true)
-    protected static PostgreSQLContainer<?> postgres;
-
-    // Database configuration (populated based on TEST_DB_TYPE)
-    protected static Map<String, Object> dbParams;
-    protected static Map<String, Object> dbHAConfig;
 
     // Static initialization - runs once for all test classes
     static {
         if (USE_POSTGRES) {
-            initializePostgres();
+            initializePostgres("eda_ha_test", "HA integration tests");
         } else {
             initializeH2();
         }
@@ -68,60 +53,6 @@ abstract class HAIntegrationTestBase {
     protected AsyncConsumer consumer2; // node2
 
     abstract String getRuleSet();
-
-    private static void initializePostgres() {
-        System.out.println("Initializing PostgreSQL Testcontainer for HA integration tests...");
-
-        // Start Testcontainer
-        postgres = new PostgreSQLContainer<>("postgres:15-alpine")
-            .withDatabaseName("eda_ha_test")
-            .withUsername("test")
-            .withPassword("test")
-            .withReuse(true); // Reuse across test classes for performance
-
-        postgres.start();
-
-        // Set system property for HAStateManagerFactory
-        System.setProperty("ha.db.type", "postgres");
-
-        // Configure parameters
-        dbParams = Map.of(
-            "host", postgres.getHost(),
-            "port", postgres.getMappedPort(5432),
-            "database", postgres.getDatabaseName(),
-            "username", postgres.getUsername(),
-            "password", postgres.getPassword(),
-            "sslmode", "disable"
-        );
-
-        dbHAConfig = Map.of("write_after", 1);
-
-        // Configure TestUtils with PostgreSQL params
-        TestUtils.setPostgresTestConfig(dbParams, dbHAConfig);
-
-        // Register shutdown hook
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            if (postgres != null && postgres.isRunning()) {
-                System.out.println("Stopping PostgreSQL Testcontainer...");
-                postgres.stop();
-            }
-            System.clearProperty("ha.db.type");
-        }));
-
-        System.out.println("PostgreSQL Testcontainer started at " +
-            postgres.getHost() + ":" + postgres.getMappedPort(5432));
-    }
-
-    private static void initializeH2() {
-        System.out.println("Using H2 in-memory database for HA integration tests");
-
-        // H2 configuration
-        dbParams = Collections.emptyMap(); // H2 doesn't need postgres params
-        dbHAConfig = Map.of(
-            "db_url", TestUtils.TEST_H2_URL,
-            "write_after", 1
-        );
-    }
 
     @BeforeEach
     void setUp() {
@@ -160,12 +91,8 @@ abstract class HAIntegrationTestBase {
             rulesEngine2.close(); // Close connection pools
         }
 
-        // Clean up database based on type
-        if (USE_POSTGRES) {
-            TestUtils.dropPostgresTables();
-        } else {
-            TestUtils.dropTables();
-        }
+        // Clean up database using inherited method
+        cleanupDatabase();
     }
 
     // Simulate a python client that consumes async responses

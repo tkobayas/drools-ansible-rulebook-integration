@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
+import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -15,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality.
@@ -437,6 +439,16 @@ class HAIntegrationTest extends HAIntegrationTestBase {
             assertThat(stateSecondary.getRuleSetName()).isEqualTo(getSecondaryRuleSetName());
         } finally {
             stateManagerForAssertion.shutdown();
+        }
+    }
+
+    @Test
+    void testHAOperationsWithoutConfiguration() {
+        try (AstRulesEngine rulesEngine = new AstRulesEngine()) {
+            rulesEngine.createRuleset(RULE_SET_BASIC);
+            assertThrows(IllegalStateException.class, () -> {
+                rulesEngine.enableLeader("leader-1");
+            });
         }
     }
 }
