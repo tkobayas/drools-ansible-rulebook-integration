@@ -90,6 +90,10 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
         // Advance time by 1 more second (t=3)
         rulesEngine1.advanceTime(sessionId1, 1, "SECONDS");
 
+        // Node2 should have the same time as Node1
+        // This is important to advance time correctly during recoverSession
+        rulesEngine2.advanceTime(sessionId2, 3, "SECONDS");
+
         // Step 2: Simulate Node 1 crash/shutdown
         rulesEngine1.disableLeader("node-1");
         rulesEngine1.close();
@@ -98,11 +102,8 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
         consumer1 = null;
 
         // Step 3: Node 2 takes over and recovers session
-        // recovery happens here, restores control event with current_count=2, advances to t=2
+        // recovery happens here, restores control event with current_count=2, advances to t=3
         rulesEngine2.enableLeader("node-2");
-
-        // Advance to the simulated current time (t=3)
-        rulesEngine2.advanceTime(sessionId2, 1, "SECONDS");
 
         // Step 4: Process third event (t=3, count=2->3)
         // This should trigger the rule because threshold (3) is reached
@@ -149,6 +150,10 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
         // Advance time by 2 more seconds (t=5)
         rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
 
+        // Node2 should have the same time as Node1
+        // This is important to advance time correctly during recoverSession
+        rulesEngine2.advanceTime(sessionId2, 5, "SECONDS");
+
         // Step 2: Simulate Node 1 crash/shutdown
         rulesEngine1.disableLeader("node-1");
         rulesEngine1.close();
@@ -157,11 +162,8 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
         consumer1 = null;
 
         // Step 3: Node 2 takes over and recovers session
-        // recovery happens here, restores control event with current_count=2, advances to t=3
+        // recovery happens here, restores control event with current_count=2, advances to t=5
         rulesEngine2.enableLeader("node-2");
-
-        // Advance to the simulated current time (t=5)
-        rulesEngine2.advanceTime(sessionId2, 2, "SECONDS");
 
         // Step 4: Advance time past the window expiration (t=5 + 6 = t=11)
         // Control event expires at t=10 (created at t=0 with 10-second expiration)

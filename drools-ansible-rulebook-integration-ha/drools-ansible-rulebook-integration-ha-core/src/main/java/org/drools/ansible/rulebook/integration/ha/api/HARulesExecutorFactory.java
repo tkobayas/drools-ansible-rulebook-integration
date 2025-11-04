@@ -25,14 +25,14 @@ public class HARulesExecutorFactory extends RulesExecutorFactory {
 
     // takes rulesetString for clean RulesSet generation, because RulesSet contains model generation state
     public static RulesExecutor createRulesExecutorWithRecovery(String rulesetString, Consumer<RulesExecutor> recovery) {
-        LOG.info("Creating RulesExecutor in recovery mode");
+        LOG.info("**** Creating RulesExecutor in recovery mode ****");
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
         HARulesExecutor rulesExecutor = new HARulesExecutor(createRulesExecutorSession(rulesSet), rulesetString);
         rulesExecutor.setOnRecovery(true);
         LOG.info("No automatic advance of internal pseudo-clock because session recovery is in-progress");
         recovery.accept(rulesExecutor);
         rulesExecutor.setOnRecovery(false);
-        LOG.info("Session recovery completed");
+        LOG.info("**** Session recovery completed ****");
         configurePseudoClock(rulesSet, rulesExecutor); // now configure the pseudo-clock as per normal
         return rulesExecutor;
     }
