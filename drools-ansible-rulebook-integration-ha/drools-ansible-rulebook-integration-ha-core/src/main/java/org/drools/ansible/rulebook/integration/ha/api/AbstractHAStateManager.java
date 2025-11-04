@@ -23,10 +23,9 @@ public abstract class AbstractHAStateManager implements HAStateManager {
     private final Map<String, SessionState> sessionStateMap = new HashMap<>();
 
     @Override
-    public RulesExecutor recoverSession(String rulesetString, SessionState sessionState) {
+    public RulesExecutor recoverSession(String rulesetString, SessionState sessionState, long currentTimeAtNewNode) {
         return HARulesExecutorFactory.createRulesExecutorWithRecovery(rulesetString, rulesExecutor -> {
             // Replay events to bring session up-to-date
-            long currentTimeAtNewNode = ((PseudoClockScheduler) rulesExecutor.asKieSession().getSessionClock()).getCurrentTime();
             ((PseudoClockScheduler) rulesExecutor.asKieSession().getSessionClock()).setStartupTime(sessionState.getCreatedTime());
             long currentTime = sessionState.getCreatedTime();
             List<EventRecord> partialEvents = sessionState.getPartialEvents();
@@ -40,11 +39,13 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                     PrototypeEventInstance controlEvent = OnceAbstractTimeConstraint.recreateControlEvent(
                             eventData, eventRecord.getExpirationDuration());
                     rulesExecutor.asKieSession().insert(controlEvent);
-                    LOG.debug("Recovered control event at time {}, expiration duration: {} ms", eventRecord.getInsertedAt(), eventRecord.getExpirationDuration());
+                    LOG.debug("  Recovered control event at time {}, expiration duration: {} ms", eventRecord.getInsertedAt(), eventRecord.getExpirationDuration());
                 } else if (recordType == RecordType.FACT) {
+                    LOG.debug("  Replaying fact event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
                     rulesExecutor.processFacts(eventRecord.getEventJson());
                 } else {
                     // RecordType.EVENT
+                    LOG.debug("  Replaying event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
                     rulesExecutor.processEvents(eventRecord.getEventJson());
                 }
                 currentTime = eventRecord.getInsertedAt();
@@ -52,6 +53,7 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             rulesExecutor.advanceTime(sessionState.getPersistedTime() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
             // TODO: Do we need to consider clock drift between nodes?
             if (currentTimeAtNewNode > sessionState.getPersistedTime()) {
+                LOG.debug("  Advancing recovered session clock from persisted time to current node time");
                 rulesExecutor.advanceTime(currentTimeAtNewNode - sessionState.getPersistedTime(), java.util.concurrent.TimeUnit.MILLISECONDS);
             }
         });

@@ -359,17 +359,14 @@ public class AstRulesEngine implements Closeable {
             // No-op if no sessions exist yet
             return;
         }
-        // Assume single session for now
-        RulesExecutor executor = executors.iterator().next();
 
-        if (!(executor instanceof HARulesExecutor)) {
-            throw new IllegalStateException("Expected HARulesExecutor in HA mode");
-        }
-
-        restoreOrCreateSessionStateAsLeader(executor);
+        executors.forEach(this::restoreOrCreateSessionStateAsLeader);
     }
 
     private void restoreOrCreateSessionStateAsLeader(RulesExecutor executor) {
+        if (!(executor instanceof HARulesExecutor)) {
+            throw new IllegalStateException("Expected HARulesExecutor in HA mode");
+        }
         if (!haStateManager.isLeader()) {
             throw new IllegalStateException("This method should only be called by the leader");
         }
@@ -389,7 +386,7 @@ public class AstRulesEngine implements Closeable {
             logger.error("Continuing with potentially corrupted SessionState for {}", rulesetName);
         }
 
-        RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesetString(), persistedSessionState);
+        RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesetString(), persistedSessionState, executor.asKieSession().getSessionClock().getCurrentTime());
         long previousId = executor.getId();
         RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
         if (removed != null) {
@@ -420,7 +417,7 @@ public class AstRulesEngine implements Closeable {
 
         if (persistedSessionState != null) {
             // Persisted state exists - recover from it
-            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState);
+            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
 
             // Register recovered state in memory (for both leader and non-leader)
             haStateManager.registerSessionState(rulesetName, persistedSessionState);
