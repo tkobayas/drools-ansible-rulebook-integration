@@ -5,6 +5,8 @@ import java.util.Map;
 
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
+
 /**
  * Abstract base class for all HA tests.
  * Provides common database setup logic for both H2 and PostgreSQL.
@@ -32,6 +34,10 @@ abstract class AbstractHATestBase {
     // Database configuration (populated based on TEST_DB_TYPE)
     protected static Map<String, Object> dbParams;
     protected static Map<String, Object> dbHAConfig;
+
+    // JSON strings for AstRulesEngine API (converted from Maps)
+    protected static String dbParamsJson;
+    protected static String dbHAConfigJson;
 
     /**
      * Initialize PostgreSQL Testcontainer with specified database name.
@@ -67,6 +73,10 @@ abstract class AbstractHATestBase {
 
         dbHAConfig = Map.of("write_after", 1);
 
+        // Convert to JSON for AstRulesEngine API
+        dbParamsJson = toJson(dbParams);
+        dbHAConfigJson = toJson(dbHAConfig);
+
         // Configure TestUtils with PostgreSQL params
         TestUtils.setPostgresTestConfig(dbParams, dbHAConfig);
 
@@ -95,6 +105,10 @@ abstract class AbstractHATestBase {
             "db_url", TestUtils.TEST_H2_URL,
             "write_after", 1
         );
+
+        // Convert to JSON for AstRulesEngine API
+        dbParamsJson = toJson(dbParams);
+        dbHAConfigJson = toJson(dbHAConfig);
     }
 
     /**
