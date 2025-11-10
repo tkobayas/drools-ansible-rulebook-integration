@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
@@ -109,13 +110,15 @@ class HAIntegrationMultiConditionFactTest extends HAIntegrationTestBase {
     void testHaStatsIncrementOnFactAssertion() {
         rulesEngine1.enableLeader("node-1");
 
-        Map<String, Object> statsAfterLeader = rulesEngine1.getHAStats();
+        String statsJson = rulesEngine1.getHAStats();
+        Map<String, Object> statsAfterLeader = readValueAsMapOfStringAndObject(statsJson);
         assertThat(statsAfterLeader.get("current_leader")).isEqualTo("node-1");
         assertThat(((Number) statsAfterLeader.get("events_processed_in_term")).intValue()).isZero();
 
         rulesEngine1.assertFact(sessionId1, "{\"i\":1}");
 
-        Map<String, Object> statsAfterFact = rulesEngine1.getHAStats();
+        statsJson = rulesEngine1.getHAStats();
+        Map<String, Object> statsAfterFact = readValueAsMapOfStringAndObject(statsJson);
         assertThat(((Number) statsAfterFact.get("events_processed_in_term")).intValue()).isEqualTo(1);
     }
 }

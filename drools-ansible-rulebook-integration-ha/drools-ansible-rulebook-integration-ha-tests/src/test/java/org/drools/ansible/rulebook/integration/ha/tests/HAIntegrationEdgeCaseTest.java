@@ -61,7 +61,7 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
         System.out.println("Running test with database: " + TEST_DB_TYPE);
 
         rulesEngine1 = new AstRulesEngine();
-        rulesEngine1.initializeHA(HA_UUID, dbParams, dbHAConfig); // The same cluster. Both nodes share same DB
+        rulesEngine1.initializeHA(HA_UUID, dbParamsJson, dbHAConfigJson); // The same cluster. Both nodes share same DB
         // This test doesn't create ruleset here, because some tests need to create ruleset after becoming leader
 
         consumer1 = new AsyncConsumer("consumer1");
@@ -143,7 +143,7 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
 
         // Simulate restarting engine-1 on the same node. The old instance is gone, so we create a new one
         AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
-        rulesEngine1Restart.initializeHA(HA_UUID, dbParams, dbHAConfig);
+        rulesEngine1Restart.initializeHA(HA_UUID, dbParamsJson, dbHAConfigJson);
         long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
         AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
         consumer1restart.startConsuming(rulesEngine1Restart.port());

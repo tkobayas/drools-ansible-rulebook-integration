@@ -348,9 +348,10 @@ class HAIntegrationTest extends HAIntegrationTestBase {
     }
 
     @Test
-    void testGetHAStats() {
+    void testGetHAStats() throws Exception {
         // Check initial stats
-        Map<String, Object> stats = rulesEngine1.getHAStats();
+        String statsJson = rulesEngine1.getHAStats();
+        Map<String, Object> stats = readValueAsMapOfStringAndObject(statsJson);
         assertThat(stats).isNotNull();
         assertThat(stats.get("current_leader")).isNull();
         assertThat(stats.get("leader_switches")).isEqualTo(0);
@@ -360,7 +361,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         // Enable leader
         rulesEngine1.enableLeader("test-leader");
 
-        stats = rulesEngine1.getHAStats();
+        statsJson = rulesEngine1.getHAStats();
+        stats = readValueAsMapOfStringAndObject(statsJson);
         assertThat(stats.get("current_leader")).isEqualTo("test-leader");
         assertThat(stats.get("leader_switches")).isEqualTo(1);
         assertThat(stats.get("current_term_started_at")).isNotNull();
@@ -372,7 +374,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         rulesEngine1.addActionInfo(sessionId1, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
 
-        stats = rulesEngine1.getHAStats();
+        statsJson = rulesEngine1.getHAStats();
+        stats = readValueAsMapOfStringAndObject(statsJson);
         assertThat(stats.get("events_processed_in_term")).isEqualTo(1); // TODO: implement event count increment on assertEvent
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(1);
     }
