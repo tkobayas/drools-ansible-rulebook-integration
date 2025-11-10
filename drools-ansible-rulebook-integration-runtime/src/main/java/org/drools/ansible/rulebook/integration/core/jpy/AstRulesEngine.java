@@ -313,19 +313,30 @@ public class AstRulesEngine implements Closeable {
     
     /**
      * Initialize HA mode with UUID and database configuration
-     * Called by Python: self._api.initializeHA(uuid, postgres_params, config)
+     * Called by Python: self._api.initializeHA(uuid, postgres_params_json, config_json)
      */
-    public void initializeHA(String uuid, Map<String, Object> postgresParams, Map<String, Object> config) {
+    public void initializeHA(String uuid, String postgresParamsJson, String configJson) {
         logger.info("Initializing HA mode with UUID: {}", uuid);
-        
+
         try {
+            Map<String, Object> postgresParams = null;
+            Map<String, Object> config = null;
+
+            if (postgresParamsJson != null && !postgresParamsJson.isEmpty()) {
+                postgresParams = readValueAsMapOfStringAndObject(postgresParamsJson);
+            }
+
+            if (configJson != null && !configJson.isEmpty()) {
+                config = readValueAsMapOfStringAndObject(configJson);
+            }
+
             this.haStateManager = HAStateManagerFactory.create();
             this.haStateManager.initializeHA(uuid, postgresParams, config);
             this.haMode = true;
 
             // HA mode always requires async channel
             rulesExecutorContainer.allowAsync();
-            
+
             logger.info("HA mode initialized successfully");
         } catch (Exception e) {
             logger.error("Failed to initialize HA mode", e);
@@ -569,11 +580,11 @@ public class AstRulesEngine implements Closeable {
      * Get current HA statistics
      * Called by Python: self._api.getHAStats()
      */
-    public Map<String, Object> getHAStats() {
+    public String getHAStats() {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
-        
+
         HAStats stats = haStateManager.getHAStats();
         Map<String, Object> result = new HashMap<>();
         result.put("current_leader", stats.getCurrentLeader());
@@ -581,8 +592,8 @@ public class AstRulesEngine implements Closeable {
         result.put("current_term_started_at", stats.getCurrentTermStartedAt());
         result.put("events_processed_in_term", stats.getEventsProcessedInTerm());
         result.put("actions_processed_in_term", stats.getActionsProcessedInTerm());
-        
-        return result;
+
+        return toJson(result);
     }
     
     /**
