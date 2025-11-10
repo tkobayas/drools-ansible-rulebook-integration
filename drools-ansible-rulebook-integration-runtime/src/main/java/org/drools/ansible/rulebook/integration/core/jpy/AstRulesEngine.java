@@ -474,7 +474,11 @@ public class AstRulesEngine implements Closeable {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
-        
+
+        if (!haStateManager.isLeader()) {
+            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
+        }
+
         haStateManager.addActionInfo(matchingUuid, index, action);
         logger.debug("Added action at index {} for ME UUID: {}", index, matchingUuid);
     }
@@ -487,7 +491,11 @@ public class AstRulesEngine implements Closeable {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
-        
+
+        if (!haStateManager.isLeader()) {
+            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
+        }
+
         haStateManager.updateActionInfo(matchingUuid, index, action);
         logger.debug("Updated action at index {} for ME UUID: {}", index, matchingUuid);
     }
@@ -500,7 +508,11 @@ public class AstRulesEngine implements Closeable {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
-        
+
+        if (!haStateManager.isLeader()) {
+            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
+        }
+
         return haStateManager.actionInfoExists(matchingUuid, index);
     }
     
@@ -511,6 +523,10 @@ public class AstRulesEngine implements Closeable {
     public String getActionInfo(long sessionId, String matchingUuid, int index) {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
+        }
+
+        if (!haStateManager.isLeader()) {
+            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
         }
 
         return haStateManager.getActionInfo(matchingUuid, index);
@@ -525,6 +541,10 @@ public class AstRulesEngine implements Closeable {
             throw new IllegalStateException("HA mode not initialized");
         }
 
+        if (!haStateManager.isLeader()) {
+            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
+        }
+
         return haStateManager.getActionStatus(matchingUuid, index);
     }
 
@@ -536,7 +556,11 @@ public class AstRulesEngine implements Closeable {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
-        
+
+        if (!haStateManager.isLeader()) {
+            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
+        }
+
         haStateManager.deleteActionInfo(matchingUuid);
         logger.debug("Deleted all actions for ME UUID: {}", matchingUuid);
     }
