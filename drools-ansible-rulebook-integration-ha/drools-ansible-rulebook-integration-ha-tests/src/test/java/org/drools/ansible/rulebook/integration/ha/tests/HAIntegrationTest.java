@@ -149,8 +149,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         String result = rulesEngine1.assertEvent(sessionId1, event);
         assertThat(result).isNotNull();
-        List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) matchList.get(0).get("matching_uuid");
+        String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
 
         // Verify that matching events were persisted to database
         // We can check this by accessing another HAStateManager directly, so this is a relatively white-box test
@@ -235,8 +234,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(result).isNotNull();
 
         // Simulate that the Python side extracts the ME UUID from the result
-        List<Map<String, Object>> resultMaps = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) resultMaps.get(0).get("matching_uuid");
+        String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
         assertThat(meUuid).isNotNull();
 
         // Set ActionInfo
@@ -319,8 +317,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         System.out.println("Result: " + result);
 
-        List<Map<String, Object>> resultMaps = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) resultMaps.get(0).get("matching_uuid");
+        String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
         assertThat(meUuid).isNotNull();
 
         // Simulate engine-1 failure
@@ -369,8 +366,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         // Process an event and action
         String result = rulesEngine1.assertEvent(sessionId1, createEvent("{\"temperature\": 35}"));
-        List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result);
-        String meUuid = (String) matchList.get(0).get("matching_uuid");
+        String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
 
         rulesEngine1.addActionInfo(sessionId1, meUuid, 0, "{\"name\":\"test\",\"status\":\"running\"}");
 
@@ -398,9 +394,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
                     "critical": true
                 }
                 """;
-        List<Map<String, Object>> primaryMatches = JsonMapper.readValueAsListOfMapOfStringAndObject(
-                rulesEngine1.assertEvent(sessionIdPrimaryNode1, eventPrimary));
-        String primaryUuid = (String) primaryMatches.get(0).get("matching_uuid");
+        String primaryResult = rulesEngine1.assertEvent(sessionIdPrimaryNode1, eventPrimary);
+        String primaryUuid = TestUtils.extractMatchingUuidFromResponse(primaryResult);
         assertThat(primaryUuid).isNotNull();
 
         String eventSecondary = """
@@ -410,9 +405,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
                     "location": "greenhouse"
                 }
                 """;
-        List<Map<String, Object>> secondaryMatches = JsonMapper.readValueAsListOfMapOfStringAndObject(
-                rulesEngine1.assertEvent(sessionIdSecondaryNode1, eventSecondary));
-        String secondaryUuid = (String) secondaryMatches.get(0).get("matching_uuid");
+        String secondaryResult = rulesEngine1.assertEvent(sessionIdSecondaryNode1, eventSecondary);
+        String secondaryUuid = TestUtils.extractMatchingUuidFromResponse(secondaryResult);
         assertThat(secondaryUuid).isNotNull();
 
         // Simulate crash of the leader handling both rule sets

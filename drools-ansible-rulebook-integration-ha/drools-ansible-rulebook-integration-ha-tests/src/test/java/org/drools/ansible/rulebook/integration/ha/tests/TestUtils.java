@@ -2,11 +2,13 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.ha.h2.H2Schema;
 import org.drools.ansible.rulebook.integration.ha.postgres.PostgreSQLSchema;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -101,5 +103,25 @@ public class TestUtils {
     public static String createEvent(String eventBody) {
         String eventUuid = UUID.randomUUID().toString();
         return eventBody.replaceFirst("\\{", "{\"meta\": {\"uuid\": \"" + eventUuid + "\"}, ");
+    }
+
+    /**
+     * Extract matching_uuid from HA mode response JSON.
+     * HA response format: [{"name": "rule_name", "events": {...}, "matching_uuid": "uuid-here"}]
+     *
+     * @param response JSON response from assertEvent/assertFact in HA mode
+     * @return matching_uuid string, or null if not found or response is empty
+     */
+    public static String extractMatchingUuidFromResponse(String response) {
+        try {
+            List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(response);
+            if (matchList.isEmpty()) {
+                return null;
+            }
+            Map<String, Object> firstMatch = matchList.get(0);
+            return (String) firstMatch.get("matching_uuid");
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to extract matching_uuid from response: " + response, e);
+        }
     }
 }
