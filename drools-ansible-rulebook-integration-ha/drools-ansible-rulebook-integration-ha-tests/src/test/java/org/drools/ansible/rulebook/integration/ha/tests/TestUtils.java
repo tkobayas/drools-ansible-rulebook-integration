@@ -124,4 +124,34 @@ public class TestUtils {
             throw new RuntimeException("Failed to extract matching_uuid from response: " + response, e);
         }
     }
+
+    /**
+     * Extract matching_uuid from async recovery message JSON.
+     * Async recovery message format:
+     * {
+     *   "session_id": 1,
+     *   "result": {
+     *     "matching_uuid": "uuid-here",
+     *     "name": "rule_name",
+     *     "type": "MATCHING_EVENT_RECOVERY",
+     *     "ruleset_name": "ruleset_name",
+     *     "events": {...}
+     *   }
+     * }
+     *
+     * @param asyncMessage JSON async recovery message
+     * @return matching_uuid string, or null if not found
+     */
+    public static String extractMatchingUuidFromAsyncRecoveryMessage(String asyncMessage) {
+        try {
+            Map<String, Object> message = JsonMapper.readValueAsMapOfStringAndObject(asyncMessage);
+            Map<String, Object> result = (Map<String, Object>) message.get("result");
+            if (result == null) {
+                return null;
+            }
+            return (String) result.get("matching_uuid");
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to extract matching_uuid from async recovery message: " + asyncMessage, e);
+        }
+    }
 }
