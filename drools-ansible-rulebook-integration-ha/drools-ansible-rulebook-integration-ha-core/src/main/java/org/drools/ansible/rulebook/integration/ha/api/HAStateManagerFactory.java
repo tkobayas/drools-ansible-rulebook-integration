@@ -26,6 +26,12 @@ public class HAStateManagerFactory {
      * @return HAStateManager instance
      */
     public static HAStateManager create() {
+        String haDbTypeEnvValue = System.getenv("DROOLS_HA_DB_TYPE");
+        if (haDbTypeEnvValue != null && !haDbTypeEnvValue.isEmpty()) {
+            // Environment variable takes precedence over system property
+            System.setProperty("ha.db.type", haDbTypeEnvValue);
+        }
+
         String dbType = System.getProperty("ha.db.type", "h2");
 
         try {
