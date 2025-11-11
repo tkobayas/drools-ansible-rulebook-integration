@@ -30,7 +30,7 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValu
  * - Default (H2): mvn test
  * - PostgreSQL: mvn test -Dtest.db.type=postgres
  */
-abstract class HAIntegrationTestBase extends AbstractHATestBase {
+public abstract class HAIntegrationTestBase extends AbstractHATestBase {
 
     protected static final String HA_UUID = "integration-ha-1";
 
