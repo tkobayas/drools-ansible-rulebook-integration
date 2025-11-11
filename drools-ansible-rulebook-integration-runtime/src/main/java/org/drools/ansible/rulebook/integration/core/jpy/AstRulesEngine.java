@@ -423,20 +423,22 @@ public class AstRulesEngine implements Closeable {
         String rulesetName = rulesSet.getName();
         String rulebookHash = sha256(rulesetString);
 
-        // Check for persisted state from database
-        SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
+        // Check for persisted state from database. Leader only
+        if (haStateManager.isLeader()) {
+            SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
 
-        if (persistedSessionState != null) {
-            // Persisted state exists - recover from it
-            RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
+            if (persistedSessionState != null) {
+                // Persisted state exists - recover from it
+                RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
 
-            // Register recovered state in memory (for both leader and non-leader)
-            haStateManager.registerSessionState(rulesetName, persistedSessionState);
+                // Register recovered state in memory (for both leader and non-leader)
+                haStateManager.registerSessionState(rulesetName, persistedSessionState);
 
-            return recoveredExecutor;
+                return recoveredExecutor;
+            }
         }
 
-        // No persisted state - create fresh executor and initial SessionState
+        // No persisted state or non-leader - create fresh executor and initial SessionState
         RulesExecutor executor = HARulesExecutorFactory.createRulesExecutor(rulesSet, rulesetString);
 
         // Create initial SessionState (same for both leader and non-leader)
