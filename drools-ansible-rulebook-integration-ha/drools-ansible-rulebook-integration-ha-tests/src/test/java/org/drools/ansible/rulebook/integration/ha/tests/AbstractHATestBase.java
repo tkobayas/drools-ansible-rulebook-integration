@@ -23,6 +23,15 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
  */
 abstract class AbstractHATestBase {
 
+    static {
+        String haDbTypeEnvValue = System.getenv("DROOLS_HA_DB_TYPE");
+        if (haDbTypeEnvValue != null && !haDbTypeEnvValue.isEmpty()) {
+            // Environment variable takes precedence over system property
+            System.setProperty("ha.db.type", haDbTypeEnvValue);
+            System.setProperty("test.db.type", haDbTypeEnvValue);
+        }
+    }
+
     // Determine database type from system property
     protected static final String TEST_DB_TYPE = System.getProperty("test.db.type", "h2");
     protected static final boolean USE_POSTGRES = "postgres".equalsIgnoreCase(TEST_DB_TYPE) ||
