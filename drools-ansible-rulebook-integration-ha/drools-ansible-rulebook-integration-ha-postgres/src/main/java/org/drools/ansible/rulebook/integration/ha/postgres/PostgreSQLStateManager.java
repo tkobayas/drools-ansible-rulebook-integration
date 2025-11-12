@@ -55,7 +55,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         Object portObj = postgresParams.getOrDefault("port", 5432);
         Integer port = (portObj instanceof Integer) ? (Integer) portObj : Integer.parseInt(portObj.toString());
         String database = (String) postgresParams.getOrDefault("database", "eda_ha");
-        String username = (String) postgresParams.getOrDefault("username", "postgres");
+        String username = (String) postgresParams.getOrDefault("user", "postgres");
         String password = (String) postgresParams.getOrDefault("password", "");
         String sslmode = (String) postgresParams.getOrDefault("sslmode", "prefer");
         String applicationName = (String) postgresParams.getOrDefault("application_name", "drools-eda-ha");
@@ -81,6 +81,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         hikariConfig.setMaximumPoolSize(3);  // Reduced from 10 to avoid "too many clients" in tests
         hikariConfig.setConnectionTimeout(30000);
         hikariConfig.setIdleTimeout(600000);
+
+        logger.debug("PostgreSQL HAStateManager connecting to database with parameters: jdbcUrl={}, username={}, sslmode={}, applicationName={}",
+            jdbcUrl, username, sslmode, applicationName);
 
         // PostgreSQL-specific optimizations
         hikariConfig.addDataSourceProperty("prepareThreshold", 3);
