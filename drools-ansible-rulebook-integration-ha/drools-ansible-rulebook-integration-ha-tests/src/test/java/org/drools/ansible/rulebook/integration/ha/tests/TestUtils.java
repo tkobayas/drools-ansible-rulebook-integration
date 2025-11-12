@@ -81,7 +81,7 @@ public class TestUtils {
         String host = (String) postgresParams.get("host");
         Integer port = (Integer) postgresParams.get("port");
         String database = (String) postgresParams.get("database");
-        String username = (String) postgresParams.get("username");
+        String username = (String) postgresParams.get("user");
         String password = (String) postgresParams.get("password");
 
         String jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s", host, port, database);

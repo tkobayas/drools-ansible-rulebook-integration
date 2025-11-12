@@ -79,7 +79,7 @@ public class PostgreSQLSimpleExample {
                     "host": "localhost",
                     "port": 5432,
                     "database": "eda_ha_db",
-                    "username": "eda_user",
+                    "user": "eda_user",
                     "password": "eda_password",
                     "sslmode": "disable"
                 }
