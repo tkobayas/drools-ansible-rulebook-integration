@@ -75,7 +75,7 @@ abstract class AbstractHATestBase {
             "host", postgres.getHost(),
             "port", postgres.getMappedPort(5432),
             "database", postgres.getDatabaseName(),
-            "username", postgres.getUsername(),
+            "user", postgres.getUsername(),
             "password", postgres.getPassword(),
             "sslmode", "disable"
         );
