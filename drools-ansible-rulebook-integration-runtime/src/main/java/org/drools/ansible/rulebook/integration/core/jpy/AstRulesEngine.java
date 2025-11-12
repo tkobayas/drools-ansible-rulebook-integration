@@ -611,10 +611,8 @@ public class AstRulesEngine implements Closeable {
                 logger.info("Found {} pending matching events for session {} : {}",
                            pendingEvents.size(), executor.getId(), executor.getRuleSetName());
                 
-                // Send each pending ME through async channel for Python to recover
-                for (MatchingEvent pendingEvent : pendingEvents) {
-                    sendMatchingEventRecovery(executor.getId(), pendingEvent);
-                }
+                // Send list of pending MEs per sessionId through async channel for Python to recover
+                sendMatchingEventRecovery(executor.getId(), pendingEvents);
             }
         }
     }
@@ -622,37 +620,44 @@ public class AstRulesEngine implements Closeable {
     /**
      * Send a matching event recovery notification through the async channel
      */
-    private void sendMatchingEventRecovery(long sessionId, MatchingEvent matchingEvent) {
+    private void sendMatchingEventRecovery(long sessionId, List<MatchingEvent> matchingEvents) {
         if (rulesExecutorContainer.getChannel() == null || !rulesExecutorContainer.getChannel().isConnected()) {
-            logger.warn("Async channel not available for ME recovery: {}", matchingEvent.getMeUuid());
+            logger.warn("Async channel not available for ME recovery: {}", matchingEvents.stream().map(MatchingEvent::getMeUuid).toList());
             return;
         }
 
-        // Parse event data JSON back to object for compatibility
-        Map<String, Object> eventData = new HashMap<>();
-        try {
-            if (matchingEvent.getEventData() != null) {
-                eventData = readValueAsMapOfStringAndObject(matchingEvent.getEventData());
+        List<Map<String, Object>> resultList = new ArrayList<>();
+
+        for (MatchingEvent matchingEvent : matchingEvents) {
+            // Parse event data JSON back to object for compatibility
+            Map<String, Object> eventData = new HashMap<>();
+            try {
+                if (matchingEvent.getEventData() != null) {
+                    eventData = readValueAsMapOfStringAndObject(matchingEvent.getEventData());
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to parse event data JSON for recovery", e);
+                // TBD: Should throw RuntimeException here?
             }
-        } catch (Exception e) {
-            logger.warn("Failed to parse event data JSON for recovery", e);
-            // TBD: Should throw RuntimeException here?
+
+            // Create recovery payload with ME UUID
+            Map<String, Object> result = new HashMap<>();
+            populateHAMatchResponse(result,
+                                    matchingEvent.getRuleName(),
+                                    eventData,
+                                    matchingEvent.getMeUuid()); // these 3 fields are conformed to HA match response format
+            result.put("type", "MATCHING_EVENT_RECOVERY");
+            result.put("ruleset_name", matchingEvent.getRuleSetName());
+
+            resultList.add(result);
         }
 
-        // Create recovery payload with ME UUID
-        Map<String, Object> recoveryData = new HashMap<>();
-        populateHAMatchResponse(recoveryData,
-                                matchingEvent.getRuleName(),
-                                eventData,
-                                matchingEvent.getMeUuid()); // these 3 fields are conformed to HA match response format
-        recoveryData.put("type", "MATCHING_EVENT_RECOVERY");
-        recoveryData.put("ruleset_name", matchingEvent.getRuleSetName());
         
         // Send through async channel
-        Response response = new Response(sessionId, recoveryData);
+        Response response = new Response(sessionId, resultList); // List is expected by Python side
         rulesExecutorContainer.getChannel().write(response);
         
-        logger.info("Sent ME recovery notification for UUID: {} on session: {}", 
-                   matchingEvent.getMeUuid(), sessionId);
+        logger.info("Sent ME recovery notification for UUID: {} on session: {}",
+                    matchingEvents.stream().map(MatchingEvent::getMeUuid).toList(), sessionId);
     }
 }

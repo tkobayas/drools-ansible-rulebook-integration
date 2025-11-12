@@ -335,7 +335,8 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         assertThat(asyncResultMap).isNotNull();
         assertThat(asyncResultMap).containsKey("session_id");
-        Map<String, Object> matchingEvent = (Map<String, Object>) asyncResultMap.get("result");
+        List<Map<String, Object>> resultList = (List<Map<String, Object>>) asyncResultMap.get("result");
+        Map<String, Object> matchingEvent = resultList.get(0);
         assertThat(matchingEvent).containsEntry("matching_uuid", meUuid);
         assertThat(matchingEvent).containsEntry("ruleset_name", "Test Ruleset");
         assertThat(matchingEvent).containsEntry("name", "temperature_alert");
