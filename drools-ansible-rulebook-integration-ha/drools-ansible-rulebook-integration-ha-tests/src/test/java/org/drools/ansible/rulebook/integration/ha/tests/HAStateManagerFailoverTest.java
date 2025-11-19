@@ -26,14 +26,14 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
 
     @BeforeEach
     void setUp() {
-        node1 = createNode();
-        node2 = createNode();
-        node3 = createNode();
+        node1 = createNode("node-1");
+        node2 = createNode("node-2");
+        node3 = createNode("node-3");
     }
 
-    private HAStateManager createNode() {
+    private HAStateManager createNode(String workerName) {
         HAStateManager manager = HAStateManagerFactory.create();
-        manager.initializeHA(HA_UUID, dbParams, dbHAConfig);
+        manager.initializeHA(HA_UUID, workerName, dbParams, dbHAConfig);
         return manager;
     }
 
@@ -52,7 +52,7 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
     @Test
     void testLeaderFailoverWithPendingActions() {
          // Node 1 becomes leader
-        node1.enableLeader("node-1");
+        node1.enableLeader();
 
         // Create matching events with actions in progress
         MatchingEvent me = createMatchingEvent(HA_UUID, "rules", "alert",
@@ -65,11 +65,11 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
         node1.addActionInfo(me1, 0, actionData);
 
         // Simulate node 1 failure
-        node1.disableLeader("node-1");
+        node1.disableLeader();
         node1.shutdown();
 
         // Node 2 takes over
-        node2.enableLeader("node-2");
+        node2.enableLeader();
 
         // Node 2 should see pending actions
         List<MatchingEvent> pending = node2.getPendingMatchingEvents();
@@ -95,16 +95,16 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
     @Test
     public void testMultipleFailovers() {
         // Node 1 starts work
-        node1.enableLeader("node-1");
+        node1.enableLeader();
 
         MatchingEvent matchingEvent1 = createMatchingEvent(HA_UUID, "rules", "rule1",
                                                            Map.of("data", "1"));
         String me1 = node1.addMatchingEvent(matchingEvent1);
 
-        node1.disableLeader("node-1");
+        node1.disableLeader();
 
         // Node 2 takes over
-        node2.enableLeader("node-2");
+        node2.enableLeader();
         List<MatchingEvent> pending2 = node2.getPendingMatchingEvents();
         assertThat(pending2).hasSize(1);
 
@@ -112,10 +112,10 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
         MatchingEvent matchingEvent2 = createMatchingEvent(HA_UUID, "rules", "rule2",
                                                            Map.of("data", "2"));
         String me2 = node2.addMatchingEvent(matchingEvent2);
-        node2.disableLeader("node-1");
+        node2.disableLeader();
 
         // Node 3 takes over
-        node3.enableLeader("node-3");
+        node3.enableLeader();
         List<MatchingEvent> pending3 = node3.getPendingMatchingEvents();
 
         // Should see both MEs
@@ -134,8 +134,8 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
     @Test
     public void testSplitBrainRecovery() {
         // Both nodes think they're leader (split brain)
-        node1.enableLeader("node-1");
-        node2.enableLeader("node-2");
+        node1.enableLeader();
+        node2.enableLeader();
 
         // Both try to create MEs
         MatchingEvent matchingEvent1 = createMatchingEvent(HA_UUID, "rules", "rule1",
@@ -147,7 +147,7 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
         node2.addMatchingEvent(matchingEvent2);
 
         // Resolve split brain - node2 wins
-        node1.disableLeader("node-1");
+        node1.disableLeader();
 
         // Node2 should see both MEs
         List<MatchingEvent> allEvents = node2.getPendingMatchingEvents();
@@ -160,7 +160,7 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
 
     @Test
     public void testActionRetryAfterFailure() {
-        node1.enableLeader("node-1");
+        node1.enableLeader();
 
         // Create ME with failed action
         MatchingEvent me = createMatchingEvent(HA_UUID, "rules", "retry_rule",
@@ -170,10 +170,10 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
         String failedActionData = "{\"name\":\"flaky_action\",\"status\":\"failed\",\"reference_id\":\"failed-job-1\"}";
 
         node1.addActionInfo(meUuid, 0, failedActionData);
-        node1.disableLeader("node-1");
+        node1.disableLeader();
 
         // New leader retries
-        node2.enableLeader("node-2");
+        node2.enableLeader();
 
         String failedAction = node2.getActionInfo(meUuid, 0);
         assertThat(failedAction).isEqualTo(failedActionData);

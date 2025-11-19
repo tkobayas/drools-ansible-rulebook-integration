@@ -61,7 +61,7 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
         System.out.println("Running test with database: " + TEST_DB_TYPE);
 
         rulesEngine1 = new AstRulesEngine();
-        rulesEngine1.initializeHA(HA_UUID, dbParamsJson, dbHAConfigJson); // The same cluster. Both nodes share same DB
+        rulesEngine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson); // The same cluster. Both nodes share same DB
         // This test doesn't create ruleset here, because some tests need to create ruleset after becoming leader
 
         consumer1 = new AsyncConsumer("consumer1");
@@ -71,7 +71,7 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
     @Test
     void testCurrentStateSha_createRulesetAfterBecomingLeader() {
         // Scenario: Become leader -> Create ruleset
-        rulesEngine1.enableLeader("leader-1");
+        rulesEngine1.enableLeader();
         sessionId1 = rulesEngine1.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         String eventUuid1 = "11111111-2222-3333-4444-555555555555";
@@ -124,7 +124,7 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
     @Test
     void testSingleRestart() {
         sessionId1 = rulesEngine1.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
-        rulesEngine1.enableLeader("engine-1");
+        rulesEngine1.enableLeader();
 
         // Process an event
         String event = createEvent("""
@@ -143,12 +143,12 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
 
         // Simulate restarting engine-1 on the same node. The old instance is gone, so we create a new one
         AstRulesEngine rulesEngine1Restart = new AstRulesEngine();
-        rulesEngine1Restart.initializeHA(HA_UUID, dbParamsJson, dbHAConfigJson);
+        rulesEngine1Restart.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
         long sessionId1Restart = rulesEngine1Restart.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
         AsyncConsumer consumer1restart = new AsyncConsumer("consumer1-restart");
         consumer1restart.startConsuming(rulesEngine1Restart.port());
 
-        rulesEngine1Restart.enableLeader("engine-1");
+        rulesEngine1Restart.enableLeader();
 
         // Process another event
         String event2 = createEvent("""

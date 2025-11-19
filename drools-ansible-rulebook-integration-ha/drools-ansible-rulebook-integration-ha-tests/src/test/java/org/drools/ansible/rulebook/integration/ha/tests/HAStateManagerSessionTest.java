@@ -32,7 +32,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
     @BeforeEach
     void setUp() {
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(HA_UUID, dbParams, dbHAConfig);
+        stateManager.initializeHA(HA_UUID, LEADER_ID, dbParams, dbHAConfig);
     }
 
     @AfterEach
@@ -96,7 +96,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
     @Test
     void testSessionRecoveryWithPartialMatch() {
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
 
         // This test works without HARulesExecutor
         RulesExecutor rulesExecutor1 = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK), ALL_CONDITION_RULE);
@@ -138,7 +138,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         // Recovery----
         // This test simulates that the restarted node recovers the session, assuming that the leader is taken over by another node
         HAStateManager stateManager2 = HAStateManagerFactory.create();
-        stateManager2.initializeHA(HA_UUID, dbParams, dbHAConfig);
+        stateManager2.initializeHA(HA_UUID, "worker-2", dbParams, dbHAConfig);
 
         SessionState retrievedSessionState = stateManager2.getPersistedSessionState("Test Ruleset");
         RulesExecutor rulesExecutorRecovered = stateManager2.recoverSession(ALL_CONDITION_RULE, retrievedSessionState, currentTime);
@@ -192,7 +192,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
     @Test
     void testFactRecordsReplayedOnRecovery() {
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
 
         // This test works without HARulesExecutor
         RulesExecutor rulesExecutor1 = RulesExecutorFactory.createFromJson(RuleNotation.CoreNotation.INSTANCE.withOptions(RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK), ALL_CONDITION_WITH_FACT_RULE);
@@ -226,7 +226,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         long currentTime = rulesExecutor1.asKieSession().getSessionClock().getCurrentTime();
 
         HAStateManager stateManager2 = HAStateManagerFactory.create();
-        stateManager2.initializeHA(HA_UUID, dbParams, dbHAConfig);
+        stateManager2.initializeHA(HA_UUID, "worker-2", dbParams, dbHAConfig);
 
         SessionState retrievedState = stateManager2.getPersistedSessionState("Test Ruleset");
         RulesExecutor recoveredExecutor = stateManager2.recoverSession(ALL_CONDITION_WITH_FACT_RULE, retrievedState, currentTime);
@@ -239,7 +239,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
     @Test
     void testSessionStateShaFieldsPersistAndLoad() {
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
 
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(HA_UUID);
@@ -262,7 +262,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         stateManager.shutdown();
 
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(HA_UUID, dbParams, dbHAConfig);
+        stateManager.initializeHA(HA_UUID, LEADER_ID, dbParams, dbHAConfig);
 
         SessionState retrieved = stateManager.getPersistedSessionState(RULE_SET_NAME);
         assertThat(retrieved.getCurrentStateSHA()).isEqualTo(expectedSha);
@@ -275,7 +275,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
     @Test
     void testMultipleRuleSetsPersistIndependently() {
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
 
         SessionState rulesetA = new SessionState();
         rulesetA.setHaUuid(HA_UUID);

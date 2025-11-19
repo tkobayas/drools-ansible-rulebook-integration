@@ -317,10 +317,10 @@ public class AstRulesEngine implements Closeable {
     
     /**
      * Initialize HA mode with UUID and database configuration
-     * Called by Python: self._api.initializeHA(uuid, postgres_params_json, config_json)
+     * Called by Python: self._api.initializeHA(uuid, worker_name, postgres_params_json, config_json)
      */
-    public void initializeHA(String uuid, String postgresParamsJson, String configJson) {
-        logger.info("Initializing HA mode with UUID: {}", uuid);
+    public void initializeHA(String uuid, String workerName, String postgresParamsJson, String configJson) {
+        logger.info("Initializing HA mode with UUID: {} and workerName: {}", uuid, workerName);
 
         try {
             Map<String, Object> postgresParams = null;
@@ -335,7 +335,7 @@ public class AstRulesEngine implements Closeable {
             }
 
             this.haStateManager = HAStateManagerFactory.create();
-            this.haStateManager.initializeHA(uuid, postgresParams, config);
+            this.haStateManager.initializeHA(uuid, workerName, postgresParams, config);
             this.haMode = true;
 
             // HA mode always requires async channel
@@ -350,15 +350,15 @@ public class AstRulesEngine implements Closeable {
 
     /**
      * Enable leader mode and start writing states to database
-     * Called by Python: self._api.enableLeader(leader_name)
+     * Called by Python: self._api.enableLeader()
      */
-    public void enableLeader(String leaderName) {
+    public void enableLeader() {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        logger.info("Enabling leader mode for: {}", leaderName);
-        haStateManager.enableLeader(leaderName);
+        logger.info("Enabling leader mode for: {}", haStateManager.getWorkerName());
+        haStateManager.enableLeader();
 
         restoreAllSessions();
 
@@ -472,15 +472,15 @@ public class AstRulesEngine implements Closeable {
 
     /**
      * Disable leader mode and stop writing to database
-     * Called by Python: self._api.disableLeader(leader_name)
+     * Called by Python: self._api.disableLeader()
      */
-    public void disableLeader(String leaderName) {
+    public void disableLeader() {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
         
-        logger.info("Disabling leader mode for: {}", leaderName);
-        haStateManager.disableLeader(leaderName);
+        logger.info("Disabling leader mode for: {}", haStateManager.getWorkerName());
+        haStateManager.disableLeader();
     }
     
     /**

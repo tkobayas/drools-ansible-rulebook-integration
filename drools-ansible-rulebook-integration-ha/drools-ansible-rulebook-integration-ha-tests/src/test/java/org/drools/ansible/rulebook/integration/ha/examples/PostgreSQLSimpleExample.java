@@ -94,7 +94,7 @@ public class PostgreSQLSimpleExample {
         // Set system property to use PostgreSQL
         System.setProperty("ha.db.type", "postgres");
 
-        rulesEngine.initializeHA(HA_UUID, postgresParamsJson, configJson);
+        rulesEngine.initializeHA(HA_UUID, "worker-1", postgresParamsJson, configJson);
         System.out.println("   HA initialized with UUID: " + HA_UUID);
 
         // Step 3: Create ruleset
@@ -110,8 +110,8 @@ public class PostgreSQLSimpleExample {
 
         // Step 4: Enable leader mode
         System.out.println("\nStep 4: Enabling leader mode...");
-        rulesEngine.enableLeader("node-1");
-        System.out.println("   Leader mode enabled for: node-1");
+        rulesEngine.enableLeader();
+        System.out.println("   Leader mode enabled for: worker-1");
 
         // Step 5: Get initial HA stats
         System.out.println("\nStep 5: Checking initial HA stats...");
@@ -215,7 +215,7 @@ public class PostgreSQLSimpleExample {
         if (consumer != null) {
             consumer.stop();
         }
-        rulesEngine.disableLeader("node-1");
+        rulesEngine.disableLeader();
         rulesEngine.shutdown();
         System.out.println("   Shutdown complete.");
 

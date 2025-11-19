@@ -49,7 +49,7 @@ class HAIntegrationRetractTest extends HAIntegrationTestBase {
     void testRetractTriggersMatchAfterFailover() {
         // Step 1: Node 1 becomes leader and inserts fact - should NOT match
         // (Rule fires when "i" is absent, but we're inserting it, so no match)
-        rulesEngine1.enableLeader("node-1");
+        rulesEngine1.enableLeader();
 
         String fact = "{\"i\":1}";
         String result1 = rulesEngine1.assertFact(sessionId1, fact);
@@ -61,14 +61,14 @@ class HAIntegrationRetractTest extends HAIntegrationTestBase {
         rulesEngine1.advanceTime(sessionId1, 5, "SECONDS");
 
         // Step 2: Simulate Node 1 crash/shutdown (fail-over)
-        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.close();
         rulesEngine1 = null;
         consumer1.stop();
         consumer1 = null;
 
         // Node 2 takes over as leader
-        rulesEngine2.enableLeader("node-2");
+        rulesEngine2.enableLeader();
 
         // Step 3: Node 2 retracts the fact - should NOW match
         // (Retracting "i" makes it absent, triggering IsNotDefinedExpression)

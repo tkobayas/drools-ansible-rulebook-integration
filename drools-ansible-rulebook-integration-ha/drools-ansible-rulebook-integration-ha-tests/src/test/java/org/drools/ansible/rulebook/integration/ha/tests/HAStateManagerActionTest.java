@@ -27,7 +27,7 @@ class HAStateManagerActionTest extends HAStateManagerTestBase {
     @BeforeEach
     void setUp() {
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(HA_UUID, dbParams, dbHAConfig);
+        stateManager.initializeHA(HA_UUID, LEADER_ID, dbParams, dbHAConfig);
     }
 
     @AfterEach
@@ -41,7 +41,7 @@ class HAStateManagerActionTest extends HAStateManagerTestBase {
 
     @Test
     void testActionManagement() {
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
 
         // First create a matching event
         MatchingEvent me = createMatchingEvent(HA_UUID, "testRuleset", "testRule",
@@ -84,7 +84,7 @@ class HAStateManagerActionTest extends HAStateManagerTestBase {
 
     @Test
     void testPendingMatchingEventsRecovery() {
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
 
         // Create multiple matching events with different states
         MatchingEvent matchingEvent1 = createMatchingEvent(HA_UUID, "ruleset1", "rule1",
