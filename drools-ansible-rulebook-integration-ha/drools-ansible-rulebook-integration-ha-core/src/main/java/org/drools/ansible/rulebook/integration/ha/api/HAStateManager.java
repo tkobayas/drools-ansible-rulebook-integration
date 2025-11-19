@@ -19,24 +19,30 @@ public interface HAStateManager {
      * Initialize HA mode with UUID and database configuration
      *
      * @param uuid           Unique identifier for this HA instance
+     * @param workerName     Name/identifier for this worker/node
      * @param postgresParams Database connection parameters
      * @param config         HA configuration parameters
      */
-    void initializeHA(String uuid, Map<String, Object> postgresParams, Map<String, Object> config);
+    void initializeHA(String uuid, String workerName, Map<String, Object> postgresParams, Map<String, Object> config);
+
+    /**
+     * Get the worker name/identifier
+     *
+     * @return The worker name
+     */
+    String getWorkerName();
 
     /**
      * Enable leader mode and start writing states to database
      *
-     * @param leaderName Name/identifier for this leader
      */
-    void enableLeader(String leaderName);
+    void enableLeader();
 
     /**
      * Disable leader mode and stop writing to database
      *
-     * @param leaderName Name/identifier for this leader
      */
-    void disableLeader(String leaderName);
+    void disableLeader();
 
     /**
      * Check if this node is currently the leader

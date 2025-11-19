@@ -101,7 +101,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
     @Test
     void testBasicBehaviorOtherThanHA() {
         // Enable leader mode
-        rulesEngine1.enableLeader("engine-leader-1");
+        rulesEngine1.enableLeader();
 
         // Process an event that triggers a rule
         String event = createEvent("""
@@ -137,7 +137,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
     @Test
     void testMatchingEventPersistence() {
-        rulesEngine1.enableLeader("leader-1");
+        rulesEngine1.enableLeader();
 
         // Process an event that triggers a rule
         String event = createEvent("""
@@ -170,7 +170,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
     @Test
     void testCurrentStateSha() {
         // Scenario: Create ruleset (done by @BeforeEach) -> Become leader
-        rulesEngine1.enableLeader("leader-1");
+        rulesEngine1.enableLeader();
 
         String eventUuid1 = "11111111-2222-3333-4444-555555555555";
         String event1 = """
@@ -220,7 +220,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
     @Test
     void testActionStateManagement() {
-        rulesEngine1.enableLeader("leader-1");
+        rulesEngine1.enableLeader();
 
         // First trigger a rule to create a matching event
         String event = createEvent("""
@@ -264,7 +264,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
     @Test
     void testLeaderTransitionWithRecovery() {
         // Set as leader
-        rulesEngine1.enableLeader("leader-1");
+        rulesEngine1.enableLeader();
 
         // Process some events
         String event = createEvent("""
@@ -276,10 +276,10 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         rulesEngine1.assertEvent(sessionId1, event);
 
         // Simulate leader failure - unset leader
-        rulesEngine1.disableLeader("leader-1");
+        rulesEngine1.disableLeader();
 
         // New leader takes over. Recovery occurs.
-        rulesEngine2.enableLeader("leader-2");
+        rulesEngine2.enableLeader();
 
         // Verify we can still process events
         String event2 = createEvent("""
@@ -304,7 +304,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
     @Test
     void testAsyncMessageReceiveOnFailoverRecovery() {
-        rulesEngine1.enableLeader("engine-1");
+        rulesEngine1.enableLeader();
 
         // Process an event
         String event = createEvent("""
@@ -321,10 +321,10 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(meUuid).isNotNull();
 
         // Simulate engine-1 failure
-        rulesEngine1.disableLeader("engine-1");
+        rulesEngine1.disableLeader();
 
         // enableLeader triggers sending pending matches to async channel
-        rulesEngine2.enableLeader("engine-2");
+        rulesEngine2.enableLeader();
 
         await().atMost(5, TimeUnit.SECONDS)
                 .until(() -> consumer2.getReceivedMessages().size() >= 1);
@@ -357,11 +357,11 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(0);
 
         // Enable leader
-        rulesEngine1.enableLeader("test-leader");
+        rulesEngine1.enableLeader();
 
         statsJson = rulesEngine1.getHAStats();
         stats = readValueAsMapOfStringAndObject(statsJson);
-        assertThat(stats.get("current_leader")).isEqualTo("test-leader");
+        assertThat(stats.get("current_leader")).isEqualTo("worker-1");
         assertThat(stats.get("leader_switches")).isEqualTo(1);
         assertThat(stats.get("current_term_started_at")).isNotNull();
 
@@ -379,7 +379,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
     @Test
     void testMultipleRuleSets() {
-        rulesEngine1.enableLeader("engine-1");
+        rulesEngine1.enableLeader();
 
         long sessionIdPrimaryNode1 = sessionId1;
         long sessionIdSecondaryNode1 = rulesEngine1.createRuleset(RULE_SET_SECONDARY);
@@ -411,13 +411,13 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(secondaryUuid).isNotNull();
 
         // Simulate crash of the leader handling both rule sets
-        rulesEngine1.disableLeader("engine-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.close();
         rulesEngine1 = null;
         consumer1.stop();
 
         // Fail-over
-        rulesEngine2.enableLeader("engine-2");
+        rulesEngine2.enableLeader();
 
         // Process new events in each ruleset to ensure they continue to function
         List<Map<String, Object>> replayPrimary = JsonMapper.readValueAsListOfMapOfStringAndObject(
@@ -445,7 +445,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         try (AstRulesEngine rulesEngine = new AstRulesEngine()) {
             rulesEngine.createRuleset(RULE_SET_BASIC);
             assertThrows(IllegalStateException.class, () -> {
-                rulesEngine.enableLeader("leader-1");
+                rulesEngine.enableLeader();
             });
         }
     }

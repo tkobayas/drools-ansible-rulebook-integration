@@ -64,7 +64,7 @@ class HAIntegrationOnceWithinTest extends HAIntegrationTestBase {
     @Test
     void testSessionRecoveryWithinTimeWindow() {
         // Step 1: Node 1 becomes leader and processes first event
-        rulesEngine1.enableLeader("node-1");
+        rulesEngine1.enableLeader();
 
         // Process first event that matches the rule (t=0)
         String firstEvent = createEvent("{\"alert\":{\"type\":\"warning\",\"host\":\"h1\"}}");
@@ -96,14 +96,14 @@ class HAIntegrationOnceWithinTest extends HAIntegrationTestBase {
         rulesEngine2.advanceTime(sessionId2, 5, "SECONDS");
 
         // Step 2: Simulate Node 1 crash/shutdown
-        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.close();
         rulesEngine1 = null;
         consumer1.stop();
         consumer1 = null;
 
         // Step 3: Node 2 takes over and recovers session
-        rulesEngine2.enableLeader("node-2");
+        rulesEngine2.enableLeader();
 
         // Step 4: Process third event for same host (t=5, still within window from t=0)
         // The recovered session should maintain the once_within control event
