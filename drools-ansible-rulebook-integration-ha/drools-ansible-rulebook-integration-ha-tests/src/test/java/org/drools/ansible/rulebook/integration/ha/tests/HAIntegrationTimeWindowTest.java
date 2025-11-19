@@ -75,7 +75,7 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
     @Test
     void testSessionRecoveryWithTimeWindow() {
         // Step 1: Node 1 becomes leader and processes events
-        rulesEngine1.enableLeader("node-1");
+        rulesEngine1.enableLeader();
 
         // Process first event (t=0): sensu.process.status == "stopped"
         String firstEvent = createEvent("{\"sensu\":{\"process\":{\"status\":\"stopped\"}}}");
@@ -102,7 +102,7 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         rulesEngine2.advanceTime(sessionId2, 5, "SECONDS");
 
         // Step 2: Simulate Node 1 crash/shutdown
-        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.close();
         rulesEngine1 = null;
         consumer1.stop();
@@ -110,7 +110,7 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
 
         // Step 3: Node 2 takes over and recovers session
         // recovery happens here, advances to t=5
-        rulesEngine2.enableLeader("node-2");
+        rulesEngine2.enableLeader();
 
         // Step 4: Process third event (t=5): sensu.storage.percent > 95
         // All 3 events are now within the 10-second window
@@ -133,7 +133,7 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         // when events are spread too far apart in time
 
         // Step 1: Node 1 becomes leader and processes first event
-        rulesEngine1.enableLeader("node-1");
+        rulesEngine1.enableLeader();
 
         // Process first event (t=0): sensu.process.status == "stopped"
         String firstEvent = createEvent("{\"sensu\":{\"process\":{\"status\":\"stopped\"}}}");
@@ -160,7 +160,7 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         rulesEngine2.advanceTime(sessionId2, 5, "SECONDS");
 
         // Step 2: Simulate Node 1 crash/shutdown
-        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.close();
         rulesEngine1 = null;
         consumer1.stop();
@@ -168,7 +168,7 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
 
         // Step 3: Node 2 takes over and recovers session
         // recovery happens here, advances to t=5
-        rulesEngine2.enableLeader("node-2");
+        rulesEngine2.enableLeader();
 
         // Step 4: Advance time significantly (t=5 + 9 = t=14)
         // This puts us more than 10 seconds away from the first event (t=0)

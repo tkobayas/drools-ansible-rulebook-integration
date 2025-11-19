@@ -34,7 +34,7 @@ class HAStateManagerTest extends HAStateManagerTestBase {
         // Generate unique HA_UUID per test to ensure complete isolation
         haUuid = "test-ha-" + System.currentTimeMillis();
         stateManager = HAStateManagerFactory.create();
-        stateManager.initializeHA(haUuid, dbParams, dbHAConfig);
+        stateManager.initializeHA(haUuid, LEADER_ID, dbParams, dbHAConfig);
     }
 
     @AfterEach
@@ -53,11 +53,11 @@ class HAStateManagerTest extends HAStateManagerTestBase {
         assertThat(stateManager.isLeader()).isFalse();
 
         // Enable leader mode
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
         assertThat(stateManager.isLeader()).isTrue();
 
         // Disable leader mode
-        stateManager.disableLeader(LEADER_ID);
+        stateManager.disableLeader();
         assertThat(stateManager.isLeader()).isFalse();
     }
 
@@ -85,7 +85,7 @@ class HAStateManagerTest extends HAStateManagerTestBase {
         assertThat(stats.getActionsProcessedInTerm()).isEqualTo(0);
 
         // Enable leader and verify stats update
-        stateManager.enableLeader(LEADER_ID);
+        stateManager.enableLeader();
         stats = stateManager.getHAStats();
         assertThat(stats.getCurrentLeader()).isEqualTo(LEADER_ID);
         assertThat(stats.getLeaderSwitches()).isEqualTo(1);

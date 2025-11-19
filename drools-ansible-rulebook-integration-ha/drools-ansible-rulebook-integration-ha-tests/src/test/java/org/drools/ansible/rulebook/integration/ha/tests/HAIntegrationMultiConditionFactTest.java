@@ -69,7 +69,7 @@ class HAIntegrationMultiConditionFactTest extends HAIntegrationTestBase {
     @Test
     void testSessionRecoveryWithPartialMatch() {
         // Step 1: Node 1 becomes leader and processes first fact (partial match)
-        rulesEngine1.enableLeader("node-1");
+        rulesEngine1.enableLeader();
 
         // Process first fact that creates partial match
         String firstFact = "{\"i\":1}";
@@ -82,14 +82,14 @@ class HAIntegrationMultiConditionFactTest extends HAIntegrationTestBase {
         rulesEngine1.advanceTime(sessionId1, 5, "SECONDS");
 
         // Step 2: Simulate Node 1 crash/shutdown
-        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.close();
         rulesEngine1 = null;
         consumer1.stop();
         consumer1 = null;
 
         // Step 3: Node 2 takes over and recovers session
-        rulesEngine2.enableLeader("node-2");
+        rulesEngine2.enableLeader();
 
         // Step 4: Node 2 processes second event that should complete the match
         // The recovered session should have the partial match from the first fact
@@ -108,11 +108,11 @@ class HAIntegrationMultiConditionFactTest extends HAIntegrationTestBase {
 
     @Test
     void testHaStatsIncrementOnFactAssertion() {
-        rulesEngine1.enableLeader("node-1");
+        rulesEngine1.enableLeader();
 
         String statsJson = rulesEngine1.getHAStats();
         Map<String, Object> statsAfterLeader = readValueAsMapOfStringAndObject(statsJson);
-        assertThat(statsAfterLeader.get("current_leader")).isEqualTo("node-1");
+        assertThat(statsAfterLeader.get("current_leader")).isEqualTo("worker-1");
         assertThat(((Number) statsAfterLeader.get("events_processed_in_term")).intValue()).isZero();
 
         rulesEngine1.assertFact(sessionId1, "{\"i\":1}");

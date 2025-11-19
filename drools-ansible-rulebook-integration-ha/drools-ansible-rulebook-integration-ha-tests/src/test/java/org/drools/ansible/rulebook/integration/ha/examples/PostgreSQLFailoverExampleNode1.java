@@ -93,7 +93,7 @@ public class PostgreSQLFailoverExampleNode1 {
         HAIntegrationTestBase.AsyncConsumer consumer = null;
 
         System.out.println("[Node-1] Initializing HA...");
-        rulesEngine.initializeHA(HA_UUID, postgresParamsJson, configJson);
+        rulesEngine.initializeHA(HA_UUID, "worker-1", postgresParamsJson, configJson);
         System.out.println("[Node-1] HA initialized with UUID: " + HA_UUID);
 
         System.out.println("[Node-1] Creating ruleset...");
@@ -106,7 +106,7 @@ public class PostgreSQLFailoverExampleNode1 {
         System.out.println("[Node-1] Async consumer started on port: " + rulesEngine.port());
 
         System.out.println("\n[Node-1] Becoming LEADER...");
-        rulesEngine.enableLeader("node-1");
+        rulesEngine.enableLeader();
         System.out.println("[Node-1] ✓ I am now the LEADER\n");
 
         String statsJson = rulesEngine.getHAStats();
@@ -192,7 +192,7 @@ public class PostgreSQLFailoverExampleNode1 {
             if (consumer != null) {
                 consumer.stop();
             }
-            rulesEngine.disableLeader("node-1");
+            rulesEngine.disableLeader();
             rulesEngine.shutdown();
             System.out.println("[Node-1] Shut down gracefully");
         }

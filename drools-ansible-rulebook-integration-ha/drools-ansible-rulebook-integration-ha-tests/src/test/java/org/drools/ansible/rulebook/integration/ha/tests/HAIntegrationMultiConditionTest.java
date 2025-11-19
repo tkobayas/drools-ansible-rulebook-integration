@@ -68,7 +68,7 @@ class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
     @Test
     void testSessionRecoveryWithPartialMatch() {
         // Step 1: Node 1 becomes leader and processes first event (partial match)
-        rulesEngine1.enableLeader("node-1");
+        rulesEngine1.enableLeader();
 
         // Process first event that creates partial match
         String firstEvent = createEvent("{\"i\":1}");
@@ -81,14 +81,14 @@ class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
         rulesEngine1.advanceTime(sessionId1, 5, "SECONDS");
 
         // Step 2: Simulate Node 1 crash/shutdown
-        rulesEngine1.disableLeader("node-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.close();
         rulesEngine1 = null;
         consumer1.stop();
         consumer1 = null;
 
         // Step 3: Node 2 takes over and recovers session
-        rulesEngine2.enableLeader("node-2");
+        rulesEngine2.enableLeader();
 
         // Step 4: Node 2 processes second event that should complete the match
         // The recovered session should have the partial match from the first event

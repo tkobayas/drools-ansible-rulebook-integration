@@ -47,7 +47,7 @@ public class PostgreSQLFailoverExampleNode2 {
         HAIntegrationTestBase.AsyncConsumer consumer = null;
 
         System.out.println("[Node-2] Initializing HA...");
-        rulesEngine.initializeHA(PostgreSQLFailoverExampleNode1.HA_UUID, postgresParamsJson, configJson);
+        rulesEngine.initializeHA(PostgreSQLFailoverExampleNode1.HA_UUID, "worker-2", postgresParamsJson, configJson);
         System.out.println("[Node-2] HA initialized with UUID: " + PostgreSQLFailoverExampleNode1.HA_UUID);
 
         System.out.println("[Node-2] Creating ruleset...");
@@ -69,7 +69,7 @@ public class PostgreSQLFailoverExampleNode2 {
 
         // Scenario Step 4: Node-2 becomes leader
         System.out.println("\n[Node-2] Step 4: Node-1 failure detected! Taking over as LEADER...");
-        rulesEngine.enableLeader("node-2");
+        rulesEngine.enableLeader();
         System.out.println("[Node-2] ✓ I am now the LEADER");
         System.out.println("[Node-2] ✓ SessionState recovered from PostgreSQL (including partial match)");
         System.out.println("[Node-2] ✓ Pending MatchingEvents dispatched via async channel\n");
@@ -159,7 +159,7 @@ public class PostgreSQLFailoverExampleNode2 {
             if (consumer != null) {
                 consumer.stop();
             }
-            rulesEngine.disableLeader("node-2");
+            rulesEngine.disableLeader();
             rulesEngine.shutdown();
             System.out.println("[Node-2] Shut down gracefully");
         }

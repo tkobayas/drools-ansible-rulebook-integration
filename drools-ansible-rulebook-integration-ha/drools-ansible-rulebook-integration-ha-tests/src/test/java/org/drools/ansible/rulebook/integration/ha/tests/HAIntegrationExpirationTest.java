@@ -121,7 +121,7 @@ class HAIntegrationExpirationTest extends HAIntegrationTestBase {
     @Test
     void testEvictEventsUsingDefaultExpiration() {
         // Node1: Enable leader mode
-        rulesEngine1.enableLeader("leader-1");
+        rulesEngine1.enableLeader();
 
         // Node1: Process event that doesn't match (waiting for Event{i:2})
         // This creates a partial event waiting for correlation
@@ -152,10 +152,10 @@ class HAIntegrationExpirationTest extends HAIntegrationTestBase {
 
         // === FAILOVER SCENARIO ===
         // Node1 fails, Node2 takes over and recovers the session
-        rulesEngine1.disableLeader("leader-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.dispose(sessionId1);
 
-        rulesEngine2.enableLeader("leader-2");
+        rulesEngine2.enableLeader();
 
         // Node2: confirm event1 is still in memory
         String facts2 = rulesEngine2.getFacts(sessionId2);
@@ -197,7 +197,7 @@ class HAIntegrationExpirationTest extends HAIntegrationTestBase {
         String customRuleSetName = "Test Ruleset with Custom TTL"; // Same name in RULE_SET_WITH_CUSTOM_TTL
 
         // Node1: Enable leader mode
-        rulesEngine1.enableLeader("leader-1");
+        rulesEngine1.enableLeader();
 
         // Node1: Process event that doesn't match
         String event1 = createEvent("{ \"j\": 2 }");
@@ -232,10 +232,10 @@ class HAIntegrationExpirationTest extends HAIntegrationTestBase {
 
         // === FAILOVER SCENARIO ===
         // Node1 fails, Node2 takes over
-        rulesEngine1.disableLeader("leader-1");
+        rulesEngine1.disableLeader();
         rulesEngine1.dispose(sessionId1);
 
-        rulesEngine2.enableLeader("leader-2");
+        rulesEngine2.enableLeader();
 
         // Node2: confirm event1 is still in memory after recovery (still within 10h TTL)
         String facts2 = rulesEngine2.getFacts(sessionId2);

@@ -39,16 +39,18 @@ public class H2StateManager extends AbstractHAStateManager {
     private String leaderId;
     private boolean isLeader = false;
     private String haUuid;
+    private String workerName;
     private HAStats haStats;
 
     public H2StateManager() {
     }
 
     @Override
-    public void initializeHA(String uuid, Map<String, Object> postgresParams, Map<String, Object> config) {
-        logger.info("Initializing HA mode with UUID: {}", uuid);
+    public void initializeHA(String uuid, String workerName, Map<String, Object> postgresParams, Map<String, Object> config) {
+        logger.info("Initializing HA mode with UUID: {}, workerName: {}", uuid, workerName);
 
         this.haUuid = uuid;
+        this.workerName = workerName;
         this.haStats = new HAStats();
 
         // Configure HikariCP connection pool
@@ -86,26 +88,26 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     @Override
-    public void enableLeader(String leaderName) {
-        this.leaderId = leaderName;
+    public void enableLeader() {
+        this.leaderId = this.workerName;
         this.isLeader = true;
 
         if (haStats != null) {
-            haStats.setCurrentLeader(leaderName);
+            haStats.setCurrentLeader(this.workerName);
             persistHAStats();
         }
 
-        logger.info("Leader mode enabled for: {}", leaderName);
+        logger.info("Leader mode enabled for: {}", this.workerName);
     }
 
     @Override
-    public void disableLeader(String leaderName) {
-        if (leaderId != null && leaderId.equals(leaderName)) {
+    public void disableLeader() {
+        if (leaderId != null && leaderId.equals(this.workerName)) {
             this.isLeader = false;
             this.leaderId = null;
         }
 
-        logger.info("Leader mode disabled for: {}", leaderName);
+        logger.info("Leader mode disabled for: {}", this.workerName);
     }
 
     @Override
@@ -121,6 +123,11 @@ public class H2StateManager extends AbstractHAStateManager {
     @Override
     public String getLeaderId() {
         return leaderId;
+    }
+
+    @Override
+    public String getWorkerName() {
+        return workerName;
     }
 
     @Override
