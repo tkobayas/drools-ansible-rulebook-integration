@@ -120,6 +120,7 @@ public class AstRulesEngine implements Closeable {
     }
 
     public String assertFact(long sessionId, String serializedFact) {
+        logger.debug("received fact {}", serializedFact);
         List<Match> matches = rulesExecutorContainer.get(sessionId).processFacts(serializedFact).join();
 
         if (haMode && haStateManager != null) {
@@ -130,6 +131,7 @@ public class AstRulesEngine implements Closeable {
     }
 
     public String assertEvent(long sessionId, String serializedFact) {
+        logger.debug("received event {}", serializedFact);
         RulesExecutor executor = rulesExecutorContainer.get(sessionId);
         List<Match> matches = executor.processEvents(serializedFact).join();
 
@@ -194,6 +196,8 @@ public class AstRulesEngine implements Closeable {
 
         // Update persisted time
         sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
+
+        sessionState.setLeaderId(haStateManager.getLeaderId());
 
         // Calculate integrity SHA from complete state
         updateStateSHA(sessionState);
@@ -343,7 +347,7 @@ public class AstRulesEngine implements Closeable {
             throw new RuntimeException("Failed to initialize HA mode: " + e.getMessage(), e);
         }
     }
-    
+
     /**
      * Enable leader mode and start writing states to database
      * Called by Python: self._api.enableLeader(leader_name)
@@ -602,6 +606,15 @@ public class AstRulesEngine implements Closeable {
      * Recover pending matching events when becoming leader
      */
     private void recoverPendingMatchingEvents() {
+        // Async channel must be available at this point
+        if (rulesExecutorContainer.getChannel() == null) {
+            throw new RuntimeException("Async channel is null. There should be a problem in API calling sequence.");
+        }
+        if (!rulesExecutorContainer.getChannel().isConnected()) {
+            // It may be a python coroutine issue where asyncio.open_connection is blocked in event loop
+            throw new RuntimeException("Async channel connection is not open yet. The Python client may not connect yet.");
+        }
+
         logger.info("Checking for pending matching events to recover");
 
         for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
