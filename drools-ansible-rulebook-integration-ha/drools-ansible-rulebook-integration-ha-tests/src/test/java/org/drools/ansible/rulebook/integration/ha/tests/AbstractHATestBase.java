@@ -108,6 +108,9 @@ abstract class AbstractHATestBase {
     protected static void initializeH2() {
         System.out.println("Using H2 in-memory database");
 
+        // Set system property for HAStateManagerFactory
+        System.setProperty("ha.db.type", "h2");
+
         // H2 configuration
         dbParams = Collections.emptyMap(); // H2 doesn't need postgres params
         dbHAConfig = Map.of(
@@ -128,7 +131,7 @@ abstract class AbstractHATestBase {
         if (USE_POSTGRES) {
             TestUtils.dropPostgresTables();
         } else {
-            TestUtils.dropTables();
+            TestUtils.dropH2Tables();
         }
     }
 }
