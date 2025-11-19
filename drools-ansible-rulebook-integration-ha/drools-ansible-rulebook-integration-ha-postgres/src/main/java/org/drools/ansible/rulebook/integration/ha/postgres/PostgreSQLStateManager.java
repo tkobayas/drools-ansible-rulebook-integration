@@ -81,6 +81,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         hikariConfig.setMaximumPoolSize(3);  // Reduced from 10 to avoid "too many clients" in tests
         hikariConfig.setConnectionTimeout(30000);
         hikariConfig.setIdleTimeout(600000);
+        hikariConfig.setDriverClassName("org.postgresql.Driver");
 
         logger.debug("PostgreSQL HAStateManager connecting to database with parameters: jdbcUrl={}, username={}, sslmode={}, applicationName={}",
             jdbcUrl, username, sslmode, applicationName);

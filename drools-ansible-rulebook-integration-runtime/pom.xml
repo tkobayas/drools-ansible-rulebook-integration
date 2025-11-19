@@ -35,11 +35,8 @@
       <artifactId>drools-ansible-rulebook-integration-ha-core</artifactId>
       <version>${project.version}</version>
     </dependency>
-    <dependency>
-      <groupId>org.drools</groupId>
-      <artifactId>drools-ansible-rulebook-integration-ha-h2</artifactId>
-      <version>${project.version}</version>
-    </dependency>
+
+    <!-- no H2 state manager dependency here -->
     <dependency>
       <groupId>org.drools</groupId>
       <artifactId>drools-ansible-rulebook-integration-ha-postgres</artifactId>
@@ -63,19 +60,7 @@
                   <exclude>META-INF/*.RSA</exclude>
             </excludes>
             </filter>
-            <!-- Include H2 and PostgreSQL state managers loaded via reflection -->
-            <filter>
-              <artifact>org.drools:drools-ansible-rulebook-integration-ha-h2</artifact>
-              <includes>
-                <include>**</include>
-              </includes>
-            </filter>
-            <filter>
-              <artifact>com.h2database:h2</artifact>
-              <includes>
-                <include>**</include>
-              </includes>
-            </filter>
+            <!-- Include PostgreSQL state managers loaded via reflection. No H2 state manager -->
             <filter>
               <artifact>org.drools:drools-ansible-rulebook-integration-ha-postgres</artifact>
               <includes>

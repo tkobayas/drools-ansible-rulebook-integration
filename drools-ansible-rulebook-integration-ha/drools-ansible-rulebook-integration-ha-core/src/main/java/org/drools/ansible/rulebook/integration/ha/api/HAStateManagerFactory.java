@@ -32,7 +32,7 @@ public class HAStateManagerFactory {
             System.setProperty("ha.db.type", haDbTypeEnvValue);
         }
 
-        String dbType = System.getProperty("ha.db.type", "h2");
+        String dbType = System.getProperty("ha.db.type", "postgresql");
 
         try {
             String className;

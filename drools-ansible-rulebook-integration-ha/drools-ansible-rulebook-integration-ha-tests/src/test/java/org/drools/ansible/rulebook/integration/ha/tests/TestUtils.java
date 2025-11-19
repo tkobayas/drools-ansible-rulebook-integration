@@ -59,7 +59,7 @@ public class TestUtils {
         return me;
     }
 
-    public static void dropTables() {
+    public static void dropH2Tables() {
         HikariConfig hikariConfig = new HikariConfig();
         hikariConfig.setJdbcUrl(TEST_H2_URL);
         hikariConfig.setUsername("sa");
