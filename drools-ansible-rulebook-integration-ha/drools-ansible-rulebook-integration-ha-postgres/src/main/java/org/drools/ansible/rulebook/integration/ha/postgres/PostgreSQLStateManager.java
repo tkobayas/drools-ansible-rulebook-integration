@@ -534,6 +534,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
                 haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
                 haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
+                haStats.setSessionStateSize(rs.getLong("session_state_size"));
 
                 logger.info("Restored HA stats from PostgreSQL database");
             } else {
@@ -556,17 +557,22 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             haStats.setHaUuid(haUuid);
         }
 
+        // Calculate session state size before persisting
+        Long sessionStateSize = calculateSessionStateSize();
+        haStats.setSessionStateSize(sessionStateSize);
+
         // PostgreSQL: Use INSERT ... ON CONFLICT instead of MERGE
         String sql = """
                 INSERT INTO HAStats (ha_uuid, current_leader, leader_switches, current_term_started_at,
-                                    events_processed_in_term, actions_processed_in_term, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                    events_processed_in_term, actions_processed_in_term, session_state_size, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (ha_uuid) DO UPDATE SET
                     current_leader = EXCLUDED.current_leader,
                     leader_switches = EXCLUDED.leader_switches,
                     current_term_started_at = EXCLUDED.current_term_started_at,
                     events_processed_in_term = EXCLUDED.events_processed_in_term,
                     actions_processed_in_term = EXCLUDED.actions_processed_in_term,
+                    session_state_size = EXCLUDED.session_state_size,
                     updated_at = EXCLUDED.updated_at
                 """;
 
@@ -579,7 +585,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setString(4, haStats.getCurrentTermStartedAt());
             ps.setInt(5, haStats.getEventsProcessedInTerm());
             ps.setInt(6, haStats.getActionsProcessedInTerm());
-            ps.setTimestamp(7, Timestamp.from(Instant.now()));
+            ps.setLong(7, haStats.getSessionStateSize());
+            ps.setTimestamp(8, Timestamp.from(Instant.now()));
 
             ps.executeUpdate();
 
@@ -587,6 +594,44 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         } catch (SQLException e) {
             logger.error("Failed to persist HA stats to PostgreSQL", e);
         }
+    }
+
+    /**
+     * Calculate the size of the latest SessionState record using PostgreSQL's pg_column_size
+     * @return size in bytes, or 0 if no session state exists
+     */
+    private Long calculateSessionStateSize() {
+        String sql = """
+                SELECT
+                    pg_column_size(ha_uuid) +
+                    pg_column_size(rule_set_name) +
+                    pg_column_size(rulebook_hash) +
+                    pg_column_size(partial_matching_events) +
+                    pg_column_size(persisted_time) +
+                    pg_column_size(current_state_sha) +
+                    pg_column_size(version) +
+                    pg_column_size(created_time) +
+                    pg_column_size(leader_id) AS total_size
+                FROM SessionState
+                WHERE ha_uuid = ?
+                ORDER BY version DESC
+                LIMIT 1
+                """;
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, haUuid);
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                return rs.getLong("total_size");
+            }
+        } catch (SQLException e) {
+            logger.warn("Failed to calculate session state size: {}", e.getMessage());
+        }
+
+        return 0L;
     }
 
     private Integer fetchActionStatusFromDatabase(String matchingUuid, int index) {
