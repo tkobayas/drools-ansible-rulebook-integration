@@ -51,7 +51,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
         this.haUuid = uuid;
         this.workerName = workerName;
-        this.haStats = new HAStats();
+        this.haStats = new HAStats(uuid);
 
         // Configure HikariCP connection pool
         HikariConfig hikariConfig = new HikariConfig();
@@ -498,6 +498,7 @@ public class H2StateManager extends AbstractHAStateManager {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
+                haStats.setHaUuid(rs.getString("ha_uuid"));
                 haStats.setCurrentLeader(rs.getString("current_leader"));
                 haStats.setLeaderSwitches(rs.getInt("leader_switches"));
                 haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
@@ -518,9 +519,14 @@ public class H2StateManager extends AbstractHAStateManager {
             return;
         }
 
+        // Ensure haUuid is set
+        if (haStats.getHaUuid() == null) {
+            haStats.setHaUuid(haUuid);
+        }
+
         // For H2, use MERGE statement
         String h2Sql = """
-                MERGE INTO HAStats 
+                MERGE INTO HAStats
                 (ha_uuid, current_leader, leader_switches, current_term_started_at,
                  events_processed_in_term, actions_processed_in_term, updated_at)
                 KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -529,7 +535,7 @@ public class H2StateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(h2Sql)) {
 
-            ps.setString(1, haUuid);
+            ps.setString(1, haStats.getHaUuid());
             ps.setString(2, haStats.getCurrentLeader());
             ps.setInt(3, haStats.getLeaderSwitches());
             ps.setString(4, haStats.getCurrentTermStartedAt());

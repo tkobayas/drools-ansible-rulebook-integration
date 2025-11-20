@@ -593,6 +593,7 @@ public class AstRulesEngine implements Closeable {
 
         HAStats stats = haStateManager.getHAStats();
         Map<String, Object> result = new HashMap<>();
+        result.put("ha_uuid", stats.getHaUuid());
         result.put("current_leader", stats.getCurrentLeader());
         result.put("leader_switches", stats.getLeaderSwitches());
         result.put("current_term_started_at", stats.getCurrentTermStartedAt());
