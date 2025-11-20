@@ -12,6 +12,7 @@ public class HAStats implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private String haUuid;
     private String currentLeader;
     private int leaderSwitches;
     private String currentTermStartedAt;
@@ -24,10 +25,33 @@ public class HAStats implements Serializable {
         this.actionsProcessedInTerm = 0;
     }
 
-    public HAStats(String currentLeader) {
+    public HAStats(String haUuid) {
         this();
+        this.haUuid = haUuid;
+    }
+
+    public HAStats(String haUuid, String currentLeader) {
+        this(haUuid);
         this.currentLeader = currentLeader;
         this.currentTermStartedAt = Instant.now().toString();
+    }
+
+    /**
+     * Gets the HA UUID that this stats instance belongs to
+     *
+     * @return HA UUID
+     */
+    public String getHaUuid() {
+        return haUuid;
+    }
+
+    /**
+     * Sets the HA UUID
+     *
+     * @param haUuid HA UUID
+     */
+    public void setHaUuid(String haUuid) {
+        this.haUuid = haUuid;
     }
 
     /**
@@ -133,20 +157,22 @@ public class HAStats implements Serializable {
         return leaderSwitches == haStats.leaderSwitches &&
                 eventsProcessedInTerm == haStats.eventsProcessedInTerm &&
                 actionsProcessedInTerm == haStats.actionsProcessedInTerm &&
+                Objects.equals(haUuid, haStats.haUuid) &&
                 Objects.equals(currentLeader, haStats.currentLeader) &&
                 Objects.equals(currentTermStartedAt, haStats.currentTermStartedAt);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(currentLeader, leaderSwitches, currentTermStartedAt,
+        return Objects.hash(haUuid, currentLeader, leaderSwitches, currentTermStartedAt,
                             eventsProcessedInTerm, actionsProcessedInTerm);
     }
 
     @Override
     public String toString() {
         return "HAStats{" +
-                "currentLeader='" + currentLeader + '\'' +
+                "haUuid='" + haUuid + '\'' +
+                ", currentLeader='" + currentLeader + '\'' +
                 ", leaderSwitches=" + leaderSwitches +
                 ", currentTermStartedAt='" + currentTermStartedAt + '\'' +
                 ", eventsProcessedInTerm=" + eventsProcessedInTerm +
