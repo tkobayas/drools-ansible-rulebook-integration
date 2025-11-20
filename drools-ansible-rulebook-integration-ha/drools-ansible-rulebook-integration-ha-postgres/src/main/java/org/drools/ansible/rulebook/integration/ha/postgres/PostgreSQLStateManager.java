@@ -50,7 +50,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
         this.haUuid = uuid;
         this.workerName = workerName;
-        this.haStats = new HAStats();
+        this.haStats = new HAStats(uuid);
 
         // Parse PostgreSQL connection parameters
         String host = (String) postgresParams.getOrDefault("host", "localhost");
@@ -528,6 +528,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
+                haStats.setHaUuid(rs.getString("ha_uuid"));
                 haStats.setCurrentLeader(rs.getString("current_leader"));
                 haStats.setLeaderSwitches(rs.getInt("leader_switches"));
                 haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
@@ -550,6 +551,11 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             return;
         }
 
+        // Ensure haUuid is set
+        if (haStats.getHaUuid() == null) {
+            haStats.setHaUuid(haUuid);
+        }
+
         // PostgreSQL: Use INSERT ... ON CONFLICT instead of MERGE
         String sql = """
                 INSERT INTO HAStats (ha_uuid, current_leader, leader_switches, current_term_started_at,
@@ -567,7 +573,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, haUuid);
+            ps.setString(1, haStats.getHaUuid());
             ps.setString(2, haStats.getCurrentLeader());
             ps.setInt(3, haStats.getLeaderSwitches());
             ps.setString(4, haStats.getCurrentTermStartedAt());
