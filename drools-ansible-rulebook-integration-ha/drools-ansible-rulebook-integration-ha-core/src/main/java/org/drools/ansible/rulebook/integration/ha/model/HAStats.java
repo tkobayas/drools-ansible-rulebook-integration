@@ -18,11 +18,13 @@ public class HAStats implements Serializable {
     private String currentTermStartedAt;
     private int eventsProcessedInTerm;
     private int actionsProcessedInTerm;
+    private Long sessionStateSize;  // Size in bytes of the latest SessionState record
 
     public HAStats() {
         this.leaderSwitches = 0;
         this.eventsProcessedInTerm = 0;
         this.actionsProcessedInTerm = 0;
+        this.sessionStateSize = 0L;
     }
 
     public HAStats(String haUuid) {
@@ -145,6 +147,24 @@ public class HAStats implements Serializable {
         this.actionsProcessedInTerm++;
     }
 
+    /**
+     * Gets the size in bytes of the latest SessionState record
+     *
+     * @return session state size in bytes
+     */
+    public Long getSessionStateSize() {
+        return sessionStateSize;
+    }
+
+    /**
+     * Sets the size in bytes of the latest SessionState record
+     *
+     * @param sessionStateSize size in bytes
+     */
+    public void setSessionStateSize(Long sessionStateSize) {
+        this.sessionStateSize = sessionStateSize;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -159,13 +179,14 @@ public class HAStats implements Serializable {
                 actionsProcessedInTerm == haStats.actionsProcessedInTerm &&
                 Objects.equals(haUuid, haStats.haUuid) &&
                 Objects.equals(currentLeader, haStats.currentLeader) &&
-                Objects.equals(currentTermStartedAt, haStats.currentTermStartedAt);
+                Objects.equals(currentTermStartedAt, haStats.currentTermStartedAt) &&
+                Objects.equals(sessionStateSize, haStats.sessionStateSize);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(haUuid, currentLeader, leaderSwitches, currentTermStartedAt,
-                            eventsProcessedInTerm, actionsProcessedInTerm);
+                            eventsProcessedInTerm, actionsProcessedInTerm, sessionStateSize);
     }
 
     @Override
@@ -177,6 +198,7 @@ public class HAStats implements Serializable {
                 ", currentTermStartedAt='" + currentTermStartedAt + '\'' +
                 ", eventsProcessedInTerm=" + eventsProcessedInTerm +
                 ", actionsProcessedInTerm=" + actionsProcessedInTerm +
+                ", sessionStateSize=" + sessionStateSize +
                 '}';
     }
 }
