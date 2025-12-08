@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
@@ -76,6 +77,10 @@ class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
 
         // Should be empty since rule requires both i=1 AND j=2
         assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        String haStatsJson = rulesEngine1.getHAStats();
+        Map<String, Object> haStats = readValueAsMapOfStringAndObject(haStatsJson);
+        assertThat(haStats).containsEntry("partial_events_in_memory", 1);
 
         // Advance time to simulate processing delay
         rulesEngine1.advanceTime(sessionId1, 5, "SECONDS");

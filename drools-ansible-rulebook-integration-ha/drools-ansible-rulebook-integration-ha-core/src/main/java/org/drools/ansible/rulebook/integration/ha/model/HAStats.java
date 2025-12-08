@@ -19,6 +19,7 @@ public class HAStats implements Serializable {
     private int eventsProcessedInTerm;
     private int actionsProcessedInTerm;
     private int incompleteMatchingEvents;
+    private int partialEventsInMemory;
     private Long sessionStateSize;  // Size in bytes of the latest SessionState record
 
     public HAStats() {
@@ -26,6 +27,7 @@ public class HAStats implements Serializable {
         this.eventsProcessedInTerm = 0;
         this.actionsProcessedInTerm = 0;
         this.incompleteMatchingEvents = 0;
+        this.partialEventsInMemory = 0;
         this.sessionStateSize = 0L;
     }
 
@@ -168,6 +170,24 @@ public class HAStats implements Serializable {
     }
 
     /**
+     * Gets the number of partial events currently tracked in memory for this HA UUID
+     *
+     * @return partial events in memory count
+     */
+    public int getPartialEventsInMemory() {
+        return partialEventsInMemory;
+    }
+
+    /**
+     * Sets the number of partial events currently tracked in memory for this HA UUID
+     *
+     * @param partialEventsInMemory partial events in memory count
+     */
+    public void setPartialEventsInMemory(int partialEventsInMemory) {
+        this.partialEventsInMemory = partialEventsInMemory;
+    }
+
+    /**
      * Gets the size in bytes of the latest SessionState record
      *
      * @return session state size in bytes
@@ -198,6 +218,7 @@ public class HAStats implements Serializable {
                 eventsProcessedInTerm == haStats.eventsProcessedInTerm &&
                 actionsProcessedInTerm == haStats.actionsProcessedInTerm &&
                 incompleteMatchingEvents == haStats.incompleteMatchingEvents &&
+                partialEventsInMemory == haStats.partialEventsInMemory &&
                 Objects.equals(haUuid, haStats.haUuid) &&
                 Objects.equals(currentLeader, haStats.currentLeader) &&
                 Objects.equals(currentTermStartedAt, haStats.currentTermStartedAt) &&
@@ -207,7 +228,8 @@ public class HAStats implements Serializable {
     @Override
     public int hashCode() {
         return Objects.hash(haUuid, currentLeader, leaderSwitches, currentTermStartedAt,
-                            eventsProcessedInTerm, actionsProcessedInTerm, incompleteMatchingEvents, sessionStateSize);
+                            eventsProcessedInTerm, actionsProcessedInTerm, incompleteMatchingEvents,
+                            partialEventsInMemory, sessionStateSize);
     }
 
     @Override
@@ -220,6 +242,7 @@ public class HAStats implements Serializable {
                 ", eventsProcessedInTerm=" + eventsProcessedInTerm +
                 ", actionsProcessedInTerm=" + actionsProcessedInTerm +
                 ", incompleteMatchingEvents=" + incompleteMatchingEvents +
+                ", partialEventsInMemory=" + partialEventsInMemory +
                 ", sessionStateSize=" + sessionStateSize +
                 '}';
     }
