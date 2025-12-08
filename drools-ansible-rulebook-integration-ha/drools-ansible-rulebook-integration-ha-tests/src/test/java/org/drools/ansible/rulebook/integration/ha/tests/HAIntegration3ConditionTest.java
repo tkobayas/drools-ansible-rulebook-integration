@@ -3,6 +3,7 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 import java.util.List;
 import java.util.Map;
 
+import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -13,10 +14,10 @@ import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createE
 /**
  * Integration tests for AstRulesEngine with HA functionality
  */
-class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
+class HAIntegration3ConditionTest extends HAIntegrationTestBase {
 
     // Multi condition rule
-    private static final String RULE_SET_MULTI_CONDITION = """
+    private static final String RULE_SET_3_CONDITION = """
                 {
                     "name": "Multi Condition Ruleset",
                     "rules": [
@@ -43,6 +44,16 @@ class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
                                                 "Integer": 2
                                             }
                                         }
+                                    },
+                                    {
+                                        "EqualsExpression": {
+                                            "lhs": {
+                                                "Event": "k"
+                                            },
+                                            "rhs": {
+                                                "Integer": 3
+                                            }
+                                        }
                                     }
                                 ]
                             },
@@ -63,7 +74,7 @@ class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
 
     @Override
     protected String getRuleSet() {
-        return RULE_SET_MULTI_CONDITION;
+        return RULE_SET_3_CONDITION;
     }
 
     @Test
@@ -75,12 +86,19 @@ class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
         String firstEvent = createEvent("{\"i\":1}");
         String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
 
-        // Should be empty since rule requires both i=1 AND j=2
+        // Should be empty since rule requires i=1 AND j=2 AND k=3
         assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        // Process second event that creates partial match
+        String secondEvent = createEvent("{\"j\":2}");
+        String result2 = rulesEngine1.assertEvent(sessionId1, secondEvent);
+
+        // Should be empty since rule requires i=1 AND j=2 AND k=3
+        assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
 
         String haStatsJson = rulesEngine1.getHAStats();
         Map<String, Object> haStats = readValueAsMapOfStringAndObject(haStatsJson);
-        assertThat(haStats).containsEntry("partial_events_in_memory", 1);
+        assertThat(haStats).containsEntry("partial_events_in_memory", 2);
         assertThat(haStats).containsEntry("partial_fulfilled_rules", 1);
 
         // Advance time to simulate processing delay
@@ -96,14 +114,14 @@ class HAIntegrationMultiConditionTest extends HAIntegrationTestBase {
         // Step 3: Node 2 takes over and recovers session
         rulesEngine2.enableLeader();
 
-        // Step 4: Node 2 processes second event that should complete the match
-        // The recovered session should have the partial match from the first event
-        String secondEvent = createEvent("{\"j\":2}");
-        String result2 = rulesEngine2.assertEvent(sessionId2, secondEvent);
+        // Step 4: Node 2 processes third event that should complete the match
+        // The recovered session should have the partial match from the first event and second event
+        String thirdEvent = createEvent("{\"k\":3}");
+        String result3 = rulesEngine2.assertEvent(sessionId2, thirdEvent);
 
-        // Should now have a complete match since both conditions are satisfied
-        // (i=1 from recovered state + j=2 from current event)
-        List<Map<String, Object>> matches = readValueAsListOfMapOfStringAndObject(result2);
+        // Should now have a complete match since all conditions are satisfied
+        // (i=1, j=2 from recovered state + k=3 from current event)
+        List<Map<String, Object>> matches = readValueAsListOfMapOfStringAndObject(result3);
         assertThat(matches).hasSize(1);
 
         Map<String, Object> match = matches.get(0);

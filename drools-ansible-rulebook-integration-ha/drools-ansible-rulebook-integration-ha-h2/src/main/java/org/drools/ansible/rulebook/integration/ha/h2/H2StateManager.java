@@ -510,6 +510,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
                 haStats.setIncompleteMatchingEvents(rs.getInt("incomplete_matching_events"));
                 haStats.setPartialEventsInMemory(rs.getInt("partial_events_in_memory"));
+                haStats.setPartialFulfilledRules(rs.getInt("partial_fulfilled_rules"));
                 haStats.setSessionStateSize(rs.getLong("session_state_size"));
 
                 logger.info("Restored HA stats from database");
@@ -536,14 +537,15 @@ public class H2StateManager extends AbstractHAStateManager {
         haStats.setSessionStateSize(sessionStateSize);
         haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
         haStats.setPartialEventsInMemory(countPartialEventsInMemory());
+        // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
 
         // For H2, use MERGE statement
         String h2Sql = """
                 MERGE INTO HAStats
                 (ha_uuid, current_leader, leader_switches, current_term_started_at,
                  events_processed_in_term, actions_processed_in_term, incomplete_matching_events,
-                 partial_events_in_memory, session_state_size, updated_at)
-                KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 partial_events_in_memory, partial_fulfilled_rules, session_state_size, updated_at)
+                KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = dataSource.getConnection();
@@ -557,8 +559,9 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setInt(6, haStats.getActionsProcessedInTerm());
             ps.setInt(7, haStats.getIncompleteMatchingEvents());
             ps.setInt(8, haStats.getPartialEventsInMemory());
-            ps.setLong(9, haStats.getSessionStateSize());
-            ps.setTimestamp(10, Timestamp.from(Instant.now()));
+            ps.setInt(9, haStats.getPartialFulfilledRules());
+            ps.setLong(10, haStats.getSessionStateSize());
+            ps.setTimestamp(11, Timestamp.from(Instant.now()));
 
             ps.executeUpdate();
         } catch (SQLException e) {

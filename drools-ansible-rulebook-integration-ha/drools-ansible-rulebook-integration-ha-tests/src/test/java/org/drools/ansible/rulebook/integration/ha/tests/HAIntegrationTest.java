@@ -357,6 +357,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(0);
         assertThat(stats.get("incomplete_matching_events")).isEqualTo(0);
         assertThat(((Number) stats.get("partial_events_in_memory")).intValue()).isZero();
+        assertThat(((Number) stats.get("partial_fulfilled_rules")).intValue()).isGreaterThanOrEqualTo(0);
 
         // Enable leader
         rulesEngine1.enableLeader();
@@ -379,6 +380,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(1);
         assertThat(stats.get("incomplete_matching_events")).isEqualTo(1);
         assertThat(((Number) stats.get("partial_events_in_memory")).intValue()).isZero();
+        assertThat(((Number) stats.get("partial_fulfilled_rules")).intValue()).isGreaterThanOrEqualTo(0);
     }
 
     @Test
