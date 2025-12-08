@@ -18,12 +18,14 @@ public class HAStats implements Serializable {
     private String currentTermStartedAt;
     private int eventsProcessedInTerm;
     private int actionsProcessedInTerm;
+    private int incompleteMatchingEvents;
     private Long sessionStateSize;  // Size in bytes of the latest SessionState record
 
     public HAStats() {
         this.leaderSwitches = 0;
         this.eventsProcessedInTerm = 0;
         this.actionsProcessedInTerm = 0;
+        this.incompleteMatchingEvents = 0;
         this.sessionStateSize = 0L;
     }
 
@@ -148,6 +150,24 @@ public class HAStats implements Serializable {
     }
 
     /**
+     * Gets the number of matching events still pending processing for this HA UUID
+     *
+     * @return pending matching events count
+     */
+    public int getIncompleteMatchingEvents() {
+        return incompleteMatchingEvents;
+    }
+
+    /**
+     * Sets the number of matching events still pending processing for this HA UUID
+     *
+     * @param incompleteMatchingEvents pending matching events count
+     */
+    public void setIncompleteMatchingEvents(int incompleteMatchingEvents) {
+        this.incompleteMatchingEvents = incompleteMatchingEvents;
+    }
+
+    /**
      * Gets the size in bytes of the latest SessionState record
      *
      * @return session state size in bytes
@@ -177,6 +197,7 @@ public class HAStats implements Serializable {
         return leaderSwitches == haStats.leaderSwitches &&
                 eventsProcessedInTerm == haStats.eventsProcessedInTerm &&
                 actionsProcessedInTerm == haStats.actionsProcessedInTerm &&
+                incompleteMatchingEvents == haStats.incompleteMatchingEvents &&
                 Objects.equals(haUuid, haStats.haUuid) &&
                 Objects.equals(currentLeader, haStats.currentLeader) &&
                 Objects.equals(currentTermStartedAt, haStats.currentTermStartedAt) &&
@@ -186,7 +207,7 @@ public class HAStats implements Serializable {
     @Override
     public int hashCode() {
         return Objects.hash(haUuid, currentLeader, leaderSwitches, currentTermStartedAt,
-                            eventsProcessedInTerm, actionsProcessedInTerm, sessionStateSize);
+                            eventsProcessedInTerm, actionsProcessedInTerm, incompleteMatchingEvents, sessionStateSize);
     }
 
     @Override
@@ -198,6 +219,7 @@ public class HAStats implements Serializable {
                 ", currentTermStartedAt='" + currentTermStartedAt + '\'' +
                 ", eventsProcessedInTerm=" + eventsProcessedInTerm +
                 ", actionsProcessedInTerm=" + actionsProcessedInTerm +
+                ", incompleteMatchingEvents=" + incompleteMatchingEvents +
                 ", sessionStateSize=" + sessionStateSize +
                 '}';
     }

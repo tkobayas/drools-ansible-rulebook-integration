@@ -355,6 +355,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(stats.get("leader_switches")).isEqualTo(0);
         assertThat(stats.get("events_processed_in_term")).isEqualTo(0);
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(0);
+        assertThat(stats.get("incomplete_matching_events")).isEqualTo(0);
 
         // Enable leader
         rulesEngine1.enableLeader();
@@ -375,6 +376,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         stats = readValueAsMapOfStringAndObject(statsJson);
         assertThat(stats.get("events_processed_in_term")).isEqualTo(1); // TODO: implement event count increment on assertEvent
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(1);
+        assertThat(stats.get("incomplete_matching_events")).isEqualTo(1);
     }
 
     @Test
