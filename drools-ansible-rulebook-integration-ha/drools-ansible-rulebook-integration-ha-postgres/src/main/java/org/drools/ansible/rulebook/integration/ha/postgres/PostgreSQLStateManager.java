@@ -509,6 +509,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     public HAStats getHAStats() {
         if (haStats != null) {
             haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
+            haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         }
         return haStats;
     }
@@ -538,6 +539,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
                 haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
                 haStats.setIncompleteMatchingEvents(rs.getInt("incomplete_matching_events"));
+                haStats.setPartialEventsInMemory(rs.getInt("partial_events_in_memory"));
                 haStats.setSessionStateSize(rs.getLong("session_state_size"));
 
                 logger.info("Restored HA stats from PostgreSQL database");
@@ -565,19 +567,21 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         Long sessionStateSize = calculateSessionStateSize();
         haStats.setSessionStateSize(sessionStateSize);
         haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
+        haStats.setPartialEventsInMemory(countPartialEventsInMemory());
 
         // PostgreSQL: Use INSERT ... ON CONFLICT instead of MERGE
         String sql = """
                 INSERT INTO HAStats (ha_uuid, current_leader, leader_switches, current_term_started_at,
                                     events_processed_in_term, actions_processed_in_term, incomplete_matching_events,
-                                    session_state_size, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    partial_events_in_memory, session_state_size, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (ha_uuid) DO UPDATE SET
                     current_leader = EXCLUDED.current_leader,
                     leader_switches = EXCLUDED.leader_switches,
                     current_term_started_at = EXCLUDED.current_term_started_at,
                     events_processed_in_term = EXCLUDED.events_processed_in_term,
                     actions_processed_in_term = EXCLUDED.actions_processed_in_term,
+                    partial_events_in_memory = EXCLUDED.partial_events_in_memory,
                     incomplete_matching_events = EXCLUDED.incomplete_matching_events,
                     session_state_size = EXCLUDED.session_state_size,
                     updated_at = EXCLUDED.updated_at
@@ -593,8 +597,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setInt(5, haStats.getEventsProcessedInTerm());
             ps.setInt(6, haStats.getActionsProcessedInTerm());
             ps.setInt(7, haStats.getIncompleteMatchingEvents());
-            ps.setLong(8, haStats.getSessionStateSize());
-            ps.setTimestamp(9, Timestamp.from(Instant.now()));
+            ps.setInt(8, haStats.getPartialEventsInMemory());
+            ps.setLong(9, haStats.getSessionStateSize());
+            ps.setTimestamp(10, Timestamp.from(Instant.now()));
 
             ps.executeUpdate();
 

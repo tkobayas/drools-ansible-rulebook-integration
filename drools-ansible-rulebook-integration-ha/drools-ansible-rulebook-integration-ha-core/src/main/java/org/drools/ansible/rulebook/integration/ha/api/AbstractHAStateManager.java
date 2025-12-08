@@ -69,6 +69,18 @@ public abstract class AbstractHAStateManager implements HAStateManager {
         return sessionStateMap.get(ruleSetName);
     }
 
+    /**
+     * Counts the total number of partial events stored in memory across all session (= rule set) states.
+     */
+    protected int countPartialEventsInMemory() {
+        return sessionStateMap.values().stream()
+                .mapToInt(state -> {
+                    List<EventRecord> partialEvents = state.getPartialEvents();
+                    return partialEvents == null ? 0 : partialEvents.size();
+                })
+                .sum();
+    }
+
     @Override
     public boolean verifySessionState(SessionState sessionState) {
         if (sessionState == null) {
