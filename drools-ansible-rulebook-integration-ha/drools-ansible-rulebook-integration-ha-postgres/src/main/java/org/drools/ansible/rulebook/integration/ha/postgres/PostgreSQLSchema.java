@@ -100,6 +100,7 @@ public class PostgreSQLSchema {
                         actions_processed_in_term INT DEFAULT 0,
                         partial_events_in_memory INT DEFAULT 0,
                         incomplete_matching_events INT DEFAULT 0,
+                        partial_fulfilled_rules INT DEFAULT 0,
                         session_state_size BIGINT DEFAULT 0,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(ha_uuid)

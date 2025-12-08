@@ -30,6 +30,7 @@ import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
+import org.drools.ansible.rulebook.integration.ha.util.PartialMatchCounter;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -592,6 +593,7 @@ public class AstRulesEngine implements Closeable {
         }
 
         HAStats stats = haStateManager.getHAStats();
+        stats.setPartialFulfilledRules(computePartialFulfilledRules());
         Map<String, Object> result = new HashMap<>();
         result.put("ha_uuid", stats.getHaUuid());
         result.put("current_leader", stats.getCurrentLeader());
@@ -601,11 +603,28 @@ public class AstRulesEngine implements Closeable {
         result.put("actions_processed_in_term", stats.getActionsProcessedInTerm());
         result.put("incomplete_matching_events", stats.getIncompleteMatchingEvents());
         result.put("partial_events_in_memory", stats.getPartialEventsInMemory());
+        result.put("partial_fulfilled_rules", stats.getPartialFulfilledRules());
         result.put("session_state_size", stats.getSessionStateSize());
 
         return toJson(result);
     }
     
+    private int computePartialFulfilledRules() {
+        if (rulesExecutorContainer == null) {
+            return 0;
+        }
+
+        int total = 0;
+        for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
+            try {
+                total += PartialMatchCounter.countPartialTuplesTotal(executor.asKieSession());
+            } catch (Exception e) {
+                logger.debug("Failed to count partial matches for executor {}", executor.getId(), e);
+            }
+        }
+        return total;
+    }
+
     /**
      * Recover pending matching events when becoming leader
      */
