@@ -507,6 +507,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public HAStats getHAStats() {
+        if (haStats != null) {
+            haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
+        }
         return haStats;
     }
 
@@ -534,6 +537,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
                 haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
                 haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
+                haStats.setIncompleteMatchingEvents(rs.getInt("incomplete_matching_events"));
                 haStats.setSessionStateSize(rs.getLong("session_state_size"));
 
                 logger.info("Restored HA stats from PostgreSQL database");
@@ -560,18 +564,21 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         // Calculate session state size before persisting
         Long sessionStateSize = calculateSessionStateSize();
         haStats.setSessionStateSize(sessionStateSize);
+        haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
 
         // PostgreSQL: Use INSERT ... ON CONFLICT instead of MERGE
         String sql = """
                 INSERT INTO HAStats (ha_uuid, current_leader, leader_switches, current_term_started_at,
-                                    events_processed_in_term, actions_processed_in_term, session_state_size, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    events_processed_in_term, actions_processed_in_term, incomplete_matching_events,
+                                    session_state_size, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (ha_uuid) DO UPDATE SET
                     current_leader = EXCLUDED.current_leader,
                     leader_switches = EXCLUDED.leader_switches,
                     current_term_started_at = EXCLUDED.current_term_started_at,
                     events_processed_in_term = EXCLUDED.events_processed_in_term,
                     actions_processed_in_term = EXCLUDED.actions_processed_in_term,
+                    incomplete_matching_events = EXCLUDED.incomplete_matching_events,
                     session_state_size = EXCLUDED.session_state_size,
                     updated_at = EXCLUDED.updated_at
                 """;
@@ -585,8 +592,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setString(4, haStats.getCurrentTermStartedAt());
             ps.setInt(5, haStats.getEventsProcessedInTerm());
             ps.setInt(6, haStats.getActionsProcessedInTerm());
-            ps.setLong(7, haStats.getSessionStateSize());
-            ps.setTimestamp(8, Timestamp.from(Instant.now()));
+            ps.setInt(7, haStats.getIncompleteMatchingEvents());
+            ps.setLong(8, haStats.getSessionStateSize());
+            ps.setTimestamp(9, Timestamp.from(Instant.now()));
 
             ps.executeUpdate();
 
@@ -632,6 +640,24 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
 
         return 0L;
+    }
+
+    private int countIncompleteMatchingEvents() {
+        String sql = "SELECT COUNT(*) AS pending FROM MatchingEvent WHERE ha_uuid = ?";
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, haUuid);
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt("pending");
+            }
+        } catch (SQLException e) {
+            logger.warn("Failed to count incomplete matching events: {}", e.getMessage());
+        }
+        return 0;
     }
 
     private Integer fetchActionStatusFromDatabase(String matchingUuid, int index) {

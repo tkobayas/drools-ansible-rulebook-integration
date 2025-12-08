@@ -599,6 +599,7 @@ public class AstRulesEngine implements Closeable {
         result.put("current_term_started_at", stats.getCurrentTermStartedAt());
         result.put("events_processed_in_term", stats.getEventsProcessedInTerm());
         result.put("actions_processed_in_term", stats.getActionsProcessedInTerm());
+        result.put("incomplete_matching_events", stats.getIncompleteMatchingEvents());
         result.put("session_state_size", stats.getSessionStateSize());
 
         return toJson(result);
