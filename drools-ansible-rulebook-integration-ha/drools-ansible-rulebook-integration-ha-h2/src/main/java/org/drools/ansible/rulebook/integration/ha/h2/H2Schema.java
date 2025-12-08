@@ -85,6 +85,7 @@ public class H2Schema {
                         current_term_started_at VARCHAR(255),
                         events_processed_in_term INT DEFAULT 0,
                         actions_processed_in_term INT DEFAULT 0,
+                        incomplete_matching_events INT DEFAULT 0,
                         session_state_size BIGINT DEFAULT 0,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(ha_uuid)

@@ -475,6 +475,9 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public HAStats getHAStats() {
+        if (haStats != null) {
+            haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
+        }
         return haStats;
     }
 
@@ -504,6 +507,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
                 haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
                 haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
+                haStats.setIncompleteMatchingEvents(rs.getInt("incomplete_matching_events"));
                 haStats.setSessionStateSize(rs.getLong("session_state_size"));
 
                 logger.info("Restored HA stats from database");
@@ -528,13 +532,15 @@ public class H2StateManager extends AbstractHAStateManager {
         // Calculate session state size before persisting
         Long sessionStateSize = calculateSessionStateSize();
         haStats.setSessionStateSize(sessionStateSize);
+        haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
 
         // For H2, use MERGE statement
         String h2Sql = """
                 MERGE INTO HAStats
                 (ha_uuid, current_leader, leader_switches, current_term_started_at,
-                 events_processed_in_term, actions_processed_in_term, session_state_size, updated_at)
-                KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 events_processed_in_term, actions_processed_in_term, incomplete_matching_events,
+                 session_state_size, updated_at)
+                KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = dataSource.getConnection();
@@ -546,8 +552,9 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(4, haStats.getCurrentTermStartedAt());
             ps.setInt(5, haStats.getEventsProcessedInTerm());
             ps.setInt(6, haStats.getActionsProcessedInTerm());
-            ps.setLong(7, haStats.getSessionStateSize());
-            ps.setTimestamp(8, Timestamp.from(Instant.now()));
+            ps.setInt(7, haStats.getIncompleteMatchingEvents());
+            ps.setLong(8, haStats.getSessionStateSize());
+            ps.setTimestamp(9, Timestamp.from(Instant.now()));
 
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -587,6 +594,24 @@ public class H2StateManager extends AbstractHAStateManager {
         }
 
         return 0L;
+    }
+
+    private int countIncompleteMatchingEvents() {
+        String sql = "SELECT COUNT(*) AS pending FROM MatchingEvent WHERE ha_uuid = ?";
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, haUuid);
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt("pending");
+            }
+        } catch (SQLException e) {
+            logger.warn("Failed to count incomplete matching events: {}", e.getMessage());
+        }
+        return 0;
     }
 
     private Integer fetchActionStatusFromDatabase(String matchingUuid, int index) {

@@ -83,6 +83,7 @@ class HAStateManagerTest extends HAStateManagerTestBase {
         assertThat(stats.getLeaderSwitches()).isEqualTo(0);
         assertThat(stats.getEventsProcessedInTerm()).isEqualTo(0);
         assertThat(stats.getActionsProcessedInTerm()).isEqualTo(0);
+        assertThat(stats.getIncompleteMatchingEvents()).isEqualTo(0);
 
         // Enable leader and verify stats update
         stateManager.enableLeader();
@@ -105,5 +106,6 @@ class HAStateManagerTest extends HAStateManagerTestBase {
         stats = stateManager.getHAStats();
         assertThat(stats.getEventsProcessedInTerm()).isEqualTo(0); // Events processed not incremented in this test
         assertThat(stats.getActionsProcessedInTerm()).isEqualTo(1);
+        assertThat(stats.getIncompleteMatchingEvents()).isEqualTo(1);
     }
 }
