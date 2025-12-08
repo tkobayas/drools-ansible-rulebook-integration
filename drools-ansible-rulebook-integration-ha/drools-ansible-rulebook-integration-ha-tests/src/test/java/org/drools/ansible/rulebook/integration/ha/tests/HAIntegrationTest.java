@@ -356,6 +356,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(stats.get("events_processed_in_term")).isEqualTo(0);
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(0);
         assertThat(stats.get("incomplete_matching_events")).isEqualTo(0);
+        assertThat(((Number) stats.get("partial_events_in_memory")).intValue()).isZero();
 
         // Enable leader
         rulesEngine1.enableLeader();
@@ -377,6 +378,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
         assertThat(stats.get("events_processed_in_term")).isEqualTo(1); // TODO: implement event count increment on assertEvent
         assertThat(stats.get("actions_processed_in_term")).isEqualTo(1);
         assertThat(stats.get("incomplete_matching_events")).isEqualTo(1);
+        assertThat(((Number) stats.get("partial_events_in_memory")).intValue()).isZero();
     }
 
     @Test
