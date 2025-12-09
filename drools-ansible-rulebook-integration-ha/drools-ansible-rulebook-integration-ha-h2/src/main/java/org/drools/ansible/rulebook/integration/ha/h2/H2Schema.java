@@ -45,7 +45,8 @@ public class H2Schema {
                         ha_uuid VARCHAR(255) NOT NULL,
                         rule_set_name VARCHAR(255),
                         rule_name VARCHAR(255) NOT NULL,
-                        event_data CLOB
+                        event_data CLOB,
+                        created_at BIGINT DEFAULT 0
                     )
                     """;
             stmt.execute(createMatchingEventTable);

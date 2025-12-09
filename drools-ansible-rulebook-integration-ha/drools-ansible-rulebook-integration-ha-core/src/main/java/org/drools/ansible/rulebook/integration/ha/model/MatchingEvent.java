@@ -10,6 +10,7 @@ public class MatchingEvent {
     private String ruleSetName;
     private String ruleName;
     private String eventData;  // JSON string representation of matching facts
+    private long createdAt;    // epoch millis when the matching event was created
 
     public MatchingEvent() {
     }
@@ -52,5 +53,13 @@ public class MatchingEvent {
 
     public void setEventData(String eventData) {
         this.eventData = eventData;
+    }
+
+    public long getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(long createdAt) {
+        this.createdAt = createdAt;
     }
 }

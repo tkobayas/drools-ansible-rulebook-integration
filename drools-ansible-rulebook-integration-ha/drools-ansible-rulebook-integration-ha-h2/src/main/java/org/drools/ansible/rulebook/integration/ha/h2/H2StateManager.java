@@ -272,10 +272,13 @@ public class H2StateManager extends AbstractHAStateManager {
 
         String meUuid = UUID.randomUUID().toString();
         matchingEvent.setMeUuid(meUuid);
+        if (matchingEvent.getCreatedAt() == 0L) {
+            matchingEvent.setCreatedAt(System.currentTimeMillis());
+        }
 
         String sql = """
-                INSERT INTO MatchingEvent (me_uuid, ha_uuid, rule_set_name, rule_name, event_data)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO MatchingEvent (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = dataSource.getConnection();
@@ -286,6 +289,7 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(3, matchingEvent.getRuleSetName());
             ps.setString(4, matchingEvent.getRuleName());
             ps.setString(5, matchingEvent.getEventData());
+            ps.setLong(6, matchingEvent.getCreatedAt());
 
             ps.executeUpdate();
 
@@ -301,7 +305,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public List<MatchingEvent> getPendingMatchingEvents() {
-        String sql = "SELECT * FROM MatchingEvent WHERE ha_uuid = ?";
+        String sql = "SELECT * FROM MatchingEvent WHERE ha_uuid = ? ORDER BY created_at";
         List<MatchingEvent> events = new ArrayList<>();
 
         try (Connection conn = dataSource.getConnection();
@@ -317,6 +321,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 event.setRuleSetName(rs.getString("rule_set_name"));
                 event.setRuleName(rs.getString("rule_name"));
                 event.setEventData(rs.getString("event_data"));
+                event.setCreatedAt(rs.getLong("created_at"));
                 events.add(event);
             }
         } catch (SQLException e) {
