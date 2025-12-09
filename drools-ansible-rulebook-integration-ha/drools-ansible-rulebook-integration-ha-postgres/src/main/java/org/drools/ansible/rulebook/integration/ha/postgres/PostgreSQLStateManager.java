@@ -25,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValue;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 
 /**
@@ -112,6 +113,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         this.leaderId = this.workerName;
         this.isLeader = true;
 
+        // HAStats should be overwritten by the persisted one. Then, adjusted by AstRulesEngine.updateGlobalSessionStats
+        loadOrCreateHAStats();
         if (haStats != null) {
             haStats.setCurrentLeader(this.workerName);
             persistHAStats();
@@ -527,7 +530,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
     }
 
-    private void loadOrCreateHAStats() {
+    public HAStats loadOrCreateHAStats() {
         String sql = "SELECT * FROM HAStats WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
@@ -545,6 +548,10 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
                 haStats.setIncompleteMatchingEvents(rs.getInt("incomplete_matching_events"));
                 haStats.setPartialEventsInMemory(rs.getInt("partial_events_in_memory"));
+                String globalSessionStatsJson = rs.getString("global_session_stats");
+                if (globalSessionStatsJson != null && !globalSessionStatsJson.isBlank()) {
+                    haStats.setGlobalSessionStats(readValue(globalSessionStatsJson, org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats.class));
+                }
                 haStats.setPartialFulfilledRules(rs.getInt("partial_fulfilled_rules"));
                 haStats.setSessionStateSize(rs.getLong("session_state_size"));
 
@@ -555,7 +562,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             }
         } catch (SQLException e) {
             logger.error("Failed to load HA stats from PostgreSQL", e);
+            throw new RuntimeException("Failed to load HA stats", e);
         }
+        return haStats;
     }
 
     @Override
@@ -575,13 +584,14 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
         haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
+        String globalSessionStatsJson = haStats.getGlobalSessionStats() == null ? null : toJson(haStats.getGlobalSessionStats());
 
         // PostgreSQL: Use INSERT ... ON CONFLICT instead of MERGE
         String sql = """
                 INSERT INTO HAStats (ha_uuid, current_leader, leader_switches, current_term_started_at,
                                     events_processed_in_term, actions_processed_in_term, incomplete_matching_events,
-                                    partial_events_in_memory, partial_fulfilled_rules, session_state_size, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (ha_uuid) DO UPDATE SET
                     current_leader = EXCLUDED.current_leader,
                     leader_switches = EXCLUDED.leader_switches,
@@ -590,6 +600,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                     actions_processed_in_term = EXCLUDED.actions_processed_in_term,
                     partial_events_in_memory = EXCLUDED.partial_events_in_memory,
                     incomplete_matching_events = EXCLUDED.incomplete_matching_events,
+                    global_session_stats = EXCLUDED.global_session_stats,
                     partial_fulfilled_rules = EXCLUDED.partial_fulfilled_rules,
                     session_state_size = EXCLUDED.session_state_size,
                     updated_at = EXCLUDED.updated_at
@@ -606,9 +617,10 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setInt(6, haStats.getActionsProcessedInTerm());
             ps.setInt(7, haStats.getIncompleteMatchingEvents());
             ps.setInt(8, haStats.getPartialEventsInMemory());
-            ps.setInt(9, haStats.getPartialFulfilledRules());
-            ps.setLong(10, haStats.getSessionStateSize());
-            ps.setTimestamp(11, Timestamp.from(Instant.now()));
+            ps.setString(9, globalSessionStatsJson);
+            ps.setInt(10, haStats.getPartialFulfilledRules());
+            ps.setLong(11, haStats.getSessionStateSize());
+            ps.setTimestamp(12, Timestamp.from(Instant.now()));
 
             ps.executeUpdate();
 

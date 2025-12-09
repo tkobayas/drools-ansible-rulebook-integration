@@ -3,11 +3,14 @@ package org.drools.ansible.rulebook.integration.core.jpy;
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -31,6 +34,7 @@ import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.util.PartialMatchCounter;
+import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
 import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +51,7 @@ public class AstRulesEngine implements Closeable {
     private static final String EMPTY_ME_UUID = "";
 
     private final RulesExecutorContainer rulesExecutorContainer = new RulesExecutorContainer();
+    private final Map<String, SessionStats> lastAggregatedSessionStatsByLeader = new ConcurrentHashMap<>();
     
     private HAStateManager haStateManager;
     private boolean haMode = false;
@@ -171,6 +176,7 @@ public class AstRulesEngine implements Closeable {
 
                 HAStats haStats = haStateManager.getHAStats();
                 haStats.incrementEventsProcessed();
+                updateGlobalSessionStats(haStats);
                 haStateManager.persistHAStats();
             }
 
@@ -363,13 +369,16 @@ public class AstRulesEngine implements Closeable {
 
         restoreAllSessions();
 
+        // on leader switch, load or create HAStats
+        haStateManager.printDatabaseContents();
+        HAStats persistedHaStats = haStateManager.loadOrCreateHAStats();
+        updateGlobalSessionStats(persistedHaStats);
+
         // Recover pending actions when becoming leader
         recoverPendingMatchingEvents();
     }
 
     private void restoreAllSessions() {
-        // TODO: Do we support multiple sessions in HA mode?
-
         Collection<RulesExecutor> executors = rulesExecutorContainer.getAllExecutors();
         if (executors.isEmpty()) {
             // No-op if no sessions exist yet
@@ -604,6 +613,8 @@ public class AstRulesEngine implements Closeable {
         result.put("incomplete_matching_events", stats.getIncompleteMatchingEvents());
         result.put("partial_events_in_memory", stats.getPartialEventsInMemory());
         result.put("partial_fulfilled_rules", stats.getPartialFulfilledRules());
+        updateGlobalSessionStats(stats);
+        result.put("global_session_stats", stats.getGlobalSessionStats());
         result.put("session_state_size", stats.getSessionStateSize());
 
         return toJson(result);
@@ -623,6 +634,69 @@ public class AstRulesEngine implements Closeable {
             }
         }
         return total;
+    }
+
+    private SessionStats aggregateAllSessionStats() {
+        Collection<RulesExecutor> executors = rulesExecutorContainer.getAllExecutors();
+        SessionStats aggregate = null;
+        for (RulesExecutor executor : executors) {
+            SessionStats stats = executor.getSessionStats();
+            if (stats == null) {
+                continue;
+            }
+            aggregate = aggregate == null ? stats : SessionStats.aggregate(aggregate, stats);
+        }
+        return aggregate;
+    }
+
+    private void updateGlobalSessionStats(HAStats haStats) {
+        if (haStats == null || !haMode || haStateManager == null || !haStateManager.isLeader()) {
+            return;
+        }
+
+        SessionStats currentAggregate = aggregateAllSessionStats();
+        if (currentAggregate == null) {
+            return;
+        }
+
+        SessionStats lastSnapshot = lastAggregatedSessionStatsByLeader.get(haStateManager.getLeaderId());
+        int deltaRulesTriggered = currentAggregate.getRulesTriggered() - (lastSnapshot == null ? 0 : lastSnapshot.getRulesTriggered());
+        int deltaEventsProcessed = currentAggregate.getEventsProcessed() - (lastSnapshot == null ? 0 : lastSnapshot.getEventsProcessed());
+        int deltaEventsMatched = currentAggregate.getEventsMatched() - (lastSnapshot == null ? 0 : lastSnapshot.getEventsMatched());
+        int deltaEventsSuppressed = currentAggregate.getEventsSuppressed() - (lastSnapshot == null ? 0 : lastSnapshot.getEventsSuppressed());
+        int deltaClockAdvances = currentAggregate.getClockAdvanceCount() - (lastSnapshot == null ? 0 : lastSnapshot.getClockAdvanceCount());
+        int deltaAsyncResponses = currentAggregate.getAsyncResponses() - (lastSnapshot == null ? 0 : lastSnapshot.getAsyncResponses());
+        int deltaBytesSent = currentAggregate.getBytesSentOnAsync() - (lastSnapshot == null ? 0 : lastSnapshot.getBytesSentOnAsync());
+
+        SessionStats existingGlobal = haStats.getGlobalSessionStats();
+        String start = existingGlobal == null ? currentAggregate.getStart() : existingGlobal.getStart();
+
+        SessionStats merged = new SessionStats(
+                start,
+                currentAggregate.getEnd(),
+                currentAggregate.getLastClockTime(),
+                (existingGlobal == null ? 0 : existingGlobal.getClockAdvanceCount()) + deltaClockAdvances,
+                currentAggregate.getNumberOfRules(),
+                currentAggregate.getNumberOfDisabledRules(),
+                (existingGlobal == null ? 0 : existingGlobal.getRulesTriggered()) + deltaRulesTriggered,
+                (existingGlobal == null ? 0 : existingGlobal.getEventsProcessed()) + deltaEventsProcessed,
+                (existingGlobal == null ? 0 : existingGlobal.getEventsMatched()) + deltaEventsMatched,
+                (existingGlobal == null ? 0 : existingGlobal.getEventsSuppressed()) + deltaEventsSuppressed,
+                currentAggregate.getPermanentStorageCount(),
+                currentAggregate.getPermanentStorageSize(),
+                (existingGlobal == null ? 0 : existingGlobal.getAsyncResponses()) + deltaAsyncResponses,
+                (existingGlobal == null ? 0 : existingGlobal.getBytesSentOnAsync()) + deltaBytesSent,
+                currentAggregate.getSessionId(),
+                currentAggregate.getRuleSetName(),
+                currentAggregate.getLastRuleFired(),
+                currentAggregate.getLastRuleFiredAt(),
+                currentAggregate.getLastEventReceivedAt(),
+                Math.max(existingGlobal == null ? 0 : existingGlobal.getBaseLevelMemory(), currentAggregate.getBaseLevelMemory()),
+                Math.max(existingGlobal == null ? 0 : existingGlobal.getPeakMemory(), currentAggregate.getPeakMemory())
+        );
+
+        haStats.setGlobalSessionStats(merged);
+        lastAggregatedSessionStatsByLeader.put(haStateManager.getLeaderId(), currentAggregate);
     }
 
     /**
