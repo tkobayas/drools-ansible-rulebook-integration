@@ -306,19 +306,25 @@ class HAIntegrationTest extends HAIntegrationTestBase {
     void testAsyncMessageReceiveOnFailoverRecovery() {
         rulesEngine1.enableLeader();
 
-        // Process an event
-        String event = createEvent("""
+        // Process 2 events
+        String event1 = createEvent("""
                 {
                     "temperature": 45,
                     "critical": true
                 }
                 """);
-        String result = rulesEngine1.assertEvent(sessionId1, event);
-
-        System.out.println("Result: " + result);
-
-        String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
+        String result1 = rulesEngine1.assertEvent(sessionId1, event1);
+        String meUuid = TestUtils.extractMatchingUuidFromResponse(result1);
         assertThat(meUuid).isNotNull();
+
+        String event2 = createEvent("""
+                {
+                    "temperature": 55,
+                    "critical": true
+                }
+                """);
+       rulesEngine1.assertEvent(sessionId1, event2);
+
 
         // Simulate engine-1 failure
         rulesEngine1.disableLeader();
@@ -333,16 +339,27 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         Map<String, Object> asyncResultMap = readValueAsMapOfStringAndObject(asyncResult);
 
+        System.out.println("Async Result Map: " + asyncResultMap);
+
         assertThat(asyncResultMap).isNotNull();
         assertThat(asyncResultMap).containsKey("session_id");
         List<Map<String, Object>> resultList = (List<Map<String, Object>>) asyncResultMap.get("result");
-        Map<String, Object> matchingEvent = resultList.get(0);
-        assertThat(matchingEvent).containsEntry("matching_uuid", meUuid);
-        assertThat(matchingEvent).containsEntry("ruleset_name", "Test Ruleset");
-        assertThat(matchingEvent).containsEntry("name", "temperature_alert");
-        Map<String, Map> events = (Map<String, Map>) matchingEvent.get("events");
-        assertThat(events.get("m")).containsEntry("critical", true);
-        assertThat(events.get("m")).containsEntry("temperature", 45);
+
+        Map<String, Object> matchingEvent1 = resultList.get(0);
+        assertThat(matchingEvent1).containsEntry("matching_uuid", meUuid);
+        assertThat(matchingEvent1).containsEntry("ruleset_name", "Test Ruleset");
+        assertThat(matchingEvent1).containsEntry("name", "temperature_alert");
+        Map<String, Map> events1 = (Map<String, Map>) matchingEvent1.get("events");
+        assertThat(events1.get("m")).containsEntry("critical", true);
+        assertThat(events1.get("m")).containsEntry("temperature", 45);
+
+        Map<String, Object> matchingEvent2 = resultList.get(1);
+        Map<String, Map> events2 = (Map<String, Map>) matchingEvent2.get("events");
+        assertThat(events2.get("m")).containsEntry("temperature", 55);
+
+        // result is sorted by created_at
+        assertThat(((Long) matchingEvent2.get("created_at")).longValue())
+                .isGreaterThan(((Long) matchingEvent1.get("created_at")).longValue());
     }
 
     @Test
