@@ -401,6 +401,41 @@ class HAIntegrationTest extends HAIntegrationTestBase {
     }
 
     @Test
+    void testHAStatsAcrossFailoverAggregatesGlobalSessionStats() throws Exception {
+        // Node1 becomes leader and processes two events
+        rulesEngine1.enableLeader();
+        rulesEngine1.assertEvent(sessionId1, createEvent("{\"temperature\": 35}"));
+        rulesEngine1.assertEvent(sessionId1, createEvent("{\"temperature\": 36}"));
+
+        String statsJsonLeader1 = rulesEngine1.getHAStats();
+        Map<String, Object> statsLeader1 = readValueAsMapOfStringAndObject(statsJsonLeader1);
+        Map<String, Object> globalStatsLeader1 = (Map<String, Object>) statsLeader1.get("global_session_stats");
+        assertThat(globalStatsLeader1).isNotNull();
+        assertThat(globalStatsLeader1).containsEntry("eventsProcessed", 2)
+                .containsEntry("rulesTriggered", 2);
+        String firstStart = (String) globalStatsLeader1.get("start");
+
+        // Simulate failover: leader1 down, leader2 up
+        rulesEngine1.disableLeader();
+        rulesEngine2.enableLeader();
+
+        // Leader2 processes one more event
+        rulesEngine2.assertEvent(sessionId2, createEvent("{\"temperature\": 37}"));
+
+        String statsJsonLeader2 = rulesEngine2.getHAStats();
+        Map<String, Object> statsLeader2 = readValueAsMapOfStringAndObject(statsJsonLeader2);
+        assertThat(statsLeader2.get("current_leader")).isEqualTo("worker-2");
+        Map<String, Object> globalStatsLeader2 = (Map<String, Object>) statsLeader2.get("global_session_stats");
+        assertThat(globalStatsLeader2).isNotNull();
+
+        // start should remain the first leader's start
+        assertThat(globalStatsLeader2.get("start")).isEqualTo(firstStart);
+        // counters should accumulate across leaders
+        assertThat(globalStatsLeader2).containsEntry("eventsProcessed", 3)
+                .containsEntry("rulesTriggered", 3);
+    }
+
+    @Test
     void testMultipleRuleSets() {
         rulesEngine1.enableLeader();
 
