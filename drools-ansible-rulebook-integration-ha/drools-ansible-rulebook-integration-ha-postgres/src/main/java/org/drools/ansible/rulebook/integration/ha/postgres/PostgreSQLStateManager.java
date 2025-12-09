@@ -294,10 +294,13 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         UUID meUuid = UUID.randomUUID();
         String meUuidString = meUuid.toString();
         matchingEvent.setMeUuid(meUuidString);
+        if (matchingEvent.getCreatedAt() == 0L) {
+            matchingEvent.setCreatedAt(System.currentTimeMillis());
+        }
 
         String sql = """
-                INSERT INTO MatchingEvent (me_uuid, ha_uuid, rule_set_name, rule_name, event_data)
-                VALUES (?::uuid, ?, ?, ?, ?)
+                INSERT INTO MatchingEvent (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at)
+                VALUES (?::uuid, ?, ?, ?, ?, ?)
                 """;
 
         try (Connection conn = dataSource.getConnection();
@@ -309,6 +312,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setString(3, matchingEvent.getRuleSetName());
             ps.setString(4, matchingEvent.getRuleName());
             ps.setString(5, matchingEvent.getEventData());
+            ps.setLong(6, matchingEvent.getCreatedAt());
 
             ps.executeUpdate();
 
@@ -324,7 +328,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public List<MatchingEvent> getPendingMatchingEvents() {
-        String sql = "SELECT * FROM MatchingEvent WHERE ha_uuid = ?";
+        String sql = "SELECT * FROM MatchingEvent WHERE ha_uuid = ? ORDER BY created_at";
         List<MatchingEvent> events = new ArrayList<>();
 
         try (Connection conn = dataSource.getConnection();
@@ -342,6 +346,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 me.setRuleSetName(rs.getString("rule_set_name"));
                 me.setRuleName(rs.getString("rule_name"));
                 me.setEventData(rs.getString("event_data"));
+                me.setCreatedAt(rs.getLong("created_at"));
                 events.add(me);
             }
 

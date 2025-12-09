@@ -53,7 +53,8 @@ public class PostgreSQLSchema {
                         ha_uuid VARCHAR(255) NOT NULL,
                         rule_set_name VARCHAR(255),
                         rule_name VARCHAR(255) NOT NULL,
-                        event_data TEXT
+                        event_data TEXT,
+                        created_at BIGINT DEFAULT 0
                     )
                     """;
             stmt.execute(createMatchingEventTable);

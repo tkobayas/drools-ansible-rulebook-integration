@@ -684,6 +684,7 @@ public class AstRulesEngine implements Closeable {
                                     matchingEvent.getMeUuid()); // these 3 fields are conformed to HA match response format
             result.put("type", "MATCHING_EVENT_RECOVERY");
             result.put("ruleset_name", matchingEvent.getRuleSetName());
+            result.put("created_at", matchingEvent.getCreatedAt());
 
             resultList.add(result);
         }
