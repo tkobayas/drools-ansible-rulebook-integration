@@ -149,6 +149,13 @@ public interface HAStateManager {
     void deleteActionInfo(String matchingUuid);
 
     /**
+     * Load existing HA statistics or create new if none exist
+     *
+     * @return HA statistics object
+     */
+    HAStats loadOrCreateHAStats();
+
+    /**
      * Get current HA statistics
      *
      * @return HA statistics object
@@ -189,4 +196,11 @@ public interface HAStateManager {
      * @return true if integrity check passes, false if corruption detected
      */
     boolean verifySessionState(SessionState sessionState);
+
+    /**
+     * for debug
+     */
+    default void printDatabaseContents() {
+        // Default no-op
+    }
 }

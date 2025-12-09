@@ -96,4 +96,12 @@ public class JsonMapper {
             throw new UncheckedIOException(e);
         }
     }
+
+    public static <T> T readValue(String json, Class<T> type) {
+        try {
+            return OBJECT_MAPPER.readValue(json, type);
+        } catch (JacksonException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
 }

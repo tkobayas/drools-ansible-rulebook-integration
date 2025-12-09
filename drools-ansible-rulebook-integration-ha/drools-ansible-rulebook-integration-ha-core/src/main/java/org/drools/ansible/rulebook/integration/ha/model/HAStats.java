@@ -4,6 +4,8 @@ import java.io.Serializable;
 import java.time.Instant;
 import java.util.Objects;
 
+import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
+
 /**
  * High Availability statistics for tracking leader status, transitions, and processing metrics.
  * Based on the HA Stats specification from the EDA HA documentation.
@@ -21,6 +23,7 @@ public class HAStats implements Serializable {
     private int incompleteMatchingEvents;
     private int partialEventsInMemory;
     private int partialFulfilledRules;
+    private SessionStats globalSessionStats;
     private Long sessionStateSize;  // Size in bytes of the latest SessionState record
 
     public HAStats() {
@@ -208,6 +211,24 @@ public class HAStats implements Serializable {
     }
 
     /**
+     * Gets the aggregated SessionStats across leaders (survives failover)
+     *
+     * @return global session stats
+     */
+    public SessionStats getGlobalSessionStats() {
+        return globalSessionStats;
+    }
+
+    /**
+     * Sets the aggregated SessionStats across leaders (survives failover)
+     *
+     * @param globalSessionStats aggregated session stats
+     */
+    public void setGlobalSessionStats(SessionStats globalSessionStats) {
+        this.globalSessionStats = globalSessionStats;
+    }
+
+    /**
      * Gets the size in bytes of the latest SessionState record
      *
      * @return session state size in bytes
@@ -240,6 +261,7 @@ public class HAStats implements Serializable {
                 incompleteMatchingEvents == haStats.incompleteMatchingEvents &&
                 partialEventsInMemory == haStats.partialEventsInMemory &&
                 partialFulfilledRules == haStats.partialFulfilledRules &&
+                Objects.equals(globalSessionStats, haStats.globalSessionStats) &&
                 Objects.equals(haUuid, haStats.haUuid) &&
                 Objects.equals(currentLeader, haStats.currentLeader) &&
                 Objects.equals(currentTermStartedAt, haStats.currentTermStartedAt) &&
@@ -250,7 +272,7 @@ public class HAStats implements Serializable {
     public int hashCode() {
         return Objects.hash(haUuid, currentLeader, leaderSwitches, currentTermStartedAt,
                             eventsProcessedInTerm, actionsProcessedInTerm, incompleteMatchingEvents,
-                            partialEventsInMemory, partialFulfilledRules, sessionStateSize);
+                            partialEventsInMemory, partialFulfilledRules, globalSessionStats, sessionStateSize);
     }
 
     @Override
@@ -265,6 +287,7 @@ public class HAStats implements Serializable {
                 ", incompleteMatchingEvents=" + incompleteMatchingEvents +
                 ", partialEventsInMemory=" + partialEventsInMemory +
                 ", partialFulfilledRules=" + partialFulfilledRules +
+                ", globalSessionStats=" + globalSessionStats +
                 ", sessionStateSize=" + sessionStateSize +
                 '}';
     }
