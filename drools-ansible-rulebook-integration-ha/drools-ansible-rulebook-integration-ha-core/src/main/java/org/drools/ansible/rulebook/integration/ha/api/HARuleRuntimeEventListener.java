@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.rulesmodel.PrototypeFactory.SYNTHETIC_PROTOTYPE_NAME;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.flattenPrototypeFact;
 
 /**
  * KieSession event listener that tracks all fact/event insertions and deletions for HA persistence.
@@ -79,16 +80,24 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
                 }
             } else {
                 // Control event or other synthetic insertion: auto-generate tracking info
-                json = JsonMapper.toJson(protoFact.asMap());
+                json = JsonMapper.toJson(flattenPrototypeFact(protoFact));
                 identifier = isEvent ? getEventUuid(factHandle).orElse(UUID.randomUUID().toString()) : UUID.randomUUID().toString();
                 recordType = isEvent ? EventRecord.RecordType.EVENT : EventRecord.RecordType.FACT;
 
                 if (isSyntheticControlEvent) {
-                    recordType = EventRecord.RecordType.getByControlName((String) protoFact.get(TimeConstraint.CONTROL_NAME));
+                    String controlName = (String) protoFact.get(TimeConstraint.CONTROL_NAME);
+                    if (controlName == null) {
+                        logger.warn("Synthetic control event missing control_name; defaulting to EVENT tracking");
+                        recordType = EventRecord.RecordType.EVENT;
+                    } else {
+                        recordType = EventRecord.RecordType.getByControlName(controlName);
+                    }
                     PrototypeEventInstance controlEvent = (PrototypeEventInstance) object;
                     expirationDuration = controlEvent.getExpiration();
                     logger.debug("Tracking synthetic control event {} with identifier: {}", recordType, identifier);
-                    logger.debug("Control event expiration duration: {} ms", expirationDuration);
+                    if (expirationDuration != Long.MAX_VALUE) {
+                        logger.debug("Control event expiration duration: {} ms", expirationDuration);
+                    }
                 }
             }
 
@@ -134,7 +143,7 @@ public class HARuleRuntimeEventListener extends DefaultRuleRuntimeEventListener 
             // Only track control event updates (e.g., AccumulateWithin increments current_count)
             if (isSyntheticControlEvent) {
                 // Serialize updated control event
-                String updatedJson = JsonMapper.toJson(protoFact.asMap());
+                String updatedJson = JsonMapper.toJson(flattenPrototypeFact(protoFact));
 
                 // Update the stored EventRecord with new state
                 // Note: expirationDuration doesn't change on update, only the JSON content changes

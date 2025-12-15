@@ -268,7 +268,11 @@ public class AstRulesEngine implements Closeable {
      * @return the events that fired
      */
     public String advanceTime(long sessionId, long amount, String unit) {
-        return matchesToJson( rulesExecutorContainer.get(sessionId).advanceTime(amount, TimeUnit.valueOf(unit.toUpperCase())).join() );
+        List<Match> matches = rulesExecutorContainer.get(sessionId).advanceTime(amount, TimeUnit.valueOf(unit.toUpperCase())).join();
+        if (haMode && haStateManager != null) {
+            return processFactOrEventHA(sessionId, matches);
+        }
+        return matchesToJson(matches);
     }
 
     private static String matchesToJson(List<Match> matches) {

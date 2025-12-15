@@ -5,9 +5,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
-import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
-import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceAbstractTimeConstraint;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
+import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord.RecordType;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
@@ -15,6 +14,11 @@ import org.kie.api.prototype.PrototypeEventInstance;
 import org.drools.core.time.impl.PseudoClockScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.drools.ansible.rulebook.integration.api.domain.temporal.OnceAbstractTimeConstraint.recreateControlEvent;
+import static org.drools.ansible.rulebook.integration.api.rulesmodel.PrototypeFactory.SYNTHETIC_PROTOTYPE_NAME;
+import static org.drools.ansible.rulebook.integration.api.rulesmodel.PrototypeFactory.getPrototypeEvent;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.normalizeControlEventData;
 
 public abstract class AbstractHAStateManager implements HAStateManager {
 
@@ -31,21 +35,26 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             List<EventRecord> partialEvents = sessionState.getPartialEvents();
             for (EventRecord eventRecord : partialEvents) {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
-
                 RecordType recordType = eventRecord.getRecordType();
-                if (recordType == RecordType.CONTROL_ONCE_WITHIN || recordType == RecordType.CONTROL_ACCUMULATE_WITHIN) {
-                    // Directly insert control event with proper prototype and expiration
-                    Map<String, Object> eventData = JsonMapper.readValueAsMapOfStringAndObject(eventRecord.getEventJson());
-                    PrototypeEventInstance controlEvent = OnceAbstractTimeConstraint.recreateControlEvent(
-                            eventData, eventRecord.getExpirationDuration());
+                if (recordType.isSynthetic()) {
+                    // How time constraints are handled??
+                    // OnceWithin : If a control event exists (= not yet expired), an event is discarded without firing the rule. [on recover]-> Inserting the control event back is sufficient.
+                    // AggregateWithin : A control event holds the number of events. Events are discarded until the threshold is met. [on recover] -> Inserting the control event back is sufficient.
+                    // TimeWindow : No control event. [on recover] -> Nothing to do.
+                    Map<String, Object> eventData = normalizeControlEventData(JsonMapper.readValueAsMapOfStringAndObject(eventRecord.getEventJson()));
+                    PrototypeEventInstance controlEvent = recreateControlEvent(eventData, eventRecord.getExpirationDuration());
                     rulesExecutor.asKieSession().insert(controlEvent);
-                    LOG.debug("  Recovered control event at time {}, expiration duration: {} ms", eventRecord.getInsertedAt(), eventRecord.getExpirationDuration());
+                    if (eventRecord.getExpirationDuration() != Long.MAX_VALUE) {
+                        LOG.debug("  * Recovered control event at time {}, expiration duration: {} ms : {}", eventRecord.getInsertedAt(), eventRecord.getExpirationDuration(), controlEvent);
+                    } else {
+                        LOG.debug("  * Recovered control event at time {}, no expiration : {}", eventRecord.getInsertedAt(), controlEvent);
+                    }
                 } else if (recordType == RecordType.FACT) {
-                    LOG.debug("  Replaying fact event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
+                    LOG.debug("  * Replaying fact event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
                     rulesExecutor.processFacts(eventRecord.getEventJson());
                 } else {
                     // RecordType.EVENT
-                    LOG.debug("  Replaying event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
+                    LOG.debug("  * Replaying event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
                     rulesExecutor.processEvents(eventRecord.getEventJson());
                 }
                 currentTime = eventRecord.getInsertedAt();
@@ -109,5 +118,4 @@ public abstract class AbstractHAStateManager implements HAStateManager {
 
         return valid;
     }
-
 }

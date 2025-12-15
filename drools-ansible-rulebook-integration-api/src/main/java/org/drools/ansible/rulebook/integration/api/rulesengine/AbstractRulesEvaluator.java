@@ -44,12 +44,16 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
 
     public AbstractRulesEvaluator(RulesExecutorSession rulesExecutorSession) {
         this.rulesExecutorSession = rulesExecutorSession;
-        this.registerOnlyAgendaFilter = new RegisterOnlyAgendaFilter(rulesExecutorSession);
+        this.registerOnlyAgendaFilter = new RegisterOnlyAgendaFilter(rulesExecutorSession, this::isOnRecovery);
     }
 
     @Override
     public long getSessionId() {
         return rulesExecutorSession.getId();
+    }
+
+    protected boolean isOnRecovery() {
+        return false;
     }
 
     @Override

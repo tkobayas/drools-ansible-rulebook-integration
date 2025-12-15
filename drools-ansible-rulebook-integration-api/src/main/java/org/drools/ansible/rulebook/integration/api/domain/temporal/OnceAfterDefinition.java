@@ -108,6 +108,7 @@ public class OnceAfterDefinition extends OnceAbstractTimeConstraint {
     protected static final Logger log = LoggerFactory.getLogger(OnceAfterDefinition.class);
 
     public static final String KEYWORD = "once_after";
+    public static final String ONCE_AFTER_CONTROL = "once_after_control";
 
     private final PrototypeEvent controlPrototype = getPrototypeEvent(SYNTHETIC_PROTOTYPE_NAME);
     private final PrototypeVariable controlVar1 = variable( controlPrototype, "c1" );
@@ -192,10 +193,12 @@ public class OnceAfterDefinition extends OnceAbstractTimeConstraint {
                                 guardedPattern,
                                 not( createControlPattern() ),
                                 on(getPatternVariable()).execute((drools, event) -> {
+                                    // This is a control event to carry the matched event
                                     PrototypeEventInstance controlEvent = controlPrototype.newInstance();
                                     for (GroupByAttribute unique : groupByAttributes) {
                                         controlEvent.put(unique.getKey(), unique.evalExtractorOnFact(event));
                                     }
+                                    controlEvent.put(CONTROL_NAME, ONCE_AFTER_CONTROL);
                                     controlEvent.put("drools_rule_name", ruleName);
                                     controlEvent.put( "event", event );
                                     controlEvent.put( "once_after_time_window", timeAmount.toString() );
@@ -212,12 +215,16 @@ public class OnceAfterDefinition extends OnceAbstractTimeConstraint {
                                 protoPattern(controlVar1).expr( "drools_rule_name", Index.ConstraintType.EQUAL, ruleName ),
                                 not( protoPattern(controlVar2).expr( "end_once_after", Index.ConstraintType.EQUAL, ruleName ) ),
                                 on(controlVar1).execute((drools, c1) -> {
+                                    // This is a control event to mark the time window is started. When it expires, the main rule fires
                                     PrototypeEventInstance startControlEvent = controlPrototype.newInstance()
                                             .withExpiration(timeAmount.getAmount(), timeAmount.getTimeUnit());
+                                    startControlEvent.put(CONTROL_NAME, ONCE_AFTER_CONTROL);
                                     startControlEvent.put( "start_once_after", ruleName );
                                     drools.insert(startControlEvent);
 
+                                    // This is a control event to clarify the condition to fire the main rule -- the start is expired, but the end is still present
                                     PrototypeEventInstance endControlEvent = controlPrototype.newInstance();
+                                    endControlEvent.put(CONTROL_NAME, ONCE_AFTER_CONTROL);
                                     endControlEvent.put( "end_once_after", ruleName );
                                     // This control event fires the main rule, so is counted as a matched event in SessionStatsCollector.registerMatchedEvents
                                     // Users may think that the main rule is matched with the first event (suppressing other events in the time window). All events are bound by transformTimedOutMatch method
@@ -239,6 +246,7 @@ public class OnceAfterDefinition extends OnceAbstractTimeConstraint {
                                 on(getPatternVariable(), getControlVariable()).execute((drools, event, control) -> {
                                     control.put( "events_in_window", ((int) control.get("events_in_window")) + 1 );
                                     drools.delete(event);
+                                    drools.update(control);
                                 })
                         )
         );

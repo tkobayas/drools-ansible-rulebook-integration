@@ -1,6 +1,7 @@
 package org.drools.ansible.rulebook.integration.ha.model;
 
 import org.drools.ansible.rulebook.integration.api.domain.temporal.AccumulateWithinDefinition;
+import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceAfterDefinition;
 import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceWithinDefinition;
 
 public class EventRecord {
@@ -9,7 +10,8 @@ public class EventRecord {
         EVENT(false, null),
         FACT(false, null),
         CONTROL_ONCE_WITHIN(true, OnceWithinDefinition.ONCE_WITHIN_CONTROL),
-        CONTROL_ACCUMULATE_WITHIN(true, AccumulateWithinDefinition.ACCUMULATE_WITHIN_CONTROL);
+        CONTROL_ACCUMULATE_WITHIN(true, AccumulateWithinDefinition.ACCUMULATE_WITHIN_CONTROL),
+        CONTROL_ONCE_AFTER(true, OnceAfterDefinition.ONCE_AFTER_CONTROL);
 
         private final boolean synthetic;
 

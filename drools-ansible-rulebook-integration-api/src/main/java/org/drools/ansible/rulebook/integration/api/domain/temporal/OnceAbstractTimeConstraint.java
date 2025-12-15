@@ -46,10 +46,13 @@ public abstract class OnceAbstractTimeConstraint implements TimeConstraint {
      * @param expirationDurationMs The expiration duration in milliseconds
      * @return A reconstructed PrototypeEventInstance with expiration and properties
      */
-    public static PrototypeEventInstance recreateControlEvent(Map<String, Object> eventData, long expirationDurationMs) {
+    public static PrototypeEventInstance recreateControlEvent(Map<String, Object> eventData, Long expirationDurationMs) {
         // Create control event with the original expiration duration
-        PrototypeEventInstance controlEvent = getPrototypeEvent(SYNTHETIC_PROTOTYPE_NAME).newInstance()
-                .withExpiration(expirationDurationMs, TimeUnit.MILLISECONDS);
+        PrototypeEventInstance controlEvent = getPrototypeEvent(SYNTHETIC_PROTOTYPE_NAME).newInstance();
+
+        if (expirationDurationMs != null && expirationDurationMs != Long.MAX_VALUE) {
+            controlEvent = controlEvent.withExpiration(expirationDurationMs, TimeUnit.MILLISECONDS);
+        }
 
         // Restore all properties (control_name, group_by attributes and drools_rule_name)
         eventData.forEach(controlEvent::put);
