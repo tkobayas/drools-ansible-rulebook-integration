@@ -360,10 +360,8 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.enableLeader()
      */
     public void enableLeader() {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
-        
+        requireHaMode();
+
         logger.info("Enabling leader mode for: {}", haStateManager.getWorkerName());
         haStateManager.enableLeader();
 
@@ -485,10 +483,8 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.disableLeader()
      */
     public void disableLeader() {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
-        
+        requireHaMode();
+
         logger.info("Disabling leader mode for: {}", haStateManager.getWorkerName());
         haStateManager.disableLeader();
     }
@@ -498,14 +494,7 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.addActionInfo(session, matching_uuid, index, action)
      */
     public void addActionInfo(long sessionId, String matchingUuid, int index, String action) {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
-
-        if (!haStateManager.isLeader()) {
-            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
-        }
-
+        requireLeader();
         haStateManager.addActionInfo(matchingUuid, index, action);
         logger.debug("Added action at index {} for ME UUID: {}", index, matchingUuid);
     }
@@ -515,14 +504,7 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.updateActionInfo(session, matching_uuid, index, action)
      */
     public void updateActionInfo(long sessionId, String matchingUuid, int index, String action) {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
-
-        if (!haStateManager.isLeader()) {
-            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
-        }
-
+        requireLeader();
         haStateManager.updateActionInfo(matchingUuid, index, action);
         logger.debug("Updated action at index {} for ME UUID: {}", index, matchingUuid);
     }
@@ -532,14 +514,7 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.actionInfoExists(session, matching_uuid, index)
      */
     public boolean actionInfoExists(long sessionId, String matchingUuid, int index) {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
-
-        if (!haStateManager.isLeader()) {
-            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
-        }
-
+        requireLeader();
         return haStateManager.actionInfoExists(matchingUuid, index);
     }
     
@@ -548,14 +523,7 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.getActionInfo(session, matching_uuid, index)
      */
     public String getActionInfo(long sessionId, String matchingUuid, int index) {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
-
-        if (!haStateManager.isLeader()) {
-            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
-        }
-
+        requireLeader();
         return haStateManager.getActionInfo(matchingUuid, index);
     }
 
@@ -564,14 +532,7 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.getActionStatus(session, matching_uuid, index)
      */
     public String getActionStatus(long sessionId, String matchingUuid, int index) {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
-
-        if (!haStateManager.isLeader()) {
-            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
-        }
-
+        requireLeader();
         return haStateManager.getActionStatus(matchingUuid, index);
     }
 
@@ -580,16 +541,22 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.deleteActionInfo(session, matching_uuid)
      */
     public void deleteActionInfo(long sessionId, String matchingUuid) {
+        requireLeader();
+        haStateManager.deleteActionInfo(matchingUuid);
+        logger.debug("Deleted all actions for ME UUID: {}", matchingUuid);
+    }
+
+    private void requireHaMode() {
         if (!haMode || haStateManager == null) {
             throw new IllegalStateException("HA mode not initialized");
         }
+    }
 
+    private void requireLeader() {
+        requireHaMode();
         if (!haStateManager.isLeader()) {
-            throw new IllegalStateException("ActionInfo operations can only be performed by the leader");
+            throw new IllegalStateException("This operation can only be performed by the leader");
         }
-
-        haStateManager.deleteActionInfo(matchingUuid);
-        logger.debug("Deleted all actions for ME UUID: {}", matchingUuid);
     }
     
     /**
@@ -597,9 +564,7 @@ public class AstRulesEngine implements Closeable {
      * Called by Python: self._api.getHAStats()
      */
     public String getHAStats() {
-        if (!haMode || haStateManager == null) {
-            throw new IllegalStateException("HA mode not initialized");
-        }
+        requireHaMode();
 
         HAStats stats = haStateManager.getHAStats();
         stats.setPartialFulfilledRules(computePartialFulfilledRules());
