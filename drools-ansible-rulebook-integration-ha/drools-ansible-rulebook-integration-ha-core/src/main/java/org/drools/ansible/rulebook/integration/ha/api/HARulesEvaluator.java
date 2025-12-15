@@ -44,6 +44,10 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
         this.onRecovery = onRecovery;
     }
 
+    public boolean isOnRecovery() {
+        return onRecovery;
+    }
+
     /**
      * Sets the external session ID for this evaluator.
      * This ID is used for container lookups and should match what Python client uses.

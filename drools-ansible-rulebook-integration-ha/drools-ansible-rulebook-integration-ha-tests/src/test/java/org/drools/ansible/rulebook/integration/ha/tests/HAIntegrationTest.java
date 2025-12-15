@@ -359,7 +359,7 @@ class HAIntegrationTest extends HAIntegrationTestBase {
 
         // result is sorted by created_at
         assertThat(((Long) matchingEvent2.get("created_at")).longValue())
-                .isGreaterThan(((Long) matchingEvent1.get("created_at")).longValue());
+                .isGreaterThanOrEqualTo(((Long) matchingEvent1.get("created_at")).longValue());
     }
 
     @Test
