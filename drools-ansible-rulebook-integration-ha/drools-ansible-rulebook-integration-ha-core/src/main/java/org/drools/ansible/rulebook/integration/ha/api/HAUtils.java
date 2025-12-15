@@ -3,12 +3,15 @@ package org.drools.ansible.rulebook.integration.ha.api;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 
+import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.model.prototype.impl.HashMapEventImpl;
+import org.kie.api.prototype.PrototypeFactInstance;
 import org.kie.api.runtime.rule.FactHandle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,5 +87,41 @@ public class HAUtils {
         matchResponse.put("name", ruleName);
         matchResponse.put("events", events);
         matchResponse.put("matching_uuid", meUuid);
+    }
+
+    /**
+     * Flatten PrototypeFactInstance to a plain Map, converting nested PrototypeFactInstances as well.
+     * Avoids Jackson serializing PrototypeEventInstance internals (prototype metadata) instead of payload.
+     */
+    public static Map<String, Object> flattenPrototypeFact(PrototypeFactInstance fact) {
+        Map<String, Object> raw = fact.asMap();
+        Map<String, Object> result = new HashMap<>(raw.size());
+        for (Map.Entry<String, Object> entry : raw.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof PrototypeFactInstance nested) {
+                result.put(entry.getKey(), flattenPrototypeFact(nested));
+            } else {
+                result.put(entry.getKey(), value);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Convert nested event maps back into PrototypeEventInstance so control facts retain the original event payload.
+     */
+    public static Map<String, Object> normalizeControlEventData(Map<String, Object> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return raw;
+        }
+        Map<String, Object> normalized = new HashMap<>(raw.size());
+        raw.forEach((k, v) -> {
+            if ("event".equals(k) && v instanceof Map<?, ?> nested) {
+                normalized.put(k, RulesModelUtil.mapToFact((Map<String, Object>) nested, true));
+            } else {
+                normalized.put(k, v);
+            }
+        });
+        return normalized;
     }
 }

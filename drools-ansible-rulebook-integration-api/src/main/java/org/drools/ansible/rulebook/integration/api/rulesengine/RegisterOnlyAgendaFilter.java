@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class RegisterOnlyAgendaFilter implements AgendaFilter {
@@ -33,12 +34,22 @@ public class RegisterOnlyAgendaFilter implements AgendaFilter {
 
     private final Set<FactHandle> matchedEvents = Collections.newSetFromMap(new IdentityHashMap<>());
 
+    private final Supplier<Boolean> recoverySupplier;
+
     public RegisterOnlyAgendaFilter(RulesExecutorSession rulesExecutorSession) {
+        this(rulesExecutorSession, () -> false);
+    }
+
+    public RegisterOnlyAgendaFilter(RulesExecutorSession rulesExecutorSession, Supplier<Boolean> recoverySupplier) {
         this.rulesExecutorSession = rulesExecutorSession;
+        this.recoverySupplier = recoverySupplier;
     }
 
     @Override
     public boolean accept(Match match) {
+        if (Boolean.TRUE.equals(recoverySupplier.get()) && match.getRule().getMetaData().get(SYNTHETIC_RULE_TAG) != null) {
+            return false;
+        }
         List<InternalFactHandle> fhs = (List<InternalFactHandle>) match.getFactHandles();
         boolean validMatch = isValidMatch(fhs);
 
