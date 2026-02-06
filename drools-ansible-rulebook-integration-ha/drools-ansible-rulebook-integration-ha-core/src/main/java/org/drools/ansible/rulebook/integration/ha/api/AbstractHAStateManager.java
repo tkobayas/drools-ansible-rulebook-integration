@@ -41,6 +41,8 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                     // OnceWithin : If a control event exists (= not yet expired), an event is discarded without firing the rule. [on recover]-> Inserting the control event back is sufficient.
                     // AggregateWithin : A control event holds the number of events. Events are discarded until the threshold is met. [on recover] -> Inserting the control event back is sufficient.
                     // TimeWindow : No control event. [on recover] -> Nothing to do.
+                    // OnceAfter : A main control event holds nested events (main control event may be multiple because of group_by).
+                    //             When its start control event expires and its end control event is present, the rule fires. [on recover] -> Inserting the all control events back is sufficient.
                     Map<String, Object> eventData = normalizeControlEventData(JsonMapper.readValueAsMapOfStringAndObject(eventRecord.getEventJson()));
                     PrototypeEventInstance controlEvent = recreateControlEvent(eventData, eventRecord.getExpirationDuration());
                     rulesExecutor.asKieSession().insert(controlEvent);

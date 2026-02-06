@@ -102,4 +102,6 @@ class HAIntegrationOnceAfterTest extends HAIntegrationTestBase {
                 .satisfies(ruleEngineMeta -> assertThat((Map<String, Integer>) ruleEngineMeta)
                         .containsEntry("events_in_window", 2));
     }
+
+    // TODO: Need more tests with different event situations (group_by, add after failover)
 }
