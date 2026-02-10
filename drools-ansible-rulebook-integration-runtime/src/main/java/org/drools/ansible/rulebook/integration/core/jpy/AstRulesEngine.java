@@ -304,14 +304,13 @@ public class AstRulesEngine implements Closeable {
         return rulesExecutorContainer.port();
     }
 
-    private boolean rulebookHashMismatch(String rulesetName, SessionState localState, SessionState persistedState) {
+    private boolean rulebookHashMismatch(String rulesetName, String localHash, SessionState persistedState) {
         String persistedHash = persistedState.getRulebookHash();
-        String localHash = localState == null ? null : localState.getRulebookHash();
         if (persistedHash == null || localHash == null) {
             return false;
         }
         if (!persistedHash.equals(localHash)) {
-            logger.warn("Rulebook hash mismatch detected for {} (local {}, persisted {}); Make sure the rulebook is identical across HA nodes.",
+            logger.warn("Rulebook hash mismatch detected for {} (local {}, persisted {}); Ruleset has been updated.",
                     rulesetName, localHash, persistedHash);
             return true;
         }
@@ -413,6 +412,17 @@ public class AstRulesEngine implements Closeable {
             logger.error("Continuing with potentially corrupted SessionState for {}", rulesetName);
         }
 
+        // Check if ruleset has been updated
+        String localHash = sha256(((HARulesExecutor) executor).getRulesetString());
+        if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState)) {
+            logger.info("Ruleset updated for {} - skipping recovery, persisting fresh state as leader", rulesetName);
+            SessionState freshState = haStateManager.getInMemorySessionState(rulesetName);
+            if (freshState != null) {
+                haStateManager.persistSessionState(freshState);
+            }
+            return;
+        }
+
         RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesetString(), persistedSessionState, executor.asKieSession().getSessionClock().getCurrentTime());
         long previousId = executor.getId();
         RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
@@ -444,13 +454,18 @@ public class AstRulesEngine implements Closeable {
             SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
 
             if (persistedSessionState != null) {
-                // Persisted state exists - recover from it
-                RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
+                if (rulebookHashMismatch(rulesetName, rulebookHash, persistedSessionState)) {
+                    logger.info("Ruleset updated for {} - creating fresh session instead of recovering", rulesetName);
+                    // Fall through to create fresh executor below
+                } else {
+                    // Persisted state exists with same rulebook - recover from it
+                    RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
 
-                // Register recovered state in memory (for both leader and non-leader)
-                haStateManager.registerSessionState(rulesetName, persistedSessionState);
+                    // Register recovered state in memory (for both leader and non-leader)
+                    haStateManager.registerSessionState(rulesetName, persistedSessionState);
 
-                return recoveredExecutor;
+                    return recoveredExecutor;
+                }
             }
         }
 
