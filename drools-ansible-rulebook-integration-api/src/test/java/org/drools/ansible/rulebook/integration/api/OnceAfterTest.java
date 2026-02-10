@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.kie.api.prototype.PrototypeFactInstance;
 import org.kie.api.runtime.rule.Match;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -110,6 +111,9 @@ public class OnceAfterTest {
         // Verify that there is no unexpected event in the returned match
         assertThat(matchedRules.get(0).getDeclarationIds()).containsExactlyInAnyOrder("m_0", "m_1", "m_2");
 
+        // drools.update(control) in _cleanup_duplicate rule changes the order of accumulated results,
+        // so we collect results into a map keyed by (host, level) instead of relying on position.
+        Map<String, Integer> eventsInWindowByHostLevel = new HashMap<>();
         for (int i = 0; i < 3; i++) {
             PrototypeFactInstance fact = (PrototypeFactInstance) matchedRules.get(0).getDeclarationValue("m_" + i);
             String host = evalAgainstFact(fact, "meta.hosts").toString();
@@ -120,8 +124,11 @@ public class OnceAfterTest {
             Map map = (Map) fact.asMap();
             Map ruleEngineMeta = (Map) ((Map)map.get(RulesModelUtil.META_FIELD)).get(RulesModelUtil.RULE_ENGINE_META_FIELD);
             assertEquals( new TimeAmount(10, TimeUnit.SECONDS).toString(), ruleEngineMeta.get("once_after_time_window") );
-            assertEquals( i == 0 ? 2 : 1, ruleEngineMeta.get("events_in_window") );
+            eventsInWindowByHostLevel.put(host + "/" + level, (int) ruleEngineMeta.get("events_in_window"));
         }
+        assertEquals( 2, eventsInWindowByHostLevel.get("h1/error").intValue() );
+        assertEquals( 1, eventsInWindowByHostLevel.get("h2/error").intValue() );
+        assertEquals( 1, eventsInWindowByHostLevel.get("h1/warning").intValue() );
 
         for (int i = 0; i < 2; i++) {
             matchedRules = rulesExecutor.processEvents("{ \"meta\": { \"hosts\":\"h1\" }, \"alert\": { \"level\":\"warning\" } }").join();
