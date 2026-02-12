@@ -100,6 +100,7 @@ import static org.drools.model.prototype.PrototypeDSL.variable;
  *   e : Event( sensu.process.type == "alert" )
  *   c1 : Control( sensu.host == e.sensu.host, sensu.process.type == e.sensu.process.type, drools_rule_name == "R" ) )
  * then
+ *   c1.set("events_in_window", c1.get("events_in_window") + 1 );
  *   delete(e);
  * end
  */
