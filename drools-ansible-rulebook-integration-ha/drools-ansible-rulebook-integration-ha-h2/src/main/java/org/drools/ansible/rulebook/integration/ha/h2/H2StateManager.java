@@ -35,6 +35,7 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 public class H2StateManager extends AbstractHAStateManager {
 
     private static final Logger logger = LoggerFactory.getLogger(H2StateManager.class);
+    public static final String DROOLS_HA_H_2_FILE = "DROOLS_HA_H2_FILE";
 
     private HikariDataSource dataSource;
     private String leaderId;
@@ -73,17 +74,21 @@ public class H2StateManager extends AbstractHAStateManager {
         // Configure HikariCP connection pool
         HikariConfig hikariConfig = new HikariConfig();
 
-        // Check if custom H2 URL is provided in config
+        // Determine JDBC URL with priority: db_url config > DROOLS_HA_H2_FILE env var > in-memory default
         String customH2Url = (String) config.get("db_url");
+        String h2FileEnv = System.getenv(DROOLS_HA_H_2_FILE);
         String jdbcUrl;
 
         if (customH2Url != null) {
             jdbcUrl = customH2Url;
+            logger.info("Using custom H2 database URL from config: {}", customH2Url);
+        } else if (h2FileEnv != null && !h2FileEnv.isEmpty()) {
+            jdbcUrl = "jdbc:h2:file:" + h2FileEnv + ";MODE=PostgreSQL";
+            logger.info("Using file-backed H2 database from DROOLS_HA_H2_FILE: {}", h2FileEnv);
         } else {
-            // Fallback to H2 for development/testing
             jdbcUrl = "jdbc:h2:mem:eda_ha_" + uuid + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
+            logger.info("Using in-memory H2 database for HA UUID: {}", uuid);
         }
-
         logger.warn("Using H2 database for HA - not suitable for production");
 
         hikariConfig.setJdbcUrl(jdbcUrl);
