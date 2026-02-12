@@ -95,6 +95,7 @@ public class H2StateManager extends AbstractHAStateManager {
         hikariConfig.setUsername("sa");
         hikariConfig.setPassword("");
         hikariConfig.setMaximumPoolSize(10);
+        hikariConfig.setDriverClassName("org.h2.Driver");
 
         this.dataSource = new HikariDataSource(hikariConfig);
 
