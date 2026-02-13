@@ -20,10 +20,10 @@ public interface HAStateManager {
      *
      * @param uuid           Unique identifier for this HA instance
      * @param workerName     Name/identifier for this worker/node
-     * @param postgresParams Database connection parameters
+     * @param dbParams Database connection parameters
      * @param config         HA configuration parameters
      */
-    void initializeHA(String uuid, String workerName, Map<String, Object> postgresParams, Map<String, Object> config);
+    void initializeHA(String uuid, String workerName, Map<String, Object> dbParams, Map<String, Object> config);
 
     /**
      * Get the worker name/identifier

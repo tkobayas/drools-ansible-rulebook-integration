@@ -74,7 +74,7 @@ public class PostgreSQLSimpleExample {
 
         // Step 2: Initialize HA mode with PostgreSQL
         System.out.println("Step 2: Initializing HA mode with PostgreSQL...");
-        String postgresParamsJson = """
+        String dbParamsJson = """
                 {
                     "host": "localhost",
                     "port": 5432,
@@ -94,7 +94,7 @@ public class PostgreSQLSimpleExample {
         // Set system property to use PostgreSQL
         System.setProperty("ha.db.type", "postgres");
 
-        rulesEngine.initializeHA(HA_UUID, "worker-1", postgresParamsJson, configJson);
+        rulesEngine.initializeHA(HA_UUID, "worker-1", dbParamsJson, configJson);
         System.out.println("   HA initialized with UUID: " + HA_UUID);
 
         // Step 3: Create ruleset

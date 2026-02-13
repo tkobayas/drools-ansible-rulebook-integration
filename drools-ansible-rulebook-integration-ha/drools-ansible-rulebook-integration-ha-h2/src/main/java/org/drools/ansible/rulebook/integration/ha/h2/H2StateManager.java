@@ -68,7 +68,7 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     @Override
-    public void initializeHA(String uuid, String workerName, Map<String, Object> postgresParams, Map<String, Object> config) {
+    public void initializeHA(String uuid, String workerName, Map<String, Object> dbParams, Map<String, Object> config) {
         logger.info("Initializing HA mode with UUID: {}, workerName: {}", uuid, workerName);
 
         this.haUuid = uuid;
