@@ -60,6 +60,7 @@ public class H2Schema {
             String createActionInfoTable =
                     "CREATE TABLE IF NOT EXISTS " + ACTION_INFO + " ("
                     + "id VARCHAR(36) PRIMARY KEY, "
+                    + "ha_uuid VARCHAR(255) NOT NULL, "
                     + "me_uuid VARCHAR(36) NOT NULL, "
                     + "index INT NOT NULL, "
                     + "action_data CLOB, "

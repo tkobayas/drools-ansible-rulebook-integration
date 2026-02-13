@@ -363,16 +363,17 @@ public class H2StateManager extends AbstractHAStateManager {
         String actionId = UUID.randomUUID().toString();
 
         String sql = "INSERT INTO " + ACTION_INFO
-                + " (id, me_uuid, index, action_data)"
-                + " VALUES (?, ?, ?, ?)";
+                + " (id, ha_uuid, me_uuid, index, action_data)"
+                + " VALUES (?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, actionId);
-            ps.setString(2, matchingUuid);
-            ps.setInt(3, index);
-            ps.setString(4, action);
+            ps.setString(2, haUuid);
+            ps.setString(3, matchingUuid);
+            ps.setInt(4, index);
+            ps.setString(5, action);
 
             ps.executeUpdate();
 
