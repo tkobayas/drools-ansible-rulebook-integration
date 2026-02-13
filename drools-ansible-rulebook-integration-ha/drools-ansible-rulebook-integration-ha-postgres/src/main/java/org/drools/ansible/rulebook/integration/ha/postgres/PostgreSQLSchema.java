@@ -71,6 +71,7 @@ public class PostgreSQLSchema {
             String createActionInfoTable =
                     "CREATE TABLE IF NOT EXISTS " + ACTION_INFO + " ("
                     + "id UUID PRIMARY KEY, "
+                    + "ha_uuid VARCHAR(255) NOT NULL, "
                     + "me_uuid UUID NOT NULL, "
                     + "index INT NOT NULL, "
                     + "action_data TEXT, "

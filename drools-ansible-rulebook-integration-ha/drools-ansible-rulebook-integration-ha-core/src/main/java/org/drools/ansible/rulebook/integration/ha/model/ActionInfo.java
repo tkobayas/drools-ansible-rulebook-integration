@@ -6,6 +6,7 @@ package org.drools.ansible.rulebook.integration.ha.model;
 public class ActionInfo {
 
     private String id;          // UUID primary key
+    private String haUuid;       // HA instance UUID
     private String meUuid;       // Foreign key to MatchingEvent
     private int index;           // Action index within the matching event
     private String actionData;   // JSON blob containing action details
@@ -19,6 +20,14 @@ public class ActionInfo {
 
     public void setId(String id) {
         this.id = id;
+    }
+
+    public String getHaUuid() {
+        return haUuid;
+    }
+
+    public void setHaUuid(String haUuid) {
+        this.haUuid = haUuid;
     }
 
     public String getMeUuid() {
