@@ -28,6 +28,10 @@ import org.slf4j.LoggerFactory;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValue;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.ACTION_INFO;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.HA_STATS;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.MATCHING_EVENT;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.SESSION_STATE;
 
 /**
  * H2 implementation of HAStateManager with simplified domain model
@@ -51,7 +55,7 @@ public class H2StateManager extends AbstractHAStateManager {
     public void printDatabaseContents() {
         try (var conn = dataSource.getConnection();
              var stmt = conn.createStatement()) {
-            try (var rs = stmt.executeQuery("SELECT ha_uuid, current_leader, global_session_stats FROM HAStats")) {
+            try (var rs = stmt.executeQuery("SELECT ha_uuid, current_leader, global_session_stats FROM " + HA_STATS)) {
                 while (rs.next()) {
                     logger.info("#### HAStats row: ha_uuid=" + rs.getString("ha_uuid")
                                                + ", current_leader=" + rs.getString("current_leader")
@@ -157,13 +161,9 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
-        String sql = """
-                SELECT *
-                FROM SessionState
-                WHERE ha_uuid = ? AND rule_set_name = ?
-                ORDER BY version DESC
-                LIMIT 1
-                """;
+        String sql = "SELECT * FROM " + SESSION_STATE
+                + " WHERE ha_uuid = ? AND rule_set_name = ?"
+                + " ORDER BY version DESC LIMIT 1";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -236,12 +236,11 @@ public class H2StateManager extends AbstractHAStateManager {
 
             // Insert new version as current
             // Note: SHA is already calculated in updateInMemorySessionState() before this is called
-            String sql = """
-                    INSERT INTO SessionState (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, version, created_time, leader_id)
-                    VALUES (?, ?, ?, ?, ?, ?,
-                        COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,
-                        ?, ?)
-                    """;
+            String sql = "INSERT INTO " + SESSION_STATE
+                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, version, created_time, leader_id)"
+                    + " VALUES (?, ?, ?, ?, ?, ?,"
+                    + " COALESCE((SELECT MAX(version) FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,"
+                    + " ?, ?)";
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, sessionState.getHaUuid());
@@ -301,10 +300,9 @@ public class H2StateManager extends AbstractHAStateManager {
             matchingEvent.setCreatedAt(System.currentTimeMillis());
         }
 
-        String sql = """
-                INSERT INTO MatchingEvent (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """;
+        String sql = "INSERT INTO " + MATCHING_EVENT
+                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -330,7 +328,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public List<MatchingEvent> getPendingMatchingEvents() {
-        String sql = "SELECT * FROM MatchingEvent WHERE ha_uuid = ? ORDER BY created_at";
+        String sql = "SELECT * FROM " + MATCHING_EVENT + " WHERE ha_uuid = ? ORDER BY created_at";
         List<MatchingEvent> events = new ArrayList<>();
 
         try (Connection conn = dataSource.getConnection();
@@ -364,10 +362,9 @@ public class H2StateManager extends AbstractHAStateManager {
 
         String actionId = UUID.randomUUID().toString();
 
-        String sql = """
-                INSERT INTO ActionInfo (id, me_uuid, index, action_data)
-                VALUES (?, ?, ?, ?)
-                """;
+        String sql = "INSERT INTO " + ACTION_INFO
+                + " (id, me_uuid, index, action_data)"
+                + " VALUES (?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -399,7 +396,7 @@ public class H2StateManager extends AbstractHAStateManager {
             return;
         }
 
-        String sql = "UPDATE ActionInfo SET action_data = ? WHERE me_uuid = ? AND index = ?";
+        String sql = "UPDATE " + ACTION_INFO + " SET action_data = ? WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -428,7 +425,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public boolean actionInfoExists(String matchingUuid, int index) {
-        String sql = "SELECT COUNT(*) FROM ActionInfo WHERE me_uuid = ? AND index = ?";
+        String sql = "SELECT COUNT(*) FROM " + ACTION_INFO + " WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -449,7 +446,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public String getActionInfo(String matchingUuid, int index) {
-        String sql = "SELECT action_data FROM ActionInfo WHERE me_uuid = ? AND index = ?";
+        String sql = "SELECT action_data FROM " + ACTION_INFO + " WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -482,14 +479,14 @@ public class H2StateManager extends AbstractHAStateManager {
             conn.setAutoCommit(false);
 
             // Delete actions first (due to foreign key)
-            String sqlActions = "DELETE FROM ActionInfo WHERE me_uuid = ?";
+            String sqlActions = "DELETE FROM " + ACTION_INFO + " WHERE me_uuid = ?";
             try (PreparedStatement ps1 = conn.prepareStatement(sqlActions)) {
                 ps1.setString(1, matchingUuid);
                 ps1.executeUpdate();
             }
 
             // Delete matching event
-            String sqlME = "DELETE FROM MatchingEvent WHERE me_uuid = ?";
+            String sqlME = "DELETE FROM " + MATCHING_EVENT + " WHERE me_uuid = ?";
             try (PreparedStatement ps2 = conn.prepareStatement(sqlME)) {
                 ps2.setString(1, matchingUuid);
                 ps2.executeUpdate();
@@ -523,7 +520,7 @@ public class H2StateManager extends AbstractHAStateManager {
     // Private helper methods
 
     public HAStats loadOrCreateHAStats() {
-        String sql = "SELECT * FROM HAStats WHERE ha_uuid = ?";
+        String sql = "SELECT * FROM " + HA_STATS + " WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -579,13 +576,11 @@ public class H2StateManager extends AbstractHAStateManager {
         String globalSessionStatsJson = haStats.getGlobalSessionStats() == null ? null : toJson(haStats.getGlobalSessionStats());
 
         // For H2, use MERGE statement
-        String h2Sql = """
-                MERGE INTO HAStats
-                (ha_uuid, current_leader, leader_switches, current_term_started_at,
-                 events_processed_in_term, actions_processed_in_term, incomplete_matching_events,
-                 partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at)
-                KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """;
+        String h2Sql = "MERGE INTO " + HA_STATS
+                + " (ha_uuid, current_leader, leader_switches, current_term_started_at,"
+                + " events_processed_in_term, actions_processed_in_term, incomplete_matching_events,"
+                + " partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at)"
+                + " KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(h2Sql)) {
@@ -614,18 +609,15 @@ public class H2StateManager extends AbstractHAStateManager {
      * @return size in bytes, or 0 if no session state exists
      */
     private Long calculateSessionStateSize() {
-        String sql = """
-                SELECT
-                    OCTET_LENGTH(ha_uuid) +
-                    OCTET_LENGTH(rule_set_name) +
-                    COALESCE(OCTET_LENGTH(rulebook_hash), 0) +
-                    COALESCE(OCTET_LENGTH(partial_matching_events), 0) +
-                    8 + 8 + 8 + 8 AS total_size
-                FROM SessionState
-                WHERE ha_uuid = ?
-                ORDER BY version DESC
-                LIMIT 1
-                """;
+        String sql = "SELECT"
+                + " OCTET_LENGTH(ha_uuid) +"
+                + " OCTET_LENGTH(rule_set_name) +"
+                + " COALESCE(OCTET_LENGTH(rulebook_hash), 0) +"
+                + " COALESCE(OCTET_LENGTH(partial_matching_events), 0) +"
+                + " 8 + 8 + 8 + 8 AS total_size"
+                + " FROM " + SESSION_STATE
+                + " WHERE ha_uuid = ?"
+                + " ORDER BY version DESC LIMIT 1";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -644,7 +636,7 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     private int countIncompleteMatchingEvents() {
-        String sql = "SELECT COUNT(*) AS pending FROM MatchingEvent WHERE ha_uuid = ?";
+        String sql = "SELECT COUNT(*) AS pending FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -662,7 +654,7 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     private Integer fetchActionStatusFromDatabase(String matchingUuid, int index) {
-        String sql = "SELECT action_data FROM ActionInfo WHERE me_uuid = ? AND index = ?";
+        String sql = "SELECT action_data FROM " + ACTION_INFO + " WHERE me_uuid = ? AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
