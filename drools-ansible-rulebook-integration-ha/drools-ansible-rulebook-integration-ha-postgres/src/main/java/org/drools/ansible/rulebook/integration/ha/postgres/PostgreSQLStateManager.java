@@ -27,6 +27,10 @@ import org.slf4j.LoggerFactory;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValue;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.ACTION_INFO;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.HA_STATS;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.MATCHING_EVENT;
+import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.SESSION_STATE;
 
 /**
  * PostgreSQL implementation of HAStateManager with production-ready persistence
@@ -155,13 +159,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
-        String sql = """
-                SELECT *
-                FROM SessionState
-                WHERE ha_uuid = ? AND rule_set_name = ?
-                ORDER BY version DESC
-                LIMIT 1
-                """;
+        String sql = "SELECT * FROM " + SESSION_STATE
+                + " WHERE ha_uuid = ? AND rule_set_name = ?"
+                + " ORDER BY version DESC LIMIT 1";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -234,12 +234,11 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
             // Insert new version as current
             // Note: SHA is already calculated in updateInMemorySessionState() before this is called
-            String sql = """
-                    INSERT INTO SessionState (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, version, created_time, leader_id)
-                    VALUES (?, ?, ?, ?, ?, ?,
-                        COALESCE((SELECT MAX(version) FROM SessionState WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,
-                        ?, ?)
-                    """;
+            String sql = "INSERT INTO " + SESSION_STATE
+                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, version, created_time, leader_id)"
+                    + " VALUES (?, ?, ?, ?, ?, ?,"
+                    + " COALESCE((SELECT MAX(version) FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,"
+                    + " ?, ?)";
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, sessionState.getHaUuid());
@@ -301,10 +300,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             matchingEvent.setCreatedAt(System.currentTimeMillis());
         }
 
-        String sql = """
-                INSERT INTO MatchingEvent (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at)
-                VALUES (?::uuid, ?, ?, ?, ?, ?)
-                """;
+        String sql = "INSERT INTO " + MATCHING_EVENT
+                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at)"
+                + " VALUES (?::uuid, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -331,7 +329,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public List<MatchingEvent> getPendingMatchingEvents() {
-        String sql = "SELECT * FROM MatchingEvent WHERE ha_uuid = ? ORDER BY created_at";
+        String sql = "SELECT * FROM " + MATCHING_EVENT + " WHERE ha_uuid = ? ORDER BY created_at";
         List<MatchingEvent> events = new ArrayList<>();
 
         try (Connection conn = dataSource.getConnection();
@@ -370,10 +368,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         // Generate UUID for ActionInfo
         UUID actionId = UUID.randomUUID();
 
-        String sql = """
-                INSERT INTO ActionInfo (id, me_uuid, index, action_data)
-                VALUES (?::uuid, ?::uuid, ?, ?)
-                """;
+        String sql = "INSERT INTO " + ACTION_INFO
+                + " (id, me_uuid, index, action_data)"
+                + " VALUES (?::uuid, ?::uuid, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -403,11 +400,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             throw new IllegalStateException("Cannot update action info - not leader");
         }
 
-        String sql = """
-                UPDATE ActionInfo
-                SET action_data = ?
-                WHERE me_uuid = ?::uuid AND index = ?
-                """;
+        String sql = "UPDATE " + ACTION_INFO
+                + " SET action_data = ?"
+                + " WHERE me_uuid = ?::uuid AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -431,7 +426,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public boolean actionInfoExists(String matchingUuid, int index) {
-        String sql = "SELECT COUNT(*) FROM ActionInfo WHERE me_uuid = ?::uuid AND index = ?";
+        String sql = "SELECT COUNT(*) FROM " + ACTION_INFO + " WHERE me_uuid = ?::uuid AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -454,7 +449,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public String getActionInfo(String matchingUuid, int index) {
-        String sql = "SELECT action_data FROM ActionInfo WHERE me_uuid = ?::uuid AND index = ?";
+        String sql = "SELECT action_data FROM " + ACTION_INFO + " WHERE me_uuid = ?::uuid AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -491,14 +486,14 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             conn.setAutoCommit(false);
 
             // Delete ActionInfo records (will cascade due to FK)
-            String deleteActionInfo = "DELETE FROM ActionInfo WHERE me_uuid = ?::uuid";
+            String deleteActionInfo = "DELETE FROM " + ACTION_INFO + " WHERE me_uuid = ?::uuid";
             try (PreparedStatement ps = conn.prepareStatement(deleteActionInfo)) {
                 ps.setObject(1, UUID.fromString(matchingUuid));
                 ps.executeUpdate();
             }
 
             // Delete MatchingEvent
-            String deleteMatchingEvent = "DELETE FROM MatchingEvent WHERE me_uuid = ?::uuid";
+            String deleteMatchingEvent = "DELETE FROM " + MATCHING_EVENT + " WHERE me_uuid = ?::uuid";
             try (PreparedStatement ps = conn.prepareStatement(deleteMatchingEvent)) {
                 ps.setObject(1, UUID.fromString(matchingUuid));
                 ps.executeUpdate();
@@ -531,7 +526,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     }
 
     public HAStats loadOrCreateHAStats() {
-        String sql = "SELECT * FROM HAStats WHERE ha_uuid = ?";
+        String sql = "SELECT * FROM " + HA_STATS + " WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -587,24 +582,23 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         String globalSessionStatsJson = haStats.getGlobalSessionStats() == null ? null : toJson(haStats.getGlobalSessionStats());
 
         // PostgreSQL: Use INSERT ... ON CONFLICT instead of MERGE
-        String sql = """
-                INSERT INTO HAStats (ha_uuid, current_leader, leader_switches, current_term_started_at,
-                                    events_processed_in_term, actions_processed_in_term, incomplete_matching_events,
-                                    partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (ha_uuid) DO UPDATE SET
-                    current_leader = EXCLUDED.current_leader,
-                    leader_switches = EXCLUDED.leader_switches,
-                    current_term_started_at = EXCLUDED.current_term_started_at,
-                    events_processed_in_term = EXCLUDED.events_processed_in_term,
-                    actions_processed_in_term = EXCLUDED.actions_processed_in_term,
-                    partial_events_in_memory = EXCLUDED.partial_events_in_memory,
-                    incomplete_matching_events = EXCLUDED.incomplete_matching_events,
-                    global_session_stats = EXCLUDED.global_session_stats,
-                    partial_fulfilled_rules = EXCLUDED.partial_fulfilled_rules,
-                    session_state_size = EXCLUDED.session_state_size,
-                    updated_at = EXCLUDED.updated_at
-                """;
+        String sql = "INSERT INTO " + HA_STATS
+                + " (ha_uuid, current_leader, leader_switches, current_term_started_at,"
+                + " events_processed_in_term, actions_processed_in_term, incomplete_matching_events,"
+                + " partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                + " ON CONFLICT (ha_uuid) DO UPDATE SET"
+                + " current_leader = EXCLUDED.current_leader,"
+                + " leader_switches = EXCLUDED.leader_switches,"
+                + " current_term_started_at = EXCLUDED.current_term_started_at,"
+                + " events_processed_in_term = EXCLUDED.events_processed_in_term,"
+                + " actions_processed_in_term = EXCLUDED.actions_processed_in_term,"
+                + " partial_events_in_memory = EXCLUDED.partial_events_in_memory,"
+                + " incomplete_matching_events = EXCLUDED.incomplete_matching_events,"
+                + " global_session_stats = EXCLUDED.global_session_stats,"
+                + " partial_fulfilled_rules = EXCLUDED.partial_fulfilled_rules,"
+                + " session_state_size = EXCLUDED.session_state_size,"
+                + " updated_at = EXCLUDED.updated_at";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -635,22 +629,19 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
      * @return size in bytes, or 0 if no session state exists
      */
     private Long calculateSessionStateSize() {
-        String sql = """
-                SELECT
-                    pg_column_size(ha_uuid) +
-                    pg_column_size(rule_set_name) +
-                    pg_column_size(rulebook_hash) +
-                    pg_column_size(partial_matching_events) +
-                    pg_column_size(persisted_time) +
-                    pg_column_size(current_state_sha) +
-                    pg_column_size(version) +
-                    pg_column_size(created_time) +
-                    pg_column_size(leader_id) AS total_size
-                FROM SessionState
-                WHERE ha_uuid = ?
-                ORDER BY version DESC
-                LIMIT 1
-                """;
+        String sql = "SELECT"
+                + " pg_column_size(ha_uuid) +"
+                + " pg_column_size(rule_set_name) +"
+                + " pg_column_size(rulebook_hash) +"
+                + " pg_column_size(partial_matching_events) +"
+                + " pg_column_size(persisted_time) +"
+                + " pg_column_size(current_state_sha) +"
+                + " pg_column_size(version) +"
+                + " pg_column_size(created_time) +"
+                + " pg_column_size(leader_id) AS total_size"
+                + " FROM " + SESSION_STATE
+                + " WHERE ha_uuid = ?"
+                + " ORDER BY version DESC LIMIT 1";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -669,7 +660,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     }
 
     private int countIncompleteMatchingEvents() {
-        String sql = "SELECT COUNT(*) AS pending FROM MatchingEvent WHERE ha_uuid = ?";
+        String sql = "SELECT COUNT(*) AS pending FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -687,7 +678,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     }
 
     private Integer fetchActionStatusFromDatabase(String matchingUuid, int index) {
-        String sql = "SELECT action_data FROM ActionInfo WHERE me_uuid = ?::uuid AND index = ?";
+        String sql = "SELECT action_data FROM " + ACTION_INFO + " WHERE me_uuid = ?::uuid AND index = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
