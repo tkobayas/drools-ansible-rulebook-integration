@@ -27,20 +27,20 @@ public class TestUtils {
 
     // PostgreSQL Configuration (for Testcontainers)
     // These will be populated by PostgreSQLTestBase when container starts
-    private static volatile Map<String, Object> postgresParams = null;
-    private static volatile Map<String, Object> postgresHAConfig = null;
+    private static volatile Map<String, Object> dbParams = null;
+    private static volatile Map<String, Object> dbHAConfig = null;
 
-    public static void setPostgresTestConfig(Map<String, Object> params, Map<String, Object> config) {
-        postgresParams = params;
-        postgresHAConfig = config;
+    public static void setDbTestConfig(Map<String, Object> params, Map<String, Object> config) {
+        dbParams = params;
+        dbHAConfig = config;
     }
 
-    public static Map<String, Object> getPostgresParams() {
-        return postgresParams != null ? postgresParams : new HashMap<>();
+    public static Map<String, Object> getDbParams() {
+        return dbParams != null ? dbParams : new HashMap<>();
     }
 
-    public static Map<String, Object> getPostgresHAConfig() {
-        return postgresHAConfig != null ? postgresHAConfig : Map.of("write_after", 1);
+    public static Map<String, Object> getDbHAConfig() {
+        return dbHAConfig != null ? dbHAConfig : Map.of("write_after", 1);
     }
 
     private TestUtils() {
@@ -74,15 +74,15 @@ public class TestUtils {
     }
 
     public static void dropPostgresTables() {
-        if (postgresParams == null || postgresParams.isEmpty()) {
+        if (dbParams == null || dbParams.isEmpty()) {
             return; // No PostgreSQL configured
         }
 
-        String host = (String) postgresParams.get("host");
-        Integer port = (Integer) postgresParams.get("port");
-        String database = (String) postgresParams.get("database");
-        String username = (String) postgresParams.get("user");
-        String password = (String) postgresParams.get("password");
+        String host = (String) dbParams.get("host");
+        Integer port = (Integer) dbParams.get("port");
+        String database = (String) dbParams.get("database");
+        String username = (String) dbParams.get("user");
+        String password = (String) dbParams.get("password");
 
         String jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s", host, port, database);
 

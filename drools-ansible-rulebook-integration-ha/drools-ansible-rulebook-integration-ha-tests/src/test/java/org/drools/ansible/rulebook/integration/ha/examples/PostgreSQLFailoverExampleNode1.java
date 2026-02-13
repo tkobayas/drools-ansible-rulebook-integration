@@ -70,7 +70,7 @@ public class PostgreSQLFailoverExampleNode1 {
         System.out.println("║           NODE-1 STARTING              ║");
         System.out.println("╚════════════════════════════════════════╝\n");
 
-        String postgresParamsJson = """
+        String dbParamsJson = """
                 {
                     "host": "localhost",
                     "port": 5432,
@@ -93,7 +93,7 @@ public class PostgreSQLFailoverExampleNode1 {
         HAIntegrationTestBase.AsyncConsumer consumer = null;
 
         System.out.println("[Node-1] Initializing HA...");
-        rulesEngine.initializeHA(HA_UUID, "worker-1", postgresParamsJson, configJson);
+        rulesEngine.initializeHA(HA_UUID, "worker-1", dbParamsJson, configJson);
         System.out.println("[Node-1] HA initialized with UUID: " + HA_UUID);
 
         System.out.println("[Node-1] Creating ruleset...");
