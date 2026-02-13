@@ -369,17 +369,18 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         UUID actionId = UUID.randomUUID();
 
         String sql = "INSERT INTO " + ACTION_INFO
-                + " (id, me_uuid, index, action_data)"
-                + " VALUES (?::uuid, ?::uuid, ?, ?)";
+                + " (id, ha_uuid, me_uuid, index, action_data)"
+                + " VALUES (?::uuid, ?, ?::uuid, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             // PostgreSQL: Use native UUID type
             ps.setObject(1, actionId);
-            ps.setObject(2, UUID.fromString(matchingUuid));
-            ps.setInt(3, index);
-            ps.setString(4, actionData);
+            ps.setString(2, haUuid);
+            ps.setObject(3, UUID.fromString(matchingUuid));
+            ps.setInt(4, index);
+            ps.setString(5, actionData);
 
             ps.executeUpdate();
 
