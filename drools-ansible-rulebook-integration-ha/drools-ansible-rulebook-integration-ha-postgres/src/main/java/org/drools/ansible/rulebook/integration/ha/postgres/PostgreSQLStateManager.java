@@ -50,7 +50,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     }
 
     @Override
-    public void initializeHA(String uuid, String workerName, Map<String, Object> postgresParams, Map<String, Object> config) {
+    public void initializeHA(String uuid, String workerName, Map<String, Object> dbParams, Map<String, Object> config) {
         logger.info("Initializing PostgreSQL HA mode with UUID: {}, workerName: {}", uuid, workerName);
 
         this.haUuid = uuid;
@@ -58,14 +58,14 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         this.haStats = new HAStats(uuid);
 
         // Parse PostgreSQL connection parameters
-        String host = (String) postgresParams.getOrDefault("host", "localhost");
-        Object portObj = postgresParams.getOrDefault("port", 5432);
+        String host = (String) dbParams.getOrDefault("host", "localhost");
+        Object portObj = dbParams.getOrDefault("port", 5432);
         Integer port = (portObj instanceof Integer) ? (Integer) portObj : Integer.parseInt(portObj.toString());
-        String database = (String) postgresParams.getOrDefault("database", "eda_ha");
-        String username = (String) postgresParams.getOrDefault("user", "postgres");
-        String password = (String) postgresParams.getOrDefault("password", "");
-        String sslmode = (String) postgresParams.getOrDefault("sslmode", "prefer");
-        String applicationName = (String) postgresParams.getOrDefault("application_name", "drools-eda-ha");
+        String database = (String) dbParams.getOrDefault("database", "eda_ha");
+        String username = (String) dbParams.getOrDefault("user", "postgres");
+        String password = (String) dbParams.getOrDefault("password", "");
+        String sslmode = (String) dbParams.getOrDefault("sslmode", "prefer");
+        String applicationName = (String) dbParams.getOrDefault("application_name", "drools-eda-ha");
 
         // Allow custom JDBC URL override
         String jdbcUrl;

@@ -327,17 +327,17 @@ public class AstRulesEngine implements Closeable {
     
     /**
      * Initialize HA mode with UUID and database configuration
-     * Called by Python: self._api.initializeHA(uuid, worker_name, postgres_params_json, config_json)
+     * Called by Python: self._api.initializeHA(uuid, worker_name, db_params_json, config_json)
      */
-    public void initializeHA(String uuid, String workerName, String postgresParamsJson, String configJson) {
+    public void initializeHA(String uuid, String workerName, String dbParamsJson, String configJson) {
         logger.info("Initializing HA mode with UUID: {} and workerName: {}", uuid, workerName);
 
         try {
-            Map<String, Object> postgresParams = null;
+            Map<String, Object> dbParams = null;
             Map<String, Object> config = null;
 
-            if (postgresParamsJson != null && !postgresParamsJson.isEmpty()) {
-                postgresParams = readValueAsMapOfStringAndObject(postgresParamsJson);
+            if (dbParamsJson != null && !dbParamsJson.isEmpty()) {
+                dbParams = readValueAsMapOfStringAndObject(dbParamsJson);
             }
 
             if (configJson != null && !configJson.isEmpty()) {
@@ -345,7 +345,7 @@ public class AstRulesEngine implements Closeable {
             }
 
             this.haStateManager = HAStateManagerFactory.create();
-            this.haStateManager.initializeHA(uuid, workerName, postgresParams, config);
+            this.haStateManager.initializeHA(uuid, workerName, dbParams, config);
             this.haMode = true;
 
             // HA mode always requires async channel

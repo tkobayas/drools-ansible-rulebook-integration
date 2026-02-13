@@ -87,7 +87,7 @@ abstract class AbstractHATestBase {
         dbHAConfigJson = toJson(dbHAConfig);
 
         // Configure TestUtils with PostgreSQL params
-        TestUtils.setPostgresTestConfig(dbParams, dbHAConfig);
+        TestUtils.setDbTestConfig(dbParams, dbHAConfig);
 
         // Register shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
