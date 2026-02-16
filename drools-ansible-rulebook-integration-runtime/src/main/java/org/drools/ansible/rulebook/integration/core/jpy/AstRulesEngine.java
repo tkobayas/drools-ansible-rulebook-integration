@@ -698,13 +698,12 @@ public class AstRulesEngine implements Closeable {
 
         logger.info("Checking for pending matching events to recover");
 
+        // TODO: remove the loop and get sessionId (for python client) to meet ME's ruleset name.
         for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
             List<MatchingEvent> pendingEvents = haStateManager.getPendingMatchingEvents();
-            
             if (!pendingEvents.isEmpty()) {
                 logger.info("Found {} pending matching events for session {} : {}",
-                           pendingEvents.size(), executor.getId(), executor.getRuleSetName());
-                
+                            pendingEvents.size(), executor.getId(), executor.getRuleSetName());
                 // Send list of pending MEs per sessionId through async channel for Python to recover
                 sendMatchingEventRecovery(executor.getId(), pendingEvents);
             }
