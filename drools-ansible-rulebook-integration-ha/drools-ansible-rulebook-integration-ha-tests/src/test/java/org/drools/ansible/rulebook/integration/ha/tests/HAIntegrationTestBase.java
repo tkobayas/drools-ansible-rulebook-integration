@@ -57,18 +57,20 @@ public abstract class HAIntegrationTestBase extends AbstractHATestBase {
         System.out.println("Running test with database: " + TEST_DB_TYPE);
 
         rulesEngine1 = new AstRulesEngine();
-        rulesEngine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson); // The same cluster. Both nodes share same DB
-        sessionId1 = rulesEngine1.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         consumer1 = new AsyncConsumer("consumer1");
         consumer1.startConsuming(rulesEngine1.port());
 
+        rulesEngine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson); // The same cluster. Both nodes share same DB
+        sessionId1 = rulesEngine1.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
         rulesEngine2 = new AstRulesEngine();
-        rulesEngine2.initializeHA(HA_UUID, "worker-2", dbParamsJson, dbHAConfigJson); // The same cluster. Both nodes share same DB
-        sessionId2 = rulesEngine2.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         consumer2 = new AsyncConsumer("consumer2");
         consumer2.startConsuming(rulesEngine2.port());
+
+        rulesEngine2.initializeHA(HA_UUID, "worker-2", dbParamsJson, dbHAConfigJson); // The same cluster. Both nodes share same DB
+        sessionId2 = rulesEngine2.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
     }
 
     @AfterEach
