@@ -307,6 +307,7 @@ class HAIntegrationOnceAfterTest extends HAIntegrationTestBase {
 
         // Node2 becomes leader — recovery advances clock from T=8s (persisted) to T=12s (Node2's clock)
         // The once_after timer expires during this clock jump (the rule fires on [main] thread)
+        // TODO: Edge Case: How should we handle the match in this case? (If Node1 had fired the rule by AutomaticPseudoClock, this wouldn't happen)
         rulesEngine2.enableLeader();
 
         // Advance time further — the timer already expired during recovery,
