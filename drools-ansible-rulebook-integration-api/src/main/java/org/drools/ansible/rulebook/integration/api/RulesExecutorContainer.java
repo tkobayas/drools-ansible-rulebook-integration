@@ -14,6 +14,9 @@ public class RulesExecutorContainer {
 
     protected static final Logger log = LoggerFactory.getLogger(RulesExecutorContainer.class);
 
+    // key: rulesExecutorId,
+    //      in case of HA, rulesExecutorId is the externalSessionId
+    //      which is consistent across recoveries and used by python client for lookups
     private Map<Long, RulesExecutor> rulesExecutors = new ConcurrentHashMap<>();
 
     private AsyncExecutor asyncExecutor;

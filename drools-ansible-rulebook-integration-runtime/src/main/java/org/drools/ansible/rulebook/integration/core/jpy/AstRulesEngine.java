@@ -698,15 +698,30 @@ public class AstRulesEngine implements Closeable {
 
         logger.info("Checking for pending matching events to recover");
 
-        // TODO: remove the loop and get sessionId (for python client) to meet ME's ruleset name.
+        List<MatchingEvent> allPendingEvents = haStateManager.getPendingMatchingEvents();
+        if (allPendingEvents.isEmpty()) {
+            logger.info("No pending matching events to recover");
+            return;
+        }
+
+        // Group MEs by ruleSetName so each executor only gets its own MEs
+        Map<String, List<MatchingEvent>> eventsByRuleSetName = allPendingEvents.stream()
+                .collect(Collectors.groupingBy(MatchingEvent::getRuleSetName));
+
         for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
-            List<MatchingEvent> pendingEvents = haStateManager.getPendingMatchingEvents();
-            if (!pendingEvents.isEmpty()) {
+            List<MatchingEvent> pendingEvents = eventsByRuleSetName.remove(executor.getRuleSetName());
+            if (pendingEvents != null && !pendingEvents.isEmpty()) {
                 logger.info("Found {} pending matching events for session {} : {}",
                             pendingEvents.size(), executor.getId(), executor.getRuleSetName());
-                // Send list of pending MEs per sessionId through async channel for Python to recover
                 sendMatchingEventRecovery(executor.getId(), pendingEvents);
             }
+        }
+
+        // Warn about orphaned MEs whose ruleSetName doesn't match any current executor
+        if (!eventsByRuleSetName.isEmpty()) {
+            eventsByRuleSetName.forEach((ruleSetName, events) ->
+                    logger.warn("Found {} orphaned pending matching events for unknown ruleset '{}': {}",
+                                events.size(), ruleSetName, events.stream().map(MatchingEvent::getMeUuid).toList()));
         }
     }
     
