@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Integration tests for AstRulesEngine with HA functionality
@@ -70,52 +71,10 @@ class HAIntegrationEdgeCaseTest extends HAIntegrationTestBase {
 
     @Test
     void testCurrentStateSha_createRulesetAfterBecomingLeader() {
-        // Scenario: Become leader -> Create ruleset
-        rulesEngine1.enableLeader();
-        sessionId1 = rulesEngine1.createRuleset(getRuleSet(), RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
-
-        String eventUuid1 = "11111111-2222-3333-4444-555555555555";
-        String event1 = """
-                {
-                    "meta": {"uuid": "%s"},
-                    "temperature": 35
-                }
-                """.formatted(eventUuid1);
-
-        String result1 = rulesEngine1.assertEvent(sessionId1, event1); // matches the rule. the event is discarded
-        assertThat(result1).contains("temperature_alert");
-
-        HAStateManager haManagerForAssertion = createHAStateManagerForAssertion();
-        SessionState state1 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
-
-        assertThat(state1).isNotNull();
-        // SHA is calculated from complete state content
-        assertThat(state1.getCurrentStateSHA()).isNotNull();
-
-        // Verify integrity by recalculating SHA
-        String recalculatedSha1 = HAUtils.calculateStateSHA(state1);
-        assertThat(state1.getCurrentStateSHA()).isEqualTo(recalculatedSha1);
-
-        String eventUuid2 = "XXXXXXXX-2222-3333-4444-555555555555";
-        String event2 = """
-                {
-                    "meta": {"uuid": "%s"},
-                    "no-match": 35
-                }
-                """.formatted(eventUuid2);
-
-        String result2 = rulesEngine1.assertEvent(sessionId1, event2); // doesn't match the rule. the event is also discarded
-        System.out.println("Result2: " + result2);
-
-        SessionState state2 = haManagerForAssertion.getPersistedSessionState(getRuleSetNameValue());
-
-        assertThat(state2).isNotNull();
-
-        assertThat(state2.getCurrentStateSHA()).isNotNull();
-
-        // Verify integrity by recalculating SHA
-        String recalculatedSha2 = HAUtils.calculateStateSHA(state2);
-        assertThat(state2.getCurrentStateSHA()).isEqualTo(recalculatedSha2);
+        // Scenario: Become leader before Creating ruleset => Exception
+        assertThrows(IllegalStateException.class, () -> {
+            rulesEngine1.enableLeader();
+        });
     }
 
     // This is a little tricky scenario. Usually we expect a leader is taken over by another node.
