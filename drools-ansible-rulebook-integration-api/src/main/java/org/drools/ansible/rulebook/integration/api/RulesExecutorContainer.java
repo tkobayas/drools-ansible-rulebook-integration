@@ -85,4 +85,8 @@ public class RulesExecutorContainer {
     public Collection<RulesExecutor> getAllExecutors() {
         return rulesExecutors.values();
     }
+
+    public boolean isEmpty() {
+        return rulesExecutors.isEmpty();
+    }
 }

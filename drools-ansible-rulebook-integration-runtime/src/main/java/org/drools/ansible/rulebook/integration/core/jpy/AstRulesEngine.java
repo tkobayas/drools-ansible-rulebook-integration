@@ -365,6 +365,9 @@ public class AstRulesEngine implements Closeable {
     public void enableLeader() {
         requireHaMode();
 
+        // Without executors/sessions, we cannot send matching events to Python client
+        requireRuleCreation();
+
         logger.info("Enabling leader mode for: {}", haStateManager.getWorkerName());
         haStateManager.enableLeader();
 
@@ -575,6 +578,12 @@ public class AstRulesEngine implements Closeable {
         requireHaMode();
         if (!haStateManager.isLeader()) {
             throw new IllegalStateException("This operation can only be performed by the leader");
+        }
+    }
+
+    private void requireRuleCreation() {
+        if (rulesExecutorContainer.isEmpty()) {
+            throw new IllegalStateException("No rulesets created yet. Please create a ruleset before performing this operation.");
         }
     }
     
