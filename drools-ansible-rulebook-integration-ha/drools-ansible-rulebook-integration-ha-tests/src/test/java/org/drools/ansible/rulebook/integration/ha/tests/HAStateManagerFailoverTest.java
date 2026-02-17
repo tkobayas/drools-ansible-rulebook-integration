@@ -32,7 +32,7 @@ class HAStateManagerFailoverTest extends HAStateManagerTestBase {
     }
 
     private HAStateManager createNode(String workerName) {
-        HAStateManager manager = HAStateManagerFactory.create();
+        HAStateManager manager = HAStateManagerFactory.create(TEST_DB_TYPE);
         manager.initializeHA(HA_UUID, workerName, dbParams, dbHAConfig);
         return manager;
     }

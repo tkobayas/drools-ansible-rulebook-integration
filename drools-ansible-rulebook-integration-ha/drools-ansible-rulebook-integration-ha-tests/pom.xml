@@ -94,31 +94,6 @@
         <plugins>
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <!-- Default execution excludes file-backed H2 test (needs env var) -->
-                    <excludes>
-                        <exclude>**/H2FileBackedTest.java</exclude>
-                    </excludes>
-                </configuration>
-                <executions>
-                    <!-- Separate execution for file-backed H2 test with DROOLS_HA_H2_FILE env var -->
-                    <execution>
-                        <id>h2-file-backed-test</id>
-                        <goals>
-                            <goal>test</goal>
-                        </goals>
-                        <configuration>
-                            <excludes combine.self="override" />
-                            <includes>
-                                <include>**/H2FileBackedTest.java</include>
-                            </includes>
-                            <environmentVariables>
-                                <DROOLS_HA_DB_TYPE>h2</DROOLS_HA_DB_TYPE>
-                                <DROOLS_HA_H2_FILE>${project.build.directory}/h2-file-test/eda_ha</DROOLS_HA_H2_FILE>
-                            </environmentVariables>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

@@ -153,7 +153,7 @@ public abstract class HAIntegrationTestBase extends AbstractHATestBase {
 
     // Helper method to create HAStateManager to assert database
     protected HAStateManager createHAStateManagerForAssertion() {
-        HAStateManager manager = HAStateManagerFactory.create();
+        HAStateManager manager = HAStateManagerFactory.create(TEST_DB_TYPE);
         manager.initializeHA(HA_UUID, "FOR_ASSERTION", dbParams, dbHAConfig);
         return manager;
     }

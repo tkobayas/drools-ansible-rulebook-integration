@@ -1,5 +1,10 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
+import java.io.IOException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
@@ -9,7 +14,6 @@ import java.util.UUID;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
-import org.drools.ansible.rulebook.integration.ha.h2.H2Schema;
 import org.drools.ansible.rulebook.integration.ha.postgres.PostgreSQLSchema;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 
@@ -17,13 +21,8 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 
 public class TestUtils {
 
-    // H2 Configuration (default for tests)
-    public static final Map<String, Object> TEST_PG_CONFIG = new HashMap<>(); // Empty for H2
-    public static final String TEST_H2_URL = "jdbc:h2:mem:eda_ha_test;DB_CLOSE_DELAY=-1";
-    public static final Map<String, Object> TEST_HA_CONFIG = Map.of( // DB is shared between nodes
-                                                                      "db_url", TEST_H2_URL, // Shared H2 database
-                                                                      "write_after", 1 // Immediate persistence
-    );
+    // H2 file-backed database path for tests (shared between nodes via same file)
+    public static final String TEST_H2_FILE_PATH = "./target/h2-test/eda_ha";
 
     // PostgreSQL Configuration (for Testcontainers)
     // These will be populated by PostgreSQLTestBase when container starts
@@ -59,17 +58,38 @@ public class TestUtils {
         return me;
     }
 
-    public static void dropH2Tables() {
-        HikariConfig hikariConfig = new HikariConfig();
-        hikariConfig.setJdbcUrl(TEST_H2_URL);
-        hikariConfig.setUsername("sa");
-        hikariConfig.setPassword("");
-        hikariConfig.setMaximumPoolSize(10);
+    /**
+     * Force H2 to fully close the database and remove it from the JVM-level cache.
+     * H2 maintains an internal static map of open databases. Without an explicit SHUTDOWN,
+     * reopening the same file path may return cached (stale) data even after file deletion.
+     * Uses IFEXISTS=TRUE to avoid creating a new database if none exists.
+     */
+    public static void shutdownH2Database() {
+        String jdbcUrl = "jdbc:h2:file:" + TEST_H2_FILE_PATH + ";MODE=PostgreSQL;IFEXISTS=TRUE";
+        try (var conn = DriverManager.getConnection(jdbcUrl, "sa", "");
+             var stmt = conn.createStatement()) {
+            stmt.execute("SHUTDOWN");
+        } catch (Exception e) {
+            // Database might already be closed or file doesn't exist - that's OK
+        }
+    }
 
-        try (HikariDataSource dataSource = new HikariDataSource(hikariConfig)) {
-            H2Schema.dropSchema(dataSource);
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
+    /**
+     * Delete H2 database files for the test file path.
+     * H2 creates .mv.db and optionally .trace.db files.
+     */
+    public static void deleteH2Files() {
+        Path dir = Path.of(TEST_H2_FILE_PATH).getParent();
+        if (dir == null || !Files.exists(dir)) {
+            return;
+        }
+        String baseName = Path.of(TEST_H2_FILE_PATH).getFileName().toString();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, baseName + ".*")) {
+            for (Path file : stream) {
+                Files.deleteIfExists(file);
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to delete H2 files: " + e.getMessage());
         }
     }
 
