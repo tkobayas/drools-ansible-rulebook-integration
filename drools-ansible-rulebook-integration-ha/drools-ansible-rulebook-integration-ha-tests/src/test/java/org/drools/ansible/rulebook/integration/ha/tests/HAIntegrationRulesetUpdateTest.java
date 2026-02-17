@@ -223,7 +223,7 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
     }
 
     private HAStateManager createHAStateManagerForAssertion() {
-        HAStateManager manager = HAStateManagerFactory.create();
+        HAStateManager manager = HAStateManagerFactory.create(TEST_DB_TYPE);
         manager.initializeHA(HA_UUID, "FOR_ASSERTION", dbParams, dbHAConfig);
         return manager;
     }

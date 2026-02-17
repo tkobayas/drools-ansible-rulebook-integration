@@ -26,7 +26,7 @@ class HAStateManagerActionTest extends HAStateManagerTestBase {
 
     @BeforeEach
     void setUp() {
-        stateManager = HAStateManagerFactory.create();
+        stateManager = HAStateManagerFactory.create(TEST_DB_TYPE);
         stateManager.initializeHA(HA_UUID, LEADER_ID, dbParams, dbHAConfig);
     }
 

@@ -1,8 +1,8 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
-import java.util.Collections;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
@@ -23,15 +23,6 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
  */
 abstract class AbstractHATestBase {
 
-    static {
-        String haDbTypeEnvValue = System.getenv("DROOLS_HA_DB_TYPE");
-        if (haDbTypeEnvValue != null && !haDbTypeEnvValue.isEmpty()) {
-            // Environment variable takes precedence over system property
-            System.setProperty("ha.db.type", haDbTypeEnvValue);
-            System.setProperty("test.db.type", haDbTypeEnvValue);
-        }
-    }
-
     // Determine database type from system property
     protected static final String TEST_DB_TYPE = System.getProperty("test.db.type", "h2");
     protected static final boolean USE_POSTGRES = "postgres".equalsIgnoreCase(TEST_DB_TYPE) ||
@@ -47,6 +38,14 @@ abstract class AbstractHATestBase {
     // JSON strings for AstRulesEngine API (converted from Maps)
     protected static String dbParamsJson;
     protected static String dbHAConfigJson;
+
+    /**
+     * Clean up database before each test to ensure a fresh state.
+     */
+    @BeforeEach
+    void cleanupDatabaseBeforeTest() {
+        cleanupDatabase();
+    }
 
     /**
      * Initialize PostgreSQL Testcontainer with specified database name.
@@ -67,11 +66,9 @@ abstract class AbstractHATestBase {
 
         postgres.start();
 
-        // Set system property for HAStateManagerFactory
-        System.setProperty("ha.db.type", "postgres");
-
         // Configure parameters
         dbParams = Map.of(
+            "db_type", "postgres",
             "host", postgres.getHost(),
             "port", postgres.getMappedPort(5432),
             "database", postgres.getDatabaseName(),
@@ -95,7 +92,6 @@ abstract class AbstractHATestBase {
                 System.out.println("Stopping PostgreSQL Testcontainer...");
                 postgres.stop();
             }
-            System.clearProperty("ha.db.type");
         }));
 
         System.out.println("PostgreSQL Testcontainer started at " +
@@ -103,20 +99,18 @@ abstract class AbstractHATestBase {
     }
 
     /**
-     * Initialize H2 in-memory database configuration.
+     * Initialize H2 file-backed database configuration.
+     * All nodes share the same file path, enabling failover tests.
      */
     protected static void initializeH2() {
-        System.out.println("Using H2 in-memory database");
+        System.out.println("Using H2 file-backed database: " + TestUtils.TEST_H2_FILE_PATH);
 
-        // Set system property for HAStateManagerFactory
-        System.setProperty("ha.db.type", "h2");
-
-        // H2 configuration
-        dbParams = Collections.emptyMap(); // H2 doesn't need postgres params
-        dbHAConfig = Map.of(
-            "db_url", TestUtils.TEST_H2_URL,
-            "write_after", 1
+        // H2 configuration with db_file_path for shared file-backed database
+        dbParams = Map.of(
+            "db_type", "h2",
+            "db_file_path", TestUtils.TEST_H2_FILE_PATH
         );
+        dbHAConfig = Map.of("write_after", 1);
 
         // Convert to JSON for AstRulesEngine API
         dbParamsJson = toJson(dbParams);
@@ -124,14 +118,16 @@ abstract class AbstractHATestBase {
     }
 
     /**
-     * Clean up database after each test based on database type.
-     * Subclasses can call this in their @AfterEach methods.
+     * Clean up database based on database type.
+     * For H2: deletes the database files.
+     * For PostgreSQL: drops all tables.
      */
     protected void cleanupDatabase() {
         if (USE_POSTGRES) {
             TestUtils.dropPostgresTables();
         } else {
-            TestUtils.dropH2Tables();
+            TestUtils.shutdownH2Database();
+            TestUtils.deleteH2Files();
         }
     }
 }

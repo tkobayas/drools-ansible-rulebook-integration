@@ -8,10 +8,6 @@ import org.drools.ansible.rulebook.integration.ha.tests.TestUtils;
  * Node-2 recovers from the H2 file after Node-1 crashes.
  * Run H2FileBackedFailoverExampleNode1 first, Ctrl+C it, then run this.
  *
- * Prerequisites:
- *   export DROOLS_HA_DB_TYPE=h2
- *   export DROOLS_HA_H2_FILE=./data/eda_ha
- *
  * To run:
  *   mvn exec:java -pl drools-ansible-rulebook-integration-ha/drools-ansible-rulebook-integration-ha-tests \
  *     -Dexec.mainClass="org.drools.ansible.rulebook.integration.ha.examples.H2FileBackedFailoverExampleNode2" \
@@ -22,20 +18,17 @@ public class H2FileBackedFailoverExampleNode2 {
     public static void main(String[] args) throws Exception {
         Thread.currentThread().setName("Node-2");
 
-        // Verify env var is set
-        String h2File = System.getenv("DROOLS_HA_H2_FILE");
-        if (h2File == null || h2File.isEmpty()) {
-            System.err.println("ERROR: DROOLS_HA_H2_FILE env var is not set.");
-            System.err.println("Run: export DROOLS_HA_H2_FILE=./data/eda_ha");
-            System.exit(1);
-        }
-
         System.out.println("╔════════════════════════════════════════════════╗");
         System.out.println("║   NODE-2 (H2 File-Backed) RECOVERING          ║");
         System.out.println("╚════════════════════════════════════════════════╝");
-        System.out.println("[Node-2] H2 file: " + h2File);
+        System.out.println("[Node-2] H2 file: " + H2FileBackedFailoverExampleNode1.DB_FILE_PATH);
 
-        System.setProperty("ha.db.type", "h2");
+        String dbParamsJson = """
+                {
+                    "db_type": "h2",
+                    "db_file_path": "%s"
+                }
+                """.formatted(H2FileBackedFailoverExampleNode1.DB_FILE_PATH);
 
         String configJson = """
                 {
@@ -48,7 +41,7 @@ public class H2FileBackedFailoverExampleNode2 {
 
         try {
             System.out.println("\n[Node-2] Initializing HA (same UUID as Node-1)...");
-            rulesEngine.initializeHA(H2FileBackedFailoverExampleNode1.HA_UUID, "worker-2", null, configJson);
+            rulesEngine.initializeHA(H2FileBackedFailoverExampleNode1.HA_UUID, "worker-2", dbParamsJson, configJson);
             System.out.println("[Node-2] HA initialized");
 
             System.out.println("[Node-2] Creating ruleset (same rules as Node-1)...");

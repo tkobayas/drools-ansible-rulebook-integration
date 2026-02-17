@@ -8,10 +8,6 @@ import org.drools.ansible.rulebook.integration.ha.tests.TestUtils;
  * Node-1 in a file-backed H2 failover test.
  * Run this first, then Ctrl+C to simulate a crash, then run H2FileBackedFailoverExampleNode2.
  *
- * Prerequisites:
- *   export DROOLS_HA_DB_TYPE=h2
- *   export DROOLS_HA_H2_FILE=./data/eda_ha
- *
  * To run:
  *   mvn exec:java -pl drools-ansible-rulebook-integration-ha/drools-ansible-rulebook-integration-ha-tests \
  *     -Dexec.mainClass="org.drools.ansible.rulebook.integration.ha.examples.H2FileBackedFailoverExampleNode1" \
@@ -23,6 +19,7 @@ import org.drools.ansible.rulebook.integration.ha.tests.TestUtils;
 public class H2FileBackedFailoverExampleNode1 {
 
     public static final String HA_UUID = "h2-file-cluster";
+    public static final String DB_FILE_PATH = "./data/eda_ha";
 
     public static final String RULE_SET = """
             {
@@ -69,20 +66,17 @@ public class H2FileBackedFailoverExampleNode1 {
     public static void main(String[] args) throws Exception {
         Thread.currentThread().setName("Node-1");
 
-        // Verify env var is set
-        String h2File = System.getenv("DROOLS_HA_H2_FILE");
-        if (h2File == null || h2File.isEmpty()) {
-            System.err.println("ERROR: DROOLS_HA_H2_FILE env var is not set.");
-            System.err.println("Run: export DROOLS_HA_H2_FILE=./data/eda_ha");
-            System.exit(1);
-        }
-
         System.out.println("╔════════════════════════════════════════════════╗");
         System.out.println("║   NODE-1 (H2 File-Backed) STARTING            ║");
         System.out.println("╚════════════════════════════════════════════════╝");
-        System.out.println("[Node-1] H2 file: " + h2File);
+        System.out.println("[Node-1] H2 file: " + DB_FILE_PATH);
 
-        System.setProperty("ha.db.type", "h2");
+        String dbParamsJson = """
+                {
+                    "db_type": "h2",
+                    "db_file_path": "%s"
+                }
+                """.formatted(DB_FILE_PATH);
 
         String configJson = """
                 {
@@ -95,7 +89,7 @@ public class H2FileBackedFailoverExampleNode1 {
 
         try {
             System.out.println("[Node-1] Initializing HA...");
-            rulesEngine.initializeHA(HA_UUID, "worker-1", null, configJson);
+            rulesEngine.initializeHA(HA_UUID, "worker-1", dbParamsJson, configJson);
             System.out.println("[Node-1] HA initialized with UUID: " + HA_UUID);
 
             System.out.println("[Node-1] Creating ruleset...");
@@ -150,7 +144,7 @@ public class H2FileBackedFailoverExampleNode1 {
             System.out.println("\n[Node-1] HA Stats: " + statsJson);
 
             // Wait for crash
-            System.out.println("\n[Node-1] State is persisted to H2 file: " + h2File + ".mv.db");
+            System.out.println("\n[Node-1] State is persisted to H2 file: " + DB_FILE_PATH + ".mv.db");
             System.out.println("[Node-1] Press Ctrl+C to simulate crash, then run Node2 to recover.");
 
             Thread.sleep(Long.MAX_VALUE);

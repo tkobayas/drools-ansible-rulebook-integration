@@ -2,15 +2,10 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 
 import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
-import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
-import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
-import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_HA_CONFIG;
-import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.TEST_PG_CONFIG;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 

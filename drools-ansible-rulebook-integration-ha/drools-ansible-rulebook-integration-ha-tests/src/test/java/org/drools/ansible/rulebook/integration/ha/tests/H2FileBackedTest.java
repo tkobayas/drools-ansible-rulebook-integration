@@ -13,20 +13,18 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
- * Tests file-backed H2 database for HA using DROOLS_HA_H2_FILE env var.
+ * Tests file-backed H2 database for HA using db_file_path in dbParams.
  *
- * This test is run in a separate surefire execution with env vars:
- *   DROOLS_HA_DB_TYPE=h2
- *   DROOLS_HA_H2_FILE=${project.build.directory}/h2-file-test/eda_ha
- *
- * The test does NOT pass db_url in config — it relies purely on the env var.
+ * The test passes db_file_path in dbParams to configure the H2 file location.
  */
 class H2FileBackedTest {
 
     private static final String HA_UUID = "h2-file-test";
+    private static final String DB_FILE_PATH = "./target/h2-file-test/eda_ha";
 
     private static final String RULE_SET = """
             {
@@ -58,7 +56,11 @@ class H2FileBackedTest {
             }
             """;
 
-    // Config without db_url — H2StateManager should pick up DROOLS_HA_H2_FILE env var
+    private static final String DB_PARAMS_JSON = toJson(Map.of(
+            "db_type", "h2",
+            "db_file_path", DB_FILE_PATH
+    ));
+
     private static final String CONFIG_JSON = """
             {"write_after": 1}
             """;
@@ -67,16 +69,7 @@ class H2FileBackedTest {
 
     @BeforeEach
     void setUp() {
-        String h2FileEnv = System.getenv("DROOLS_HA_H2_FILE");
-        assertThat(h2FileEnv)
-                .as("DROOLS_HA_H2_FILE env var must be set (configured in pom.xml surefire execution)")
-                .isNotNull()
-                .isNotEmpty();
-        h2FilePath = Path.of(h2FileEnv + ".mv.db");
-
-        // Ensure ha.db.type is set (env var DROOLS_HA_DB_TYPE should have set this via AbstractHATestBase static block,
-        // but set it explicitly in case this test runs standalone)
-        System.setProperty("ha.db.type", "h2");
+        h2FilePath = Path.of(DB_FILE_PATH + ".mv.db");
     }
 
     @AfterEach
@@ -95,7 +88,7 @@ class H2FileBackedTest {
         long sessionId1;
 
         try {
-            engine1.initializeHA(HA_UUID, "worker-1", null, CONFIG_JSON);
+            engine1.initializeHA(HA_UUID, "worker-1", DB_PARAMS_JSON, CONFIG_JSON);
             sessionId1 = engine1.createRuleset(RULE_SET, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
             consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1");
@@ -109,9 +102,9 @@ class H2FileBackedTest {
 
             engine1.advanceTime(sessionId1, 5, "SECONDS");
 
-            // Verify H2 file was created on disk via env var
+            // Verify H2 file was created on disk via db_file_path
             assertThat(h2FilePath)
-                    .as("H2 database file should be created from DROOLS_HA_H2_FILE env var")
+                    .as("H2 database file should be created from db_file_path in dbParams")
                     .exists();
             assertThat(Files.size(h2FilePath)).isGreaterThan(0);
 
@@ -140,7 +133,7 @@ class H2FileBackedTest {
         long sessionId2;
 
         try {
-            engine2.initializeHA(HA_UUID, "worker-2", null, CONFIG_JSON);
+            engine2.initializeHA(HA_UUID, "worker-2", DB_PARAMS_JSON, CONFIG_JSON);
             sessionId2 = engine2.createRuleset(RULE_SET, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
             consumer2 = new HAIntegrationTestBase.AsyncConsumer("consumer2");

@@ -31,7 +31,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
     @BeforeEach
     void setUp() {
-        stateManager = HAStateManagerFactory.create();
+        stateManager = HAStateManagerFactory.create(TEST_DB_TYPE);
         stateManager.initializeHA(HA_UUID, LEADER_ID, dbParams, dbHAConfig);
     }
 
@@ -137,7 +137,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
         // Recovery----
         // This test simulates that the restarted node recovers the session, assuming that the leader is taken over by another node
-        HAStateManager stateManager2 = HAStateManagerFactory.create();
+        HAStateManager stateManager2 = HAStateManagerFactory.create(TEST_DB_TYPE);
         stateManager2.initializeHA(HA_UUID, "worker-2", dbParams, dbHAConfig);
 
         SessionState retrievedSessionState = stateManager2.getPersistedSessionState("Test Ruleset");
@@ -225,7 +225,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
         long currentTime = rulesExecutor1.asKieSession().getSessionClock().getCurrentTime();
 
-        HAStateManager stateManager2 = HAStateManagerFactory.create();
+        HAStateManager stateManager2 = HAStateManagerFactory.create(TEST_DB_TYPE);
         stateManager2.initializeHA(HA_UUID, "worker-2", dbParams, dbHAConfig);
 
         SessionState retrievedState = stateManager2.getPersistedSessionState("Test Ruleset");
@@ -261,7 +261,7 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
 
         stateManager.shutdown();
 
-        stateManager = HAStateManagerFactory.create();
+        stateManager = HAStateManagerFactory.create(TEST_DB_TYPE);
         stateManager.initializeHA(HA_UUID, LEADER_ID, dbParams, dbHAConfig);
 
         SessionState retrieved = stateManager.getPersistedSessionState(RULE_SET_NAME);

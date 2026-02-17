@@ -39,7 +39,6 @@ import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.SESSIO
 public class H2StateManager extends AbstractHAStateManager {
 
     private static final Logger logger = LoggerFactory.getLogger(H2StateManager.class);
-    public static final String DROOLS_HA_H_2_FILE = "DROOLS_HA_H2_FILE";
 
     private HikariDataSource dataSource;
     private String leaderId;
@@ -78,21 +77,13 @@ public class H2StateManager extends AbstractHAStateManager {
         // Configure HikariCP connection pool
         HikariConfig hikariConfig = new HikariConfig();
 
-        // Determine JDBC URL with priority: db_url config > DROOLS_HA_H2_FILE env var > in-memory default
-        String customH2Url = (String) config.get("db_url");
-        String h2FileEnv = System.getenv(DROOLS_HA_H_2_FILE);
-        String jdbcUrl;
-
-        if (customH2Url != null) {
-            jdbcUrl = customH2Url;
-            logger.info("Using custom H2 database URL from config: {}", customH2Url);
-        } else if (h2FileEnv != null && !h2FileEnv.isEmpty()) {
-            jdbcUrl = "jdbc:h2:file:" + h2FileEnv + ";MODE=PostgreSQL";
-            logger.info("Using file-backed H2 database from DROOLS_HA_H2_FILE: {}", h2FileEnv);
-        } else {
-            jdbcUrl = "jdbc:h2:mem:eda_ha_" + uuid + ";DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
-            logger.info("Using in-memory H2 database for HA UUID: {}", uuid);
+        // db_file_path in dbParams is required (default ./eda_ha)
+        String dbFilePath = dbParams != null ? (String) dbParams.get("db_file_path") : null;
+        if (dbFilePath == null || dbFilePath.isEmpty()) {
+            dbFilePath = "./eda_ha";
         }
+        String jdbcUrl = "jdbc:h2:file:" + dbFilePath + ";MODE=PostgreSQL";
+        logger.info("Using file-backed H2 database from db_file_path: {}", dbFilePath);
         logger.warn("Using H2 database for HA - not suitable for production");
 
         hikariConfig.setJdbcUrl(jdbcUrl);
@@ -515,6 +506,25 @@ public class H2StateManager extends AbstractHAStateManager {
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
             logger.info("Shutting down H2StateManager");
+        }
+    }
+
+    /**
+     * Force H2 to fully close the database and release all JVM-level caches.
+     * This executes the H2 SHUTDOWN command before closing the connection pool.
+     * Useful in tests to ensure file-backed databases are completely released
+     * between test runs, preventing stale data from H2's internal database cache.
+     */
+    public void shutdownCompletely() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            try (Connection conn = dataSource.getConnection();
+                 var stmt = conn.createStatement()) {
+                stmt.execute("SHUTDOWN");
+            } catch (SQLException e) {
+                logger.debug("H2 SHUTDOWN command failed (may already be closed): {}", e.getMessage());
+            }
+            dataSource.close();
+            logger.info("Shutting down H2StateManager completely");
         }
     }
 
