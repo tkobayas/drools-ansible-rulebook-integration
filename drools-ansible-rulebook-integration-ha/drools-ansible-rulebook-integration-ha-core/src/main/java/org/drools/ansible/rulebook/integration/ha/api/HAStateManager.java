@@ -198,6 +198,11 @@ public interface HAStateManager {
     boolean verifySessionState(SessionState sessionState);
 
     /**
+     * Log a summary of pending items in the database at leader startup.
+     */
+    void logStartupSummary();
+
+    /**
      * for debug
      */
     default void printDatabaseContents() {
