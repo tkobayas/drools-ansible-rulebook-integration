@@ -380,6 +380,8 @@ public class AstRulesEngine implements Closeable {
 
         // Recover pending actions when becoming leader
         recoverPendingMatchingEvents();
+
+        haStateManager.logStartupSummary();
     }
 
     private void restoreAllSessions() {

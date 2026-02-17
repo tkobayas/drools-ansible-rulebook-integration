@@ -636,6 +636,55 @@ public class H2StateManager extends AbstractHAStateManager {
         return 0L;
     }
 
+    @Override
+    public void logStartupSummary() {
+        int pendingMEs = countIncompleteMatchingEvents();
+        int pendingActions = countActionInfo();
+        int sessionCount = countSessionStates();
+        int partialEvents = countPartialEventsInMemory();
+        String leader = haStats != null ? haStats.getCurrentLeader() : "unknown";
+        int switches = haStats != null ? haStats.getLeaderSwitches() : 0;
+
+        logger.info("HA startup summary [ha_uuid={}, leader={}]: {} session(s), {} partial event(s), {} pending matching event(s), {} pending action(s), leader switches: {}",
+                     haUuid, leader, sessionCount, partialEvents, pendingMEs, pendingActions, switches);
+    }
+
+    private int countSessionStates() {
+        String sql = "SELECT COUNT(DISTINCT rule_set_name) AS cnt FROM " + SESSION_STATE + " WHERE ha_uuid = ?";
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, haUuid);
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt("cnt");
+            }
+        } catch (SQLException e) {
+            logger.warn("Failed to count session states: {}", e.getMessage());
+        }
+        return 0;
+    }
+
+    private int countActionInfo() {
+        String sql = "SELECT COUNT(*) AS cnt FROM " + ACTION_INFO + " WHERE ha_uuid = ?";
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, haUuid);
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt("cnt");
+            }
+        } catch (SQLException e) {
+            logger.warn("Failed to count action info: {}", e.getMessage());
+        }
+        return 0;
+    }
+
     private int countIncompleteMatchingEvents() {
         String sql = "SELECT COUNT(*) AS pending FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?";
 
