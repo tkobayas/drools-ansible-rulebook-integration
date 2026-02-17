@@ -344,7 +344,10 @@ public class AstRulesEngine implements Closeable {
                 config = readValueAsMapOfStringAndObject(configJson);
             }
 
-            this.haStateManager = HAStateManagerFactory.create();
+            // Extract db_type from dbParams (default: "postgres")
+            String dbType = dbParams != null ? (String) dbParams.getOrDefault("db_type", "postgres") : "postgres";
+
+            this.haStateManager = HAStateManagerFactory.create(dbType);
             this.haStateManager.initializeHA(uuid, workerName, dbParams, config);
             this.haMode = true;
 

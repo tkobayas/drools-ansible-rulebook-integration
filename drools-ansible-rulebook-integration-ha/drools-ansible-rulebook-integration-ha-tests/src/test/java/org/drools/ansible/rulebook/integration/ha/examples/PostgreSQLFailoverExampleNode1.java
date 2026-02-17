@@ -72,6 +72,7 @@ public class PostgreSQLFailoverExampleNode1 {
 
         String dbParamsJson = """
                 {
+                    "db_type": "postgres",
                     "host": "localhost",
                     "port": 5432,
                     "database": "eda_ha_db",
@@ -86,8 +87,6 @@ public class PostgreSQLFailoverExampleNode1 {
                     "write_after": 1
                 }
                 """;
-
-        System.setProperty("ha.db.type", "postgres");
 
         AstRulesEngine rulesEngine = new AstRulesEngine();
         HAIntegrationTestBase.AsyncConsumer consumer = null;

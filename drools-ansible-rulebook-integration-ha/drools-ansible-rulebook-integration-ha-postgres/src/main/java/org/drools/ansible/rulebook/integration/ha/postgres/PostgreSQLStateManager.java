@@ -67,18 +67,11 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         String sslmode = (String) dbParams.getOrDefault("sslmode", "prefer");
         String applicationName = (String) dbParams.getOrDefault("application_name", "drools-eda-ha");
 
-        // Allow custom JDBC URL override
-        String jdbcUrl;
-        if (config != null && config.containsKey("db_url")) {
-            jdbcUrl = (String) config.get("db_url");
-            logger.info("Using custom JDBC URL from config");
-        } else {
-            jdbcUrl = String.format(
-                "jdbc:postgresql://%s:%d/%s?sslmode=%s&ApplicationName=%s",
-                host, port, database, sslmode, applicationName
-            );
-            logger.info("Connecting to PostgreSQL at {}:{}/{}", host, port, database);
-        }
+        String jdbcUrl = String.format(
+            "jdbc:postgresql://%s:%d/%s?sslmode=%s&ApplicationName=%s",
+            host, port, database, sslmode, applicationName
+        );
+        logger.info("Connecting to PostgreSQL at {}:{}/{}", host, port, database);
 
         // Configure HikariCP connection pool
         HikariConfig hikariConfig = new HikariConfig();

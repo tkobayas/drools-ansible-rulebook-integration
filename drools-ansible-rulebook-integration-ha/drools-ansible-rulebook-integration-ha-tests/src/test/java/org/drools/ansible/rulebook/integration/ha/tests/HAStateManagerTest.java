@@ -33,7 +33,7 @@ class HAStateManagerTest extends HAStateManagerTestBase {
         System.out.println("Setting up HAStateManager for test...");
         // Generate unique HA_UUID per test to ensure complete isolation
         haUuid = "test-ha-" + System.currentTimeMillis();
-        stateManager = HAStateManagerFactory.create();
+        stateManager = HAStateManagerFactory.create(TEST_DB_TYPE);
         stateManager.initializeHA(haUuid, LEADER_ID, dbParams, dbHAConfig);
     }
 

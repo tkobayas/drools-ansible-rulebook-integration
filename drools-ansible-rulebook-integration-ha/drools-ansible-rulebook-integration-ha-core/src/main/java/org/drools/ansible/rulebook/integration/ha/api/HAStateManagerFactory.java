@@ -14,25 +14,15 @@ public class HAStateManagerFactory {
     }
 
     /**
-     * Create an HAStateManager instance without initialization
-     * Used for new initializeHA API where initialization happens separately
+     * Create an HAStateManager instance based on the given database type.
      *
-     * Database type is determined by system property "ha.db.type":
-     * - "postgres" or "postgresql": Uses PostgreSQLStateManager
-     * - "h2" or any other value: Uses H2StateManager (default)
-     *
-     * Example: java -Dha.db.type=postgres ...
-     *
+     * @param dbType the database type: "postgres" or "h2" (default is "postgres" if null/empty)
      * @return HAStateManager instance
      */
-    public static HAStateManager create() {
-        String haDbTypeEnvValue = System.getenv("DROOLS_HA_DB_TYPE");
-        if (haDbTypeEnvValue != null && !haDbTypeEnvValue.isEmpty()) {
-            // Environment variable takes precedence over system property
-            System.setProperty("ha.db.type", haDbTypeEnvValue);
+    public static HAStateManager create(String dbType) {
+        if (dbType == null || dbType.isEmpty()) {
+            dbType = "postgres";
         }
-
-        String dbType = System.getProperty("ha.db.type", "postgresql");
 
         try {
             String className;
@@ -41,14 +31,16 @@ public class HAStateManagerFactory {
             if ("postgres".equalsIgnoreCase(dbType) || "postgresql".equalsIgnoreCase(dbType)) {
                 className = "org.drools.ansible.rulebook.integration.ha.postgres.PostgreSQLStateManager";
                 managerName = "PostgreSQLStateManager";
-            } else {
+            } else if ("h2".equalsIgnoreCase(dbType)) {
                 className = "org.drools.ansible.rulebook.integration.ha.h2.H2StateManager";
                 managerName = "H2StateManager";
+            } else {
+                throw new IllegalArgumentException("Unknown db_type: '" + dbType + "'. Supported values are 'postgres' and 'h2'.");
             }
 
             Class<?> managerClass = Class.forName(className);
             HAStateManager manager = (HAStateManager) managerClass.getDeclaredConstructor().newInstance();
-            logger.info("Created {} instance (ha.db.type={})", managerName, dbType);
+            logger.info("Created {} instance (db_type={})", managerName, dbType);
             return manager;
         } catch (ClassNotFoundException e) {
             throw new RuntimeException("Failed to find HAStateManager implementation for type '" + dbType + "': " + e.getMessage() +
