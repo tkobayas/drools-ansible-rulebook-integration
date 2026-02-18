@@ -1,5 +1,8 @@
 package org.drools.ansible.rulebook.integration.ha.postgres;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -45,6 +48,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     private String haUuid;
     private String workerName;
     private HAStats haStats;
+    private Path tempP12KeystorePath;
 
     public PostgreSQLStateManager() {
     }
@@ -67,41 +71,82 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         String sslmode = (String) dbParams.getOrDefault("sslmode", "prefer");
         String applicationName = (String) dbParams.getOrDefault("application_name", "drools-eda-ha");
 
-        String jdbcUrl = String.format(
-            "jdbc:postgresql://%s:%d/%s?sslmode=%s&ApplicationName=%s",
-            host, port, database, sslmode, applicationName
-        );
-        logger.info("Connecting to PostgreSQL at {}:{}/{}", host, port, database);
+        // SSL client certificate parameters
+        String sslkey = (String) dbParams.get("sslkey");
+        String sslcert = (String) dbParams.get("sslcert");
+        String sslrootcert = (String) dbParams.get("sslrootcert");
+        String sslpassword = (String) dbParams.get("sslpassword");
 
-        // Configure HikariCP connection pool
-        HikariConfig hikariConfig = new HikariConfig();
-        hikariConfig.setJdbcUrl(jdbcUrl);
-        hikariConfig.setUsername(username);
-        hikariConfig.setPassword(password);
-        hikariConfig.setMaximumPoolSize(3);  // Reduced from 10 to avoid "too many clients" in tests
-        hikariConfig.setConnectionTimeout(30000);
-        hikariConfig.setIdleTimeout(600000);
-        hikariConfig.setDriverClassName("org.postgresql.Driver");
-
-        logger.debug("PostgreSQL HAStateManager connecting to database with parameters: jdbcUrl={}, username={}, sslmode={}, applicationName={}",
-            jdbcUrl, username, sslmode, applicationName);
-
-        // PostgreSQL-specific optimizations
-        hikariConfig.addDataSourceProperty("prepareThreshold", 3);
-        hikariConfig.addDataSourceProperty("preparedStatementCacheQueries", 256);
-
-        this.dataSource = new HikariDataSource(hikariConfig);
+        // If sslkey is provided and is a PEM file, convert to PKCS#12 for pgjdbc compatibility.
+        // Skip conversion if the key is already in a format pgjdbc handles natively.
+        if (sslkey != null && !sslkey.isEmpty() && needsPemConversion(sslkey)) {
+            if (sslcert == null || sslcert.isEmpty()) {
+                throw new IllegalArgumentException("sslcert is required when sslkey is a PEM file");
+            }
+            if (sslpassword == null || sslpassword.isEmpty()) {
+                throw new IllegalArgumentException("sslpassword is required when sslkey is a PEM file");
+            }
+            tempP12KeystorePath = PemToKeyStoreConverter.convertPemToP12(sslkey, sslcert, sslpassword.toCharArray());
+            sslkey = tempP12KeystorePath.toString();
+            logger.info("Converted PEM client key to PKCS#12 keystore for SSL connection");
+        }
 
         try {
+            StringBuilder jdbcUrlBuilder = new StringBuilder(
+                String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s&ApplicationName=%s",
+                    host, port, database, sslmode, applicationName));
+
+            // Append SSL parameters to JDBC URL for pgjdbc compatibility (URL-encoded)
+            if (sslkey != null && !sslkey.isEmpty()) {
+                jdbcUrlBuilder.append("&sslkey=").append(URLEncoder.encode(sslkey, StandardCharsets.UTF_8));
+                jdbcUrlBuilder.append("&sslpassword=").append(URLEncoder.encode(sslpassword, StandardCharsets.UTF_8));
+            }
+            if (sslcert != null && !sslcert.isEmpty()) {
+                jdbcUrlBuilder.append("&sslcert=").append(URLEncoder.encode(sslcert, StandardCharsets.UTF_8));
+            }
+            if (sslrootcert != null && !sslrootcert.isEmpty()) {
+                jdbcUrlBuilder.append("&sslrootcert=").append(URLEncoder.encode(sslrootcert, StandardCharsets.UTF_8));
+            }
+
+            String jdbcUrl = jdbcUrlBuilder.toString();
+            logger.info("Connecting to PostgreSQL at {}:{}/{}", host, port, database);
+
+            // Configure HikariCP connection pool
+            HikariConfig hikariConfig = new HikariConfig();
+            hikariConfig.setJdbcUrl(jdbcUrl);
+            hikariConfig.setUsername(username);
+            hikariConfig.setPassword(password);
+            hikariConfig.setMaximumPoolSize(3);  // Reduced from 10 to avoid "too many clients" in tests
+            hikariConfig.setConnectionTimeout(30000);
+            hikariConfig.setIdleTimeout(600000);
+            hikariConfig.setDriverClassName("org.postgresql.Driver");
+
+            logger.debug("PostgreSQL HAStateManager connecting to database with parameters: jdbcUrl={}, username={}, sslmode={}, applicationName={}",
+                maskSensitiveParams(jdbcUrl), username, sslmode, applicationName);
+
+            // PostgreSQL-specific optimizations
+            hikariConfig.addDataSourceProperty("prepareThreshold", 3);
+            hikariConfig.addDataSourceProperty("preparedStatementCacheQueries", 256);
+
+            this.dataSource = new HikariDataSource(hikariConfig);
+
             PostgreSQLSchema.createSchema(dataSource);
 
             // Initialize or load HA stats
             loadOrCreateHAStats();
 
             logger.info("PostgreSQL HA initialization completed successfully");
-        } catch (SQLException e) {
-            logger.error("Failed to initialize PostgreSQL HA schema", e);
-            throw new RuntimeException("Failed to initialize PostgreSQL HA schema", e);
+        } catch (Exception e) {
+            // Clean up temp P12 keystore if initialization fails after conversion
+            if (tempP12KeystorePath != null) {
+                PemToKeyStoreConverter.cleanup(tempP12KeystorePath);
+                tempP12KeystorePath = null;
+            }
+            if (dataSource != null && !dataSource.isClosed()) {
+                dataSource.close();
+            }
+            logger.error("Failed to initialize PostgreSQL HA", e);
+            throw new RuntimeException("Failed to initialize PostgreSQL HA", e);
         }
     }
 
@@ -517,6 +562,10 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             dataSource.close();
             logger.info("PostgreSQL HA state manager shut down");
         }
+        if (tempP12KeystorePath != null) {
+            PemToKeyStoreConverter.cleanup(tempP12KeystorePath);
+            tempP12KeystorePath = null;
+        }
     }
 
     public HAStats loadOrCreateHAStats() {
@@ -737,6 +786,24 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             logger.error("Failed to fetch action status from PostgreSQL", e);
         }
         return null;
+    }
+
+    /**
+     * Check if the sslkey file needs PEM-to-P12 conversion.
+     * Files with .p12, .pfx, .pk8, or .der extensions are already in formats
+     * that pgjdbc handles natively and should not be converted.
+     */
+    private static boolean needsPemConversion(String sslkey) {
+        String lower = sslkey.toLowerCase();
+        return !lower.endsWith(".p12") && !lower.endsWith(".pfx")
+                && !lower.endsWith(".pk8") && !lower.endsWith(".der");
+    }
+
+    private static String maskSensitiveParams(String url) {
+        if (url == null) {
+            return null;
+        }
+        return url.replaceAll("(sslpassword=)[^&]*", "$1***");
     }
 
     private Integer extractStatus(String actionJson) {
