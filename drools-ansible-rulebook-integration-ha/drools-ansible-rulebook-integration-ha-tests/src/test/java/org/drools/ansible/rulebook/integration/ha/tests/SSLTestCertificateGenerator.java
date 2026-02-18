@@ -67,6 +67,8 @@ final class SSLTestCertificateGenerator {
     /**
      * Generate a full set of SSL certificates for testing.
      *
+     * This is the basic bundle with client key in traditional PEM format encrypted with a passphrase (BEGIN RSA PRIVATE KEY + Proc-Type/DEK-Info).
+     *
      * @param baseDir directory to write certificate files into
      * @return CertBundle with paths to all generated files
      */
