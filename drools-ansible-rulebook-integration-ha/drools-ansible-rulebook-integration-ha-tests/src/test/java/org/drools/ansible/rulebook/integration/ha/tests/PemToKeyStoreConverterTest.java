@@ -120,6 +120,26 @@ class PemToKeyStoreConverterTest {
     }
 
     @Test
+    void testIsPemEncrypted() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs"));
+
+        // Encrypted PEM key should be detected as encrypted
+        assertThat(PemToKeyStoreConverter.isPemEncrypted(bundle.clientKey().toString())).isTrue();
+
+        // Unencrypted PEM key should be detected as not encrypted
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+        keyGen.initialize(2048, new SecureRandom());
+        KeyPair keyPair = keyGen.generateKeyPair();
+
+        Path unencryptedKeyPath = tempDir.resolve("unencrypted.pem");
+        try (JcaPEMWriter writer = new JcaPEMWriter(new FileWriter(unencryptedKeyPath.toFile()))) {
+            writer.writeObject(keyPair.getPrivate());
+        }
+
+        assertThat(PemToKeyStoreConverter.isPemEncrypted(unencryptedKeyPath.toString())).isFalse();
+    }
+
+    @Test
     void testConvertUnencryptedPemToP12() throws Exception {
         SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs"));
 
@@ -146,6 +166,49 @@ class PemToKeyStoreConverterTest {
             ks.load(is, "dummypass".toCharArray());
         }
         assertThat(ks.size()).isEqualTo(1);
+
+        PemToKeyStoreConverter.cleanup(p12Path);
+    }
+
+    @Test
+    void testConvertUnencryptedPkcs8PemToP12() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs"));
+
+        // Write client key as unencrypted PKCS#8 PEM (BEGIN PRIVATE KEY)
+        SSLTestCertificateGenerator.CertBundle pkcs8Bundle =
+                SSLTestCertificateGenerator.withUnencryptedPkcs8PemKey(bundle, tempDir.resolve("client-pkcs8.pem"));
+
+        // Verify the PEM file has the expected header
+        String pemContent = Files.readString(pkcs8Bundle.clientKey());
+        assertThat(pemContent).contains("-----BEGIN PRIVATE KEY-----");
+        assertThat(pemContent).doesNotContain("ENCRYPTED");
+
+        // Convert to P12 with a generated passphrase (simulates what PostgreSQLStateManager will do)
+        Path p12Path = PemToKeyStoreConverter.convertPemToP12(
+                pkcs8Bundle.clientKey().toString(),
+                pkcs8Bundle.clientCert().toString(),
+                "generated-passphrase".toCharArray());
+
+        assertThat(p12Path).exists();
+        assertThat(p12Path.toString()).endsWith(".p12");
+
+        // Verify the P12 keystore contains the correct key and certificate
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        try (var is = Files.newInputStream(p12Path)) {
+            ks.load(is, "generated-passphrase".toCharArray());
+        }
+
+        String alias = ks.aliases().nextElement();
+        assertThat(ks.isKeyEntry(alias)).isTrue();
+
+        PrivateKey key = (PrivateKey) ks.getKey(alias, "generated-passphrase".toCharArray());
+        assertThat(key).isNotNull();
+        assertThat(key.getAlgorithm()).isEqualTo("RSA");
+
+        Certificate[] chain = ks.getCertificateChain(alias);
+        assertThat(chain).isNotNull().hasSize(1);
+        X509Certificate cert = (X509Certificate) chain[0];
+        assertThat(cert.getSubjectX500Principal().getName()).contains("CN=test");
 
         PemToKeyStoreConverter.cleanup(p12Path);
     }
