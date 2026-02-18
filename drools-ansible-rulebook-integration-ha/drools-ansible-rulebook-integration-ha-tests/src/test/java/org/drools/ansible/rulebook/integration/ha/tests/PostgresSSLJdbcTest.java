@@ -8,6 +8,8 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
 import org.drools.ansible.rulebook.integration.ha.postgres.PemToKeyStoreConverter;
@@ -133,7 +135,10 @@ class PostgresSSLJdbcTest {
     void testSSLWithP12KeystoreViaUrlParams() throws Exception {
         String url = String.format(
                 "%s?sslmode=require&sslrootcert=%s&sslkey=%s&sslpassword=%s",
-                jdbcUrl, bundle.caCert(), p12Path, bundle.passphrase());
+                jdbcUrl,
+                URLEncoder.encode(bundle.caCert().toString(), StandardCharsets.UTF_8),
+                URLEncoder.encode(p12Path.toString(), StandardCharsets.UTF_8),
+                URLEncoder.encode(bundle.passphrase(), StandardCharsets.UTF_8));
 
         Properties props = new Properties();
         props.setProperty("user", "test");
