@@ -50,26 +50,6 @@ public final class PemToKeyStoreConverter {
     }
 
     /**
-     * Detect whether a PEM key file is encrypted by inspecting its content.
-     * Uses BouncyCastle's PEMParser to determine the object type:
-     * encrypted types (PKCS8EncryptedPrivateKeyInfo, PEMEncryptedKeyPair) return true.
-     *
-     * @param pemKeyPath path to the PEM key file
-     * @return true if the key is encrypted, false if unencrypted
-     * @throws IllegalArgumentException if the file cannot be read or parsed
-     */
-    // TODO: This method is currently unused, but revisit to remove later
-    public static boolean isPemEncrypted(String pemKeyPath) {
-        try (PEMParser parser = new PEMParser(new FileReader(pemKeyPath))) {
-            Object object = parser.readObject();
-            return object instanceof PKCS8EncryptedPrivateKeyInfo
-                    || object instanceof PEMEncryptedKeyPair;
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Cannot read key file: " + pemKeyPath, e);
-        }
-    }
-
-    /**
      * Convert a PEM private key and certificate to a PKCS#12 keystore file.
      *
      * @param pemKeyPath  path to the PEM private key file (encrypted or unencrypted PKCS#8, or traditional format)

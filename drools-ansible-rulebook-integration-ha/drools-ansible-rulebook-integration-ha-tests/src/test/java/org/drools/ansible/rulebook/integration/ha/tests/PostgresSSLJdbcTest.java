@@ -2,8 +2,6 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.KeyStore;
-import java.security.PrivateKey;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -37,16 +35,13 @@ class PostgresSSLJdbcTest {
 
     private static PostgreSQLContainer<?> postgres;
     private static SSLTestCertificateGenerator.CertBundle bundle;
-    private static SSLTestCertificateGenerator.CertBundle unencryptedPkcs8PemBundle;
+    private static Path tempDir;
     private static String jdbcUrl;
 
     @BeforeAll
     static void setUp() throws Exception {
-        Path tempDir = Files.createTempDirectory("ssl-jdbc-test-");
+        tempDir = Files.createTempDirectory("ssl-jdbc-test-");
         bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs"));
-
-        // Derive unencrypted PKCS#8 PEM bundle
-        unencryptedPkcs8PemBundle = SSLTestCertificateGenerator.withUnencryptedPkcs8PemKey(bundle, tempDir.resolve("client-pkcs8.pem"));
 
         // Start SSL PostgreSQL container
         postgres = createSSLPostgresContainer(bundle);
@@ -78,28 +73,17 @@ class PostgresSSLJdbcTest {
         }
     }
 
+    // Key format: PKCS#8 DER unencrypted
     @Test
     void testSSLWithDerKeyViaProperties() throws Exception {
-        // Convert encrypted PEM to P12, then extract unencrypted PKCS#8 DER key
-        Path p12 = PemToKeyStoreConverter.convertPemToP12(
-                bundle.clientKey().toString(),
-                bundle.clientCert().toString(),
-                bundle.passphrase().toCharArray());
-        KeyStore ks = KeyStore.getInstance("PKCS12");
-        try (var is = Files.newInputStream(p12)) {
-            ks.load(is, bundle.passphrase().toCharArray());
-        }
-        String alias = ks.aliases().nextElement();
-        PrivateKey clientPrivateKey = (PrivateKey) ks.getKey(alias, bundle.passphrase().toCharArray());
-        Path derKey = Files.createTempFile("client", ".der");
-        Files.write(derKey, clientPrivateKey.getEncoded());
-        PemToKeyStoreConverter.cleanup(p12);
+        SSLTestCertificateGenerator.CertBundle derBundle =
+                SSLTestCertificateGenerator.withDerUnencryptedKey(bundle, tempDir.resolve("client.der"));
 
         Properties props = new Properties();
         props.setProperty("user", "test");
         props.setProperty("password", "test");
         props.setProperty("sslmode", "require");
-        props.setProperty("sslkey", derKey.toString());
+        props.setProperty("sslkey", derBundle.clientKey().toString());
         props.setProperty("sslcert", bundle.clientCert().toString());
         props.setProperty("sslrootcert", bundle.caCert().toString());
 
@@ -108,18 +92,19 @@ class PostgresSSLJdbcTest {
              ResultSet rs = stmt.executeQuery("SELECT 1 AS result")) {
             assertThat(rs.next()).isTrue();
             assertThat(rs.getInt("result")).isEqualTo(1);
-        } finally {
-            Files.deleteIfExists(derKey);
         }
     }
 
+    // Key format: unencrypted PEM PKCS#8 (converted to PKCS#12 for JDBC)
     @Test
     void testSSLWithUnencryptedPkcs8PemKeyViaProperties() throws Exception {
-        // Convert unencrypted PKCS#8 PEM to PKCS#12 keystore
+        // Derive unencrypted PKCS#8 PEM bundle and convert to PKCS#12 keystore
+        SSLTestCertificateGenerator.CertBundle pkcs8Bundle =
+                SSLTestCertificateGenerator.withUnencryptedPkcs8PemKey(bundle, tempDir.resolve("client-pkcs8.pem"));
         char[] p12Password = bundle.passphrase().toCharArray();
         Path convertedP12 = PemToKeyStoreConverter.convertPemToP12(
-                unencryptedPkcs8PemBundle.clientKey().toString(),
-                unencryptedPkcs8PemBundle.clientCert().toString(),
+                pkcs8Bundle.clientKey().toString(),
+                pkcs8Bundle.clientCert().toString(),
                 p12Password);
         try {
             Properties props = new Properties();
@@ -141,6 +126,7 @@ class PostgresSSLJdbcTest {
         }
     }
 
+    // Key format: PKCS#12 with password
     @Test
     void testSSLWithP12KeystoreViaProperties() throws Exception {
         // Convert encrypted PEM to PKCS#12 keystore
@@ -168,6 +154,7 @@ class PostgresSSLJdbcTest {
         }
     }
 
+    // Key format: PKCS#12 with password (via URL params)
     @Test
     void testSSLWithP12KeystoreViaUrlParams() throws Exception {
         // Convert encrypted PEM to PKCS#12 keystore
