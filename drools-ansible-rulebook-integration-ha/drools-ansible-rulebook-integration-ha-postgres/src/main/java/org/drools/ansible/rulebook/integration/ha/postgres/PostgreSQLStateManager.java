@@ -77,14 +77,16 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         String sslrootcert = (String) dbParams.get("sslrootcert");
         String sslpassword = (String) dbParams.get("sslpassword");
 
-        // If sslkey is provided and is a PEM file, convert to PKCS#12 for pgjdbc compatibility.
-        // Skip conversion if the key is already in a format pgjdbc handles natively.
-        if (sslkey != null && !sslkey.isEmpty() && needsPemConversion(sslkey)) {
+        // Convert encrypted PEM keys to PKCS#12 for pgjdbc compatibility.
+        // Conversion only happens when ALL of:
+        //   - sslkey is provided
+        //   - sslkey is not already a native format (.p12, .pfx, .pk8, .der)
+        //   - sslpassword is provided (indicates an encrypted key that pgjdbc cannot decrypt natively)
+        // Unencrypted keys (no sslpassword) are passed through to pgjdbc as-is.
+        if (sslkey != null && !sslkey.isEmpty() && needsPemConversion(sslkey)
+                && sslpassword != null && !sslpassword.isEmpty()) {
             if (sslcert == null || sslcert.isEmpty()) {
-                throw new IllegalArgumentException("sslcert is required when sslkey is a PEM file");
-            }
-            if (sslpassword == null || sslpassword.isEmpty()) {
-                throw new IllegalArgumentException("sslpassword is required when sslkey is a PEM file");
+                throw new IllegalArgumentException("sslcert is required when converting an encrypted PEM key");
             }
             tempP12KeystorePath = PemToKeyStoreConverter.convertPemToP12(sslkey, sslcert, sslpassword.toCharArray());
             sslkey = tempP12KeystorePath.toString();
@@ -99,6 +101,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             // Append SSL parameters to JDBC URL for pgjdbc compatibility (URL-encoded)
             if (sslkey != null && !sslkey.isEmpty()) {
                 jdbcUrlBuilder.append("&sslkey=").append(URLEncoder.encode(sslkey, StandardCharsets.UTF_8));
+            }
+            if (sslpassword != null && !sslpassword.isEmpty()) {
                 jdbcUrlBuilder.append("&sslpassword=").append(URLEncoder.encode(sslpassword, StandardCharsets.UTF_8));
             }
             if (sslcert != null && !sslcert.isEmpty()) {
