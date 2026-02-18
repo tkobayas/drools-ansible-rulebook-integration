@@ -2,8 +2,6 @@ package org.drools.ansible.rulebook.integration.ha.tests;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.KeyStore;
-import java.security.PrivateKey;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -11,7 +9,6 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
-import org.drools.ansible.rulebook.integration.ha.postgres.PemToKeyStoreConverter;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -37,29 +34,20 @@ class HAPostgresSSLTest {
     private static final String RULE_SET_NAME = "sslTestRuleset";
 
     private static PostgreSQLContainer<?> sslPostgres;
-    private static SSLTestCertificateGenerator.CertBundle certBundle;
-    private static Path derKeyPath;
+    private static SSLTestCertificateGenerator.CertBundle baseCertBundle;
+    private static SSLTestCertificateGenerator.CertBundle derKeyBundle;
+    private static SSLTestCertificateGenerator.CertBundle unencryptedPkcs8PemKeyBundle;
 
     @BeforeAll
     static void setUp() throws Exception {
         Path tempDir = Files.createTempDirectory("ha-ssl-test-");
-        certBundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs"));
+        baseCertBundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs"));
 
-        // Extract unencrypted DER key for the no-password test
-        Path p12Path = PemToKeyStoreConverter.convertPemToP12(
-                certBundle.clientKey().toString(),
-                certBundle.clientCert().toString(),
-                certBundle.passphrase().toCharArray());
-        KeyStore ks = KeyStore.getInstance("PKCS12");
-        try (var is = Files.newInputStream(p12Path)) {
-            ks.load(is, certBundle.passphrase().toCharArray());
-        }
-        PrivateKey clientPrivateKey = (PrivateKey) ks.getKey(ks.aliases().nextElement(), certBundle.passphrase().toCharArray());
-        derKeyPath = tempDir.resolve("client.der");
-        Files.write(derKeyPath, clientPrivateKey.getEncoded());
-        PemToKeyStoreConverter.cleanup(p12Path);
+        // Derive bundles with client key in different formats
+        derKeyBundle = SSLTestCertificateGenerator.withDerUnencryptedKey(baseCertBundle, tempDir.resolve("client.der"));
+        unencryptedPkcs8PemKeyBundle = SSLTestCertificateGenerator.withUnencryptedPkcs8PemKey(baseCertBundle, tempDir.resolve("client-pkcs8.pem"));
 
-        sslPostgres = PostgresSSLJdbcTest.createSSLPostgresContainer(certBundle);
+        sslPostgres = PostgresSSLJdbcTest.createSSLPostgresContainer(baseCertBundle);
         sslPostgres.start();
     }
 
@@ -73,10 +61,10 @@ class HAPostgresSSLTest {
     @Test
     void testSSLConnectionWithEncryptedPemKey() throws Exception {
         String haUuid = "ssl-test-encrypted-pem";
-        Map<String, Object> dbParams = buildBaseDbParams();
-        dbParams.put("sslkey", certBundle.clientKey().toString());
-        dbParams.put("sslcert", certBundle.clientCert().toString());
-        dbParams.put("sslpassword", certBundle.passphrase());
+        Map<String, Object> dbParams = buildBaseDbParams(baseCertBundle);
+        dbParams.put("sslkey", baseCertBundle.clientKey().toString());
+        dbParams.put("sslcert", baseCertBundle.clientCert().toString());
+        dbParams.put("sslpassword", baseCertBundle.passphrase());
 
         HAStateManager stateManager = HAStateManagerFactory.create("postgres");
         try {
@@ -92,9 +80,9 @@ class HAPostgresSSLTest {
     @Test
     void testSSLConnectionWithDerKeyNoPassword() throws Exception {
         String haUuid = "ssl-test-der-no-password";
-        Map<String, Object> dbParams = buildBaseDbParams();
-        dbParams.put("sslkey", derKeyPath.toString());
-        dbParams.put("sslcert", certBundle.clientCert().toString());
+        Map<String, Object> dbParams = buildBaseDbParams(derKeyBundle);
+        dbParams.put("sslkey", derKeyBundle.clientKey().toString());
+        dbParams.put("sslcert", derKeyBundle.clientCert().toString());
         // No sslpassword — DER key is unencrypted
 
         HAStateManager stateManager = HAStateManagerFactory.create("postgres");
@@ -108,7 +96,26 @@ class HAPostgresSSLTest {
         }
     }
 
-    private Map<String, Object> buildBaseDbParams() {
+    @Test
+    void testSSLConnectionWithUnencryptedPkcs8PemKey() throws Exception {
+        String haUuid = "ssl-test-unencrypted-pkcs8-pem";
+        Map<String, Object> dbParams = buildBaseDbParams(unencryptedPkcs8PemKeyBundle);
+        dbParams.put("sslkey", unencryptedPkcs8PemKeyBundle.clientKey().toString());
+        dbParams.put("sslcert", unencryptedPkcs8PemKeyBundle.clientCert().toString());
+        // No sslpassword — unencrypted PEM key
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
+    private Map<String, Object> buildBaseDbParams(SSLTestCertificateGenerator.CertBundle bundle) {
         Map<String, Object> dbParams = new HashMap<>();
         dbParams.put("db_type", "postgres");
         dbParams.put("host", sslPostgres.getHost());
@@ -117,7 +124,7 @@ class HAPostgresSSLTest {
         dbParams.put("user", sslPostgres.getUsername());
         dbParams.put("password", sslPostgres.getPassword());
         dbParams.put("sslmode", "verify-ca");
-        dbParams.put("sslrootcert", certBundle.caCert().toString());
+        dbParams.put("sslrootcert", bundle.caCert().toString());
         return dbParams;
     }
 

@@ -25,6 +25,7 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
+import org.bouncycastle.openssl.jcajce.JcaPKCS8Generator;
 import org.bouncycastle.openssl.jcajce.JcePEMEncryptorBuilder;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
@@ -59,7 +60,8 @@ final class SSLTestCertificateGenerator {
             Path clientKey,
             Path clientCert,
             String passphrase,
-            Path baseDir
+            Path baseDir,
+            KeyPair clientKeyPair
     ) {}
 
     /**
@@ -94,12 +96,12 @@ final class SSLTestCertificateGenerator {
         Path clientCertPath = baseDir.resolve("client.crt");
 
         writeCertPem(caCertPath, caCert);
-        writeUnencryptedKeyPem(serverKeyPath, serverKeyPair);
+        writeUnencryptedPkcs8Pem(serverKeyPath, serverKeyPair);
         writeCertPem(serverCertPath, serverCert);
-        writeEncryptedKeyPem(clientKeyPath, clientKeyPair, TEST_PASSPHRASE.toCharArray());
+        writeTraditionalEncryptedPem(clientKeyPath, clientKeyPair, TEST_PASSPHRASE.toCharArray());
         writeCertPem(clientCertPath, clientCert);
 
-        return new CertBundle(caCertPath, serverKeyPath, serverCertPath, clientKeyPath, clientCertPath, TEST_PASSPHRASE, baseDir);
+        return new CertBundle(caCertPath, serverKeyPath, serverCertPath, clientKeyPath, clientCertPath, TEST_PASSPHRASE, baseDir, clientKeyPair);
     }
 
     private static X509Certificate buildCACertificate(KeyPair caKeyPair) throws Exception {
@@ -182,18 +184,59 @@ final class SSLTestCertificateGenerator {
         }
     }
 
-    private static void writeUnencryptedKeyPem(Path path, KeyPair keyPair) throws Exception {
+    // ---- Bundle variant factories ----
+    // Each method writes the client key in a specific format and returns a new CertBundle
+    // with clientKey pointing to that file. CA, server, and client cert are shared from base.
+
+    /**
+     * Derive a bundle with client key as unencrypted PKCS#8 PEM: {@code -----BEGIN PRIVATE KEY-----}
+     * <p>Most common format in Ansible/OpenShift deployments.
+     */
+    static CertBundle withUnencryptedPkcs8PemKey(CertBundle base, Path outputPath) throws Exception {
+        writeUnencryptedPkcs8Pem(outputPath, base.clientKeyPair());
+        return replaceClientKey(base, outputPath, null);
+    }
+
+    // Future:
+    // static CertBundle withUnencryptedPkcs1PemKey(CertBundle base, Path outputPath) — BEGIN RSA PRIVATE KEY (no encryption)
+    // static CertBundle withTraditionalEncryptedPemKey(CertBundle base, Path outputPath, String passphrase) — BEGIN RSA PRIVATE KEY + DEK-Info
+    // static CertBundle withPkcs8EncryptedPemKey(CertBundle base, Path outputPath, String passphrase) — BEGIN ENCRYPTED PRIVATE KEY
+    // static CertBundle withPkcs12Key(CertBundle base, Path outputPath, String passphrase) — .p12 with password
+    // static CertBundle withPkcs12KeyNoPassword(CertBundle base, Path outputPath) — .p12 without password
+    // static CertBundle withDerUnencryptedKey(CertBundle base, Path outputPath) — .der PKCS#8 unencrypted
+    // static CertBundle withDerEncryptedKey(CertBundle base, Path outputPath, String passphrase) — .der PKCS#8 encrypted
+
+    /**
+     * Derive a bundle with client key as unencrypted PKCS#8 DER (raw binary).
+     */
+    static CertBundle withDerUnencryptedKey(CertBundle base, Path outputPath) throws Exception {
+        Files.write(outputPath, base.clientKeyPair().getPrivate().getEncoded());
+        return replaceClientKey(base, outputPath, null);
+    }
+
+    // ---- Internal key format writers ----
+
+    private static void writeUnencryptedPkcs8Pem(Path path, KeyPair keyPair) throws Exception {
+        // Use JcaPKCS8Generator to produce PKCS#8 PEM (BEGIN PRIVATE KEY)
+        // JcaPEMWriter.writeObject(privateKey) writes PKCS#1 (BEGIN RSA PRIVATE KEY) for RSA keys
         try (JcaPEMWriter writer = new JcaPEMWriter(new FileWriter(path.toFile()))) {
-            writer.writeObject(keyPair.getPrivate());
+            writer.writeObject(new JcaPKCS8Generator(keyPair.getPrivate(), null));
         }
     }
 
-    private static void writeEncryptedKeyPem(Path path, KeyPair keyPair, char[] passphrase) throws Exception {
-        // Write traditional encrypted PEM (DEK-Info style, e.g. "-----BEGIN RSA PRIVATE KEY-----" with Proc-Type/DEK-Info)
+    private static void writeTraditionalEncryptedPem(Path path, KeyPair keyPair, char[] passphrase) throws Exception {
         JcePEMEncryptorBuilder encBuilder = new JcePEMEncryptorBuilder("AES-256-CBC");
         encBuilder.setProvider("BC");
         try (JcaPEMWriter writer = new JcaPEMWriter(new FileWriter(path.toFile()))) {
             writer.writeObject(keyPair.getPrivate(), encBuilder.build(passphrase));
         }
+    }
+
+    private static CertBundle replaceClientKey(CertBundle base, Path newClientKey, String newPassphrase) {
+        return new CertBundle(
+                base.caCert(), base.serverKey(), base.serverCert(),
+                newClientKey, base.clientCert(),
+                newPassphrase,
+                base.baseDir(), base.clientKeyPair());
     }
 }

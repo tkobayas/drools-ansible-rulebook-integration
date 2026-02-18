@@ -42,6 +42,20 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     private static final Logger logger = LoggerFactory.getLogger(PostgreSQLStateManager.class);
 
+    /**
+     * SSL key format classification. Determines how the key file is handled:
+     * <ul>
+     *   <li>{@code PKCS12} — .p12/.pfx files, passed through to pgjdbc as-is</li>
+     *   <li>{@code DER} — .pk8/.der files, passed through to pgjdbc as-is</li>
+     *   <li>{@code PEM} — PEM files (encrypted or unencrypted), converted to temporary PKCS#12</li>
+     * </ul>
+     */
+    private enum SslKeyFormat {
+        PKCS12,
+        DER,
+        PEM
+    }
+
     private HikariDataSource dataSource;
     private String leaderId;
     private boolean isLeader = false;
@@ -77,20 +91,36 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         String sslrootcert = (String) dbParams.get("sslrootcert");
         String sslpassword = (String) dbParams.get("sslpassword");
 
-        // Convert encrypted PEM keys to PKCS#12 for pgjdbc compatibility.
-        // Conversion only happens when ALL of:
-        //   - sslkey is provided
-        //   - sslkey is not already a native format (.p12, .pfx, .pk8, .der)
-        //   - sslpassword is provided (indicates an encrypted key that pgjdbc cannot decrypt natively)
-        // Unencrypted keys (no sslpassword) are passed through to pgjdbc as-is.
-        if (sslkey != null && !sslkey.isEmpty() && needsPemConversion(sslkey)
-                && sslpassword != null && !sslpassword.isEmpty()) {
-            if (sslcert == null || sslcert.isEmpty()) {
-                throw new IllegalArgumentException("sslcert is required when converting an encrypted PEM key");
+        // Detect SSL key format and handle accordingly
+        if (sslkey != null && !sslkey.isEmpty()) {
+            SslKeyFormat format = detectSslKeyFormat(sslkey);
+            logger.info("SSL key format detected: {} for {}", format, sslkey);
+
+            switch (format) {
+                case PKCS12:
+                case DER:
+                    // Native format — passed through to pgjdbc as-is.
+                    // sslpassword is optional (pgjdbc uses it if the keystore/key is password-protected).
+                    break;
+
+                case PEM:
+                    if (sslcert == null || sslcert.isEmpty()) {
+                        throw new IllegalArgumentException(
+                                "sslcert is required when converting a PEM key to PKCS#12");
+                    }
+                    char[] passphrase;
+                    if (sslpassword != null && !sslpassword.isEmpty()) {
+                        passphrase = sslpassword.toCharArray();
+                    } else {
+                        sslpassword = UUID.randomUUID().toString();
+                        passphrase = sslpassword.toCharArray();
+                    }
+                    tempP12KeystorePath = PemToKeyStoreConverter.convertPemToP12(
+                            sslkey, sslcert, passphrase);
+                    sslkey = tempP12KeystorePath.toString();
+                    logger.info("Converted PEM key to PKCS#12 keystore");
+                    break;
             }
-            tempP12KeystorePath = PemToKeyStoreConverter.convertPemToP12(sslkey, sslcert, sslpassword.toCharArray());
-            sslkey = tempP12KeystorePath.toString();
-            logger.info("Converted PEM client key to PKCS#12 keystore for SSL connection");
         }
 
         try {
@@ -793,14 +823,18 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     }
 
     /**
-     * Check if the sslkey file needs PEM-to-P12 conversion.
-     * Files with .p12, .pfx, .pk8, or .der extensions are already in formats
-     * that pgjdbc handles natively and should not be converted.
+     * Detect the SSL key format based on file extension.
+     * PKCS#12 and DER are identified by extension; everything else is treated as PEM.
      */
-    private static boolean needsPemConversion(String sslkey) {
-        String lower = sslkey.toLowerCase();
-        return !lower.endsWith(".p12") && !lower.endsWith(".pfx")
-                && !lower.endsWith(".pk8") && !lower.endsWith(".der");
+    private static SslKeyFormat detectSslKeyFormat(String sslkeyPath) {
+        String lower = sslkeyPath.toLowerCase();
+        if (lower.endsWith(".p12") || lower.endsWith(".pfx")) {
+            return SslKeyFormat.PKCS12;
+        }
+        if (lower.endsWith(".pk8") || lower.endsWith(".der")) {
+            return SslKeyFormat.DER;
+        }
+        return SslKeyFormat.PEM;
     }
 
     private static String maskSensitiveParams(String url) {
