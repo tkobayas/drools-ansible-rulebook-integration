@@ -1,18 +1,23 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
 import java.io.FileWriter;
+import java.io.OutputStream;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.security.Security;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
@@ -26,9 +31,13 @@ import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.openssl.jcajce.JcaPKCS8Generator;
+import org.bouncycastle.openssl.jcajce.JceOpenSSLPKCS8EncryptorBuilder;
 import org.bouncycastle.openssl.jcajce.JcePEMEncryptorBuilder;
 import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.OutputEncryptor;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfoBuilder;
+import org.bouncycastle.pkcs.jcajce.JcePKCSPBEOutputEncryptorBuilder;
 
 /**
  * Generates SSL certificates at test runtime for mTLS testing with PostgreSQL.
@@ -199,14 +208,51 @@ final class SSLTestCertificateGenerator {
         return replaceClientKey(base, outputPath, null);
     }
 
-    // Future:
-    // static CertBundle withUnencryptedPkcs1PemKey(CertBundle base, Path outputPath) — BEGIN RSA PRIVATE KEY (no encryption)
-    // static CertBundle withTraditionalEncryptedPemKey(CertBundle base, Path outputPath, String passphrase) — BEGIN RSA PRIVATE KEY + DEK-Info
-    // static CertBundle withPkcs8EncryptedPemKey(CertBundle base, Path outputPath, String passphrase) — BEGIN ENCRYPTED PRIVATE KEY
-    // static CertBundle withPkcs12Key(CertBundle base, Path outputPath, String passphrase) — .p12 with password
-    // static CertBundle withPkcs12KeyNoPassword(CertBundle base, Path outputPath) — .p12 without password
-    // static CertBundle withDerUnencryptedKey(CertBundle base, Path outputPath) — .der PKCS#8 unencrypted
-    // static CertBundle withDerEncryptedKey(CertBundle base, Path outputPath, String passphrase) — .der PKCS#8 encrypted
+    /**
+     * Derive a bundle with client key as unencrypted PKCS#1 PEM: {@code -----BEGIN RSA PRIVATE KEY-----}
+     * <p>Traditional OpenSSL RSA key format without encryption.
+     */
+    static CertBundle withUnencryptedPkcs1PemKey(CertBundle base, Path outputPath) throws Exception {
+        writeUnencryptedPkcs1Pem(outputPath, base.clientKeyPair());
+        return replaceClientKey(base, outputPath, null);
+    }
+
+    /**
+     * Derive a bundle with client key as encrypted PKCS#8 PEM (PBES2): {@code -----BEGIN ENCRYPTED PRIVATE KEY-----}
+     */
+    static CertBundle withPkcs8EncryptedPemKey(CertBundle base, Path outputPath, String passphrase) throws Exception {
+        writePkcs8EncryptedPem(outputPath, base.clientKeyPair(), passphrase.toCharArray());
+        return replaceClientKey(base, outputPath, passphrase);
+    }
+
+    /**
+     * Derive a bundle with client key + cert as a PKCS#12 keystore with password.
+     * <p>Output path must end with {@code .p12} for format detection by {@code PostgreSQLStateManager}.
+     */
+    static CertBundle withPkcs12Key(CertBundle base, Path outputPath, String passphrase) throws Exception {
+        writePkcs12(outputPath, base.clientKeyPair(), base.clientCert(), passphrase.toCharArray());
+        return replaceClientKey(base, outputPath, passphrase);
+    }
+
+    /**
+     * Derive a bundle with client key + cert as a PKCS#12 keystore without password.
+     * <p>Uses empty password internally because pgjdbc's {@code PKCS12KeyManager} requires
+     * an {@code sslpassword} parameter (falls back to console callback otherwise).
+     * <p>Output path must end with {@code .p12} for format detection by {@code PostgreSQLStateManager}.
+     */
+    static CertBundle withPkcs12KeyNoPassword(CertBundle base, Path outputPath) throws Exception {
+        writePkcs12(outputPath, base.clientKeyPair(), base.clientCert(), new char[0]);
+        return replaceClientKey(base, outputPath, "");
+    }
+
+    /**
+     * Derive a bundle with client key as encrypted PKCS#8 DER (PBES2, PBKDF2-HMAC-SHA256, AES-256-CBC).
+     * <p>Output path should end with {@code .der} or {@code .pk8} for format detection by {@code PostgreSQLStateManager}.
+     */
+    static CertBundle withDerEncryptedKey(CertBundle base, Path outputPath, String passphrase) throws Exception {
+        writeDerEncryptedPkcs8(outputPath, base.clientKeyPair(), passphrase.toCharArray());
+        return replaceClientKey(base, outputPath, passphrase);
+    }
 
     /**
      * Derive a bundle with client key as unencrypted PKCS#8 DER (raw binary).
@@ -218,11 +264,56 @@ final class SSLTestCertificateGenerator {
 
     // ---- Internal key format writers ----
 
+    private static void writeUnencryptedPkcs1Pem(Path path, KeyPair keyPair) throws Exception {
+        // JcaPEMWriter.writeObject(privateKey) writes PKCS#1 (BEGIN RSA PRIVATE KEY) for RSA keys
+        try (JcaPEMWriter writer = new JcaPEMWriter(new FileWriter(path.toFile()))) {
+            writer.writeObject(keyPair.getPrivate());
+        }
+    }
+
     private static void writeUnencryptedPkcs8Pem(Path path, KeyPair keyPair) throws Exception {
         // Use JcaPKCS8Generator to produce PKCS#8 PEM (BEGIN PRIVATE KEY)
         // JcaPEMWriter.writeObject(privateKey) writes PKCS#1 (BEGIN RSA PRIVATE KEY) for RSA keys
         try (JcaPEMWriter writer = new JcaPEMWriter(new FileWriter(path.toFile()))) {
             writer.writeObject(new JcaPKCS8Generator(keyPair.getPrivate(), null));
+        }
+    }
+
+    private static void writeDerEncryptedPkcs8(Path path, KeyPair keyPair, char[] passphrase) throws Exception {
+        // PBES2 with PBKDF2-HMAC-SHA256 + AES-256-CBC
+        PrivateKeyInfo keyInfo = PrivateKeyInfo.getInstance(keyPair.getPrivate().getEncoded());
+        PKCS8EncryptedPrivateKeyInfoBuilder builder = new PKCS8EncryptedPrivateKeyInfoBuilder(keyInfo);
+        OutputEncryptor encryptor = new JcePKCSPBEOutputEncryptorBuilder(NISTObjectIdentifiers.id_aes256_CBC)
+                .setProvider("BC")
+                .build(passphrase);
+        Files.write(path, builder.build(encryptor).getEncoded());
+    }
+
+    private static void writePkcs8EncryptedPem(Path path, KeyPair keyPair, char[] passphrase) throws Exception {
+        // PBES2 with AES-256-CBC produces "BEGIN ENCRYPTED PRIVATE KEY"
+        JceOpenSSLPKCS8EncryptorBuilder encryptorBuilder =
+                new JceOpenSSLPKCS8EncryptorBuilder(NISTObjectIdentifiers.id_aes256_CBC);
+        encryptorBuilder.setProvider("BC");
+        encryptorBuilder.setPassword(passphrase);
+        OutputEncryptor encryptor = encryptorBuilder.build();
+        try (JcaPEMWriter writer = new JcaPEMWriter(new FileWriter(path.toFile()))) {
+            writer.writeObject(new JcaPKCS8Generator(keyPair.getPrivate(), encryptor));
+        }
+    }
+
+    private static void writePkcs12(Path path, KeyPair keyPair, Path clientCertPath, char[] passphrase) throws Exception {
+        // Load client certificate from PEM file
+        java.security.cert.CertificateFactory cf = java.security.cert.CertificateFactory.getInstance("X.509");
+        Certificate cert;
+        try (var is = Files.newInputStream(clientCertPath)) {
+            cert = cf.generateCertificate(is);
+        }
+
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        ks.load(null, passphrase);
+        ks.setKeyEntry("user", keyPair.getPrivate(), passphrase, new Certificate[]{cert});
+        try (OutputStream os = Files.newOutputStream(path)) {
+            ks.store(os, passphrase);
         }
     }
 

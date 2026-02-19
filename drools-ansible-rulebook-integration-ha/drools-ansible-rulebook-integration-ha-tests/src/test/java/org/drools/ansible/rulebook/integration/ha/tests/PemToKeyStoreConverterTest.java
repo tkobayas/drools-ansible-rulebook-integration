@@ -62,6 +62,99 @@ class PemToKeyStoreConverterTest {
         assertThat(p12Path).doesNotExist();
     }
 
+    // Key format: unencrypted PEM PKCS#1
+    @Test
+    void testConvertUnencryptedPkcs1PemToP12() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-pkcs1"));
+
+        // Write client key as unencrypted PKCS#1 PEM (BEGIN RSA PRIVATE KEY)
+        SSLTestCertificateGenerator.CertBundle pkcs1Bundle =
+                SSLTestCertificateGenerator.withUnencryptedPkcs1PemKey(bundle, tempDir.resolve("client-pkcs1.pem"));
+
+        // Verify the PEM file has the expected PKCS#1 header
+        String pemContent = Files.readString(pkcs1Bundle.clientKey());
+        assertThat(pemContent).contains("-----BEGIN RSA PRIVATE KEY-----");
+        assertThat(pemContent).doesNotContain("ENCRYPTED");
+        assertThat(pemContent).doesNotContain("BEGIN PRIVATE KEY"); // not PKCS#8
+
+        // Convert to P12 with a generated passphrase (no key passphrase needed for unencrypted)
+        Path p12Path = PemToKeyStoreConverter.convertPemToP12(
+                pkcs1Bundle.clientKey().toString(),
+                pkcs1Bundle.clientCert().toString(),
+                "generated-passphrase".toCharArray());
+
+        try {
+            assertThat(p12Path).exists();
+            assertThat(p12Path.toString()).endsWith(".p12");
+
+            // Verify the P12 keystore contains the correct key and certificate
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            try (var is = Files.newInputStream(p12Path)) {
+                ks.load(is, "generated-passphrase".toCharArray());
+            }
+
+            String alias = ks.aliases().nextElement();
+            assertThat(ks.isKeyEntry(alias)).isTrue();
+
+            PrivateKey key = (PrivateKey) ks.getKey(alias, "generated-passphrase".toCharArray());
+            assertThat(key).isNotNull();
+            assertThat(key.getAlgorithm()).isEqualTo("RSA");
+
+            Certificate[] chain = ks.getCertificateChain(alias);
+            assertThat(chain).isNotNull().hasSize(1);
+            X509Certificate cert = (X509Certificate) chain[0];
+            assertThat(cert.getSubjectX500Principal().getName()).contains("CN=test");
+        } finally {
+            PemToKeyStoreConverter.cleanup(p12Path);
+        }
+    }
+
+    // Key format: PKCS#8 encrypted PEM (PBES2)
+    @Test
+    void testConvertPkcs8EncryptedPemToP12() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-pkcs8enc"));
+
+        // Write client key as encrypted PKCS#8 PEM (BEGIN ENCRYPTED PRIVATE KEY)
+        SSLTestCertificateGenerator.CertBundle encBundle =
+                SSLTestCertificateGenerator.withPkcs8EncryptedPemKey(bundle, tempDir.resolve("client-pkcs8-enc.pem"),
+                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
+
+        // Verify the PEM file has the expected PKCS#8 encrypted header
+        String pemContent = Files.readString(encBundle.clientKey());
+        assertThat(pemContent).contains("-----BEGIN ENCRYPTED PRIVATE KEY-----");
+
+        // Convert to P12 using the passphrase
+        Path p12Path = PemToKeyStoreConverter.convertPemToP12(
+                encBundle.clientKey().toString(),
+                encBundle.clientCert().toString(),
+                encBundle.passphrase().toCharArray());
+
+        try {
+            assertThat(p12Path).exists();
+            assertThat(p12Path.toString()).endsWith(".p12");
+
+            // Verify the P12 keystore contains the correct key and certificate
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            try (var is = Files.newInputStream(p12Path)) {
+                ks.load(is, encBundle.passphrase().toCharArray());
+            }
+
+            String alias = ks.aliases().nextElement();
+            assertThat(ks.isKeyEntry(alias)).isTrue();
+
+            PrivateKey key = (PrivateKey) ks.getKey(alias, encBundle.passphrase().toCharArray());
+            assertThat(key).isNotNull();
+            assertThat(key.getAlgorithm()).isEqualTo("RSA");
+
+            Certificate[] chain = ks.getCertificateChain(alias);
+            assertThat(chain).isNotNull().hasSize(1);
+            X509Certificate cert = (X509Certificate) chain[0];
+            assertThat(cert.getSubjectX500Principal().getName()).contains("CN=test");
+        } finally {
+            PemToKeyStoreConverter.cleanup(p12Path);
+        }
+    }
+
     // Key format: unencrypted PEM PKCS#8
     @Test
     void testConvertUnencryptedPkcs8PemToP12() throws Exception {
@@ -104,5 +197,51 @@ class PemToKeyStoreConverterTest {
         assertThat(cert.getSubjectX500Principal().getName()).contains("CN=test");
 
         PemToKeyStoreConverter.cleanup(p12Path);
+    }
+
+    // Key format: PKCS#8 DER encrypted (PBES2, PBKDF2-HMAC-SHA256, AES-256-CBC)
+    @Test
+    void testConvertDerEncryptedToP12() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-der-enc"));
+
+        // Write client key as encrypted PKCS#8 DER
+        SSLTestCertificateGenerator.CertBundle derEncBundle =
+                SSLTestCertificateGenerator.withDerEncryptedKey(bundle, tempDir.resolve("client-enc.der"),
+                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
+
+        // Verify the file is binary DER (not PEM text)
+        byte[] derBytes = Files.readAllBytes(derEncBundle.clientKey());
+        assertThat(new String(derBytes)).doesNotContain("-----BEGIN");
+
+        // Convert encrypted DER to P12
+        Path p12Path = PemToKeyStoreConverter.convertDerToP12(
+                derEncBundle.clientKey().toString(),
+                derEncBundle.clientCert().toString(),
+                derEncBundle.passphrase().toCharArray());
+
+        try {
+            assertThat(p12Path).exists();
+            assertThat(p12Path.toString()).endsWith(".p12");
+
+            // Verify the P12 keystore contains the correct key and certificate
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            try (var is = Files.newInputStream(p12Path)) {
+                ks.load(is, derEncBundle.passphrase().toCharArray());
+            }
+
+            String alias = ks.aliases().nextElement();
+            assertThat(ks.isKeyEntry(alias)).isTrue();
+
+            PrivateKey key = (PrivateKey) ks.getKey(alias, derEncBundle.passphrase().toCharArray());
+            assertThat(key).isNotNull();
+            assertThat(key.getAlgorithm()).isEqualTo("RSA");
+
+            Certificate[] chain = ks.getCertificateChain(alias);
+            assertThat(chain).isNotNull().hasSize(1);
+            X509Certificate cert = (X509Certificate) chain[0];
+            assertThat(cert.getSubjectX500Principal().getName()).contains("CN=test");
+        } finally {
+            PemToKeyStoreConverter.cleanup(p12Path);
+        }
     }
 }
