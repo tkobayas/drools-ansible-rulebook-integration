@@ -70,7 +70,8 @@ final class SSLTestCertificateGenerator {
             Path clientCert,
             String passphrase,
             Path baseDir,
-            KeyPair clientKeyPair
+            KeyPair clientKeyPair,
+            KeyPair caKeyPair
     ) {}
 
     /**
@@ -112,7 +113,7 @@ final class SSLTestCertificateGenerator {
         writeTraditionalEncryptedPem(clientKeyPath, clientKeyPair, TEST_PASSPHRASE.toCharArray());
         writeCertPem(clientCertPath, clientCert);
 
-        return new CertBundle(caCertPath, serverKeyPath, serverCertPath, clientKeyPath, clientCertPath, TEST_PASSPHRASE, baseDir, clientKeyPair);
+        return new CertBundle(caCertPath, serverKeyPath, serverCertPath, clientKeyPath, clientCertPath, TEST_PASSPHRASE, baseDir, clientKeyPair, caKeyPair);
     }
 
     private static X509Certificate buildCACertificate(KeyPair caKeyPair) throws Exception {
@@ -167,26 +168,7 @@ final class SSLTestCertificateGenerator {
     }
 
     private static X509Certificate buildClientCertificate(KeyPair clientKeyPair, KeyPair caKeyPair, X509Certificate caCert) throws Exception {
-        X500Name issuer = new X500Name("CN=Test CA");
-        // CN=test matches the PostgreSQL role name used in tests
-        X500Name subject = new X500Name("CN=test");
-        Instant now = Instant.now();
-        Date notBefore = Date.from(now);
-        Date notAfter = Date.from(now.plus(Duration.ofDays(365)));
-
-        X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
-                issuer,
-                BigInteger.valueOf(3),
-                notBefore, notAfter,
-                subject,
-                clientKeyPair.getPublic()
-        );
-        builder.addExtension(Extension.keyUsage, true,
-                new KeyUsage(KeyUsage.digitalSignature));
-
-        ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA").build(caKeyPair.getPrivate());
-        X509CertificateHolder holder = builder.build(signer);
-        return new JcaX509CertificateConverter().getCertificate(holder);
+        return buildClientCertificate(clientKeyPair, caKeyPair, caCert, "test");
     }
 
     private static void writeCertPem(Path path, X509Certificate cert) throws Exception {
@@ -330,6 +312,68 @@ final class SSLTestCertificateGenerator {
                 base.caCert(), base.serverKey(), base.serverCert(),
                 newClientKey, base.clientCert(),
                 newPassphrase,
-                base.baseDir(), base.clientKeyPair());
+                base.baseDir(), base.clientKeyPair(), base.caKeyPair());
+    }
+
+    /**
+     * Derive a bundle with a new client certificate using a different CN.
+     * The new client cert is signed by the same CA as the original bundle.
+     * The client key is in traditional encrypted PEM format (same as default {@link #generate}).
+     *
+     * @param base      the original bundle (provides CA key pair for signing)
+     * @param cn        the CN for the new client certificate (e.g., "wronguser")
+     * @param outputDir directory to write the new client key and cert files
+     * @return a new CertBundle with the replaced client key/cert
+     */
+    static CertBundle withClientCN(CertBundle base, String cn, Path outputDir) throws Exception {
+        Files.createDirectories(outputDir);
+
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("RSA");
+        keyGen.initialize(2048, new SecureRandom());
+        KeyPair newClientKeyPair = keyGen.generateKeyPair();
+
+        // Load the CA certificate from the base bundle
+        java.security.cert.CertificateFactory cf = java.security.cert.CertificateFactory.getInstance("X.509");
+        X509Certificate caCert;
+        try (var is = Files.newInputStream(base.caCert())) {
+            caCert = (X509Certificate) cf.generateCertificate(is);
+        }
+
+        X509Certificate newClientCert = buildClientCertificate(newClientKeyPair, base.caKeyPair(), caCert, cn);
+
+        Path newClientKeyPath = outputDir.resolve("client.key");
+        Path newClientCertPath = outputDir.resolve("client.crt");
+
+        writeTraditionalEncryptedPem(newClientKeyPath, newClientKeyPair, TEST_PASSPHRASE.toCharArray());
+        writeCertPem(newClientCertPath, newClientCert);
+
+        return new CertBundle(
+                base.caCert(), base.serverKey(), base.serverCert(),
+                newClientKeyPath, newClientCertPath,
+                TEST_PASSPHRASE,
+                outputDir, newClientKeyPair, base.caKeyPair());
+    }
+
+    private static X509Certificate buildClientCertificate(KeyPair clientKeyPair, KeyPair caKeyPair,
+                                                          X509Certificate caCert, String cn) throws Exception {
+        X500Name issuer = new X500Name("CN=Test CA");
+        X500Name subject = new X500Name("CN=" + cn);
+        Instant now = Instant.now();
+        Date notBefore = Date.from(now);
+        Date notAfter = Date.from(now.plus(Duration.ofDays(365)));
+
+        X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
+                issuer,
+                BigInteger.valueOf(System.nanoTime()),
+                notBefore, notAfter,
+                subject,
+                clientKeyPair.getPublic()
+        );
+        builder.addExtension(Extension.keyUsage, true,
+                new KeyUsage(KeyUsage.digitalSignature));
+
+        ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA").build(caKeyPair.getPrivate());
+        X509CertificateHolder holder = builder.build(signer);
+        return new JcaX509CertificateConverter().getCertificate(holder);
     }
 }
