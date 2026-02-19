@@ -311,6 +311,24 @@ class HAPostgresSSLTest {
         }
     }
 
+    // Client certificate CN mismatch: CN=wronguser doesn't match any PostgreSQL role
+    @Test
+    void testClientCertCNMismatchRejected() throws Exception {
+        SSLTestCertificateGenerator.CertBundle wrongCnBundle =
+                SSLTestCertificateGenerator.withClientCN(bundle, "wronguser", tempDir.resolve("wrong-cn"));
+
+        String haUuid = "ssl-test-wrong-cn";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", wrongCnBundle.clientKey().toString());
+        dbParams.put("sslcert", wrongCnBundle.clientCert().toString());
+        dbParams.put("sslpassword", wrongCnBundle.passphrase());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        assertThatThrownBy(() ->
+                stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
+                .isInstanceOf(RuntimeException.class);
+    }
+
     private Map<String, Object> buildBaseDbParams() {
         Map<String, Object> dbParams = new HashMap<>();
         dbParams.put("db_type", "postgres");
