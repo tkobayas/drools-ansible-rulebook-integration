@@ -13,6 +13,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +60,32 @@ class HAPostgresSSLTest {
     void testSSLConnectionWithEncryptedPemKey() throws Exception {
         String haUuid = "ssl-test-encrypted-pem";
         Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", bundle.passphrase());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
+    // Key format: Traditional OpenSSL PEM encryption, varying sslmode
+    // pg_hba.conf allows both SSL (cert auth) and non-SSL (scram-sha-256) for user 'test',
+    // so all sslmode values should succeed:
+    //   disable/allow  -> non-SSL with password auth (client cert params ignored)
+    //   prefer/require/verify-ca/verify-full -> SSL with client certificate auth
+    @ParameterizedTest(name = "sslmode={0}")
+    @ValueSource(strings = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"})
+    void testSSLConnectionWithSslMode(String sslmode) throws Exception {
+        String haUuid = "ssl-test-sslmode-" + sslmode;
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslmode", sslmode);
         dbParams.put("sslkey", bundle.clientKey().toString());
         dbParams.put("sslcert", bundle.clientCert().toString());
         dbParams.put("sslpassword", bundle.passphrase());
@@ -242,7 +270,7 @@ class HAPostgresSSLTest {
         dbParams.put("database", sslPostgres.getDatabaseName());
         dbParams.put("user", sslPostgres.getUsername());
         dbParams.put("password", sslPostgres.getPassword());
-        dbParams.put("sslmode", "verify-ca");
+        dbParams.put("sslmode", "verify-full");
         dbParams.put("sslrootcert", bundle.caCert().toString());
         return dbParams;
     }
