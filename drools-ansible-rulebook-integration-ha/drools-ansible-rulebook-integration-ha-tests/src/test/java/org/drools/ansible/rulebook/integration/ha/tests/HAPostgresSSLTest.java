@@ -18,6 +18,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Integration test for SSL/mTLS connection to PostgreSQL via HAStateManager.
@@ -250,6 +251,54 @@ class HAPostgresSSLTest {
         Map<String, Object> dbParams = buildBaseDbParams();
         dbParams.put("sslkey", pkcs8Bundle.clientKey().toString());
         dbParams.put("sslcert", bundle.clientCert().toString());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
+    // Wrong CA: verify-ca and verify-full should reject the untrusted server cert
+    @ParameterizedTest(name = "sslmode={0} with wrong CA should fail")
+    @ValueSource(strings = {"verify-ca", "verify-full"})
+    void testWrongCARejectedByVerifyModes(String sslmode) throws Exception {
+        // Generate a second, unrelated CA
+        SSLTestCertificateGenerator.CertBundle wrongCaBundle =
+                SSLTestCertificateGenerator.generate(tempDir.resolve("wrong-ca-" + sslmode));
+
+        String haUuid = "ssl-test-wrong-ca-" + sslmode;
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslmode", sslmode);
+        dbParams.put("sslrootcert", wrongCaBundle.caCert().toString()); // wrong CA
+        dbParams.put("sslkey", bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", bundle.passphrase());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        assertThatThrownBy(() ->
+                stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    // Wrong CA: require mode does not verify server cert, so it should still succeed
+    @Test
+    void testWrongCAAcceptedByRequireMode() throws Exception {
+        // Generate a second, unrelated CA
+        SSLTestCertificateGenerator.CertBundle wrongCaBundle =
+                SSLTestCertificateGenerator.generate(tempDir.resolve("wrong-ca-require"));
+
+        String haUuid = "ssl-test-wrong-ca-require";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslmode", "require");
+        dbParams.put("sslrootcert", wrongCaBundle.caCert().toString()); // wrong CA, but require doesn't check
+        dbParams.put("sslkey", bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", bundle.passphrase());
 
         HAStateManager stateManager = HAStateManagerFactory.create("postgres");
         try {
