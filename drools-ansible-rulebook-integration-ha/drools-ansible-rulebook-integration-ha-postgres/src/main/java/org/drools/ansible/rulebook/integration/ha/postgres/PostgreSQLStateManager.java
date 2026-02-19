@@ -50,7 +50,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
      *   <li>{@code PEM} — PEM files (encrypted or unencrypted), converted to temporary PKCS#12</li>
      * </ul>
      */
-    private enum SslKeyFormat {
+    public enum SslKeyFormat {
         PKCS12,
         DER,
         PEM
@@ -843,7 +843,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
      * Detect the SSL key format based on file extension.
      * PKCS#12 and DER are identified by extension; everything else is treated as PEM.
      */
-    private static SslKeyFormat detectSslKeyFormat(String sslkeyPath) {
+    public static SslKeyFormat detectSslKeyFormat(String sslkeyPath) {
         String lower = sslkeyPath.toLowerCase();
         if (lower.endsWith(".p12") || lower.endsWith(".pfx")) {
             return SslKeyFormat.PKCS12;
