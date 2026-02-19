@@ -329,6 +329,27 @@ class HAPostgresSSLTest {
                 .isInstanceOf(RuntimeException.class);
     }
 
+    // Unencrypted DER + sslpassword: PostgreSQLStateManager assumes DER is encrypted when
+    // sslpassword is provided, so it tries to decrypt the unencrypted file and fails.
+    // This documents a known heuristic limitation.
+    @Test
+    void testUnencryptedDerWithSslpasswordFails() throws Exception {
+        SSLTestCertificateGenerator.CertBundle derBundle =
+                SSLTestCertificateGenerator.withDerUnencryptedKey(bundle, tempDir.resolve("client-unenc-limit.der"));
+
+        String haUuid = "ssl-test-der-unenc-limit";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", derBundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", "some-passphrase"); // triggers encrypted DER path
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        assertThatThrownBy(() ->
+                stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to convert encrypted DER to PKCS#12 keystore");
+    }
+
     // Wrong passphrase for the traditional encrypted PEM key
     @Test
     void testWrongPassphraseForEncryptedKey() throws Exception {
