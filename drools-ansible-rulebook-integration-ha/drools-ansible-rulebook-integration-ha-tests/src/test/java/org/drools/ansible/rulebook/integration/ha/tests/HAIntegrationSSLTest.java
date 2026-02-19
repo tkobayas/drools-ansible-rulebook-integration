@@ -138,7 +138,7 @@ class HAIntegrationSSLTest {
         params.put("database", sslPostgres.getDatabaseName());
         params.put("user", sslPostgres.getUsername());
         params.put("password", sslPostgres.getPassword());
-        params.put("sslmode", "verify-ca");
+        params.put("sslmode", "verify-full");
         params.put("sslrootcert", bundle.caCert().toString());
         params.put("sslcert", bundle.clientCert().toString());
         params.put("sslkey", bundle.clientKey().toString());

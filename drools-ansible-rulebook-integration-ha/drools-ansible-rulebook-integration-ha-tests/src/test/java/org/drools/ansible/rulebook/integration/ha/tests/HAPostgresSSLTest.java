@@ -390,6 +390,22 @@ class HAPostgresSSLTest {
         assertThat(stateManager.getTempP12KeystorePath()).isNull();
     }
 
+    // Missing client certificate: sslmode=require without sslkey/sslcert.
+    // pg_hba.conf's "hostssl all test ... cert" rule requires a client cert,
+    // so the connection is rejected.
+    @Test
+    void testMissingClientCertificateRejected() throws Exception {
+        String haUuid = "ssl-test-no-client-cert";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslmode", "require");
+        // Deliberately omit sslkey and sslcert
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        assertThatThrownBy(() ->
+                stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
+                .isInstanceOf(RuntimeException.class);
+    }
+
     private Map<String, Object> buildBaseDbParams() {
         Map<String, Object> dbParams = new HashMap<>();
         dbParams.put("db_type", "postgres");
