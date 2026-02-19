@@ -329,6 +329,21 @@ class HAPostgresSSLTest {
                 .isInstanceOf(RuntimeException.class);
     }
 
+    // Wrong passphrase for the traditional encrypted PEM key
+    @Test
+    void testWrongPassphraseForEncryptedKey() throws Exception {
+        String haUuid = "ssl-test-wrong-passphrase";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", "wrong-passphrase");
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        assertThatThrownBy(() ->
+                stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
+                .isInstanceOf(RuntimeException.class);
+    }
+
     private Map<String, Object> buildBaseDbParams() {
         Map<String, Object> dbParams = new HashMap<>();
         dbParams.put("db_type", "postgres");
