@@ -98,9 +98,26 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
             switch (format) {
                 case PKCS12:
+                    // pgjdbc's PKCS12KeyManager requires sslpassword; without it, pgjdbc
+                    // falls back to a console callback that fails in headless environments.
+                    if (sslpassword == null) {
+                        sslpassword = "";
+                    }
+                    break;
                 case DER:
-                    // Native format — passed through to pgjdbc as-is.
-                    // sslpassword is optional (pgjdbc uses it if the keystore/key is password-protected).
+                    // Unencrypted DER is passed through to pgjdbc as-is.
+                    // Encrypted DER (PBES2) must be converted to PKCS#12 because pgjdbc's
+                    // LazyKeyManager cannot decrypt PBES2 (JDK lacks "PBES2" cipher support).
+                    if (sslpassword != null && !sslpassword.isEmpty()) {
+                        if (sslcert == null || sslcert.isEmpty()) {
+                            throw new IllegalArgumentException(
+                                    "sslcert is required when converting an encrypted DER key to PKCS#12");
+                        }
+                        tempP12KeystorePath = PemToKeyStoreConverter.convertDerToP12(
+                                sslkey, sslcert, sslpassword.toCharArray());
+                        sslkey = tempP12KeystorePath.toString();
+                        logger.info("Converted encrypted DER key to PKCS#12 keystore");
+                    }
                     break;
 
                 case PEM:
@@ -132,7 +149,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             if (sslkey != null && !sslkey.isEmpty()) {
                 jdbcUrlBuilder.append("&sslkey=").append(URLEncoder.encode(sslkey, StandardCharsets.UTF_8));
             }
-            if (sslpassword != null && !sslpassword.isEmpty()) {
+            if (sslpassword != null) {
                 jdbcUrlBuilder.append("&sslpassword=").append(URLEncoder.encode(sslpassword, StandardCharsets.UTF_8));
             }
             if (sslcert != null && !sslcert.isEmpty()) {

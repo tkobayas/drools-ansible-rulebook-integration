@@ -73,6 +73,77 @@ class HAPostgresSSLTest {
         }
     }
 
+    // Key format: PKCS#12 with password
+    @Test
+    void testSSLConnectionWithPkcs12Key() throws Exception {
+        SSLTestCertificateGenerator.CertBundle p12Bundle =
+                SSLTestCertificateGenerator.withPkcs12Key(bundle, tempDir.resolve("client.p12"),
+                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
+
+        String haUuid = "ssl-test-p12";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", p12Bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", p12Bundle.passphrase());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
+    // Key format: PKCS#12 without password
+    @Test
+    void testSSLConnectionWithPkcs12KeyNoPassword() throws Exception {
+        SSLTestCertificateGenerator.CertBundle p12Bundle =
+                SSLTestCertificateGenerator.withPkcs12KeyNoPassword(bundle, tempDir.resolve("client-nopass.p12"));
+
+        String haUuid = "ssl-test-p12-nopass";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", p12Bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", p12Bundle.passphrase());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
+    // Key format: PKCS#8 DER encrypted (PBES2, PBKDF2-HMAC-SHA256, AES-256-CBC)
+    @Test
+    void testSSLConnectionWithDerEncryptedKey() throws Exception {
+        SSLTestCertificateGenerator.CertBundle derEncBundle =
+                SSLTestCertificateGenerator.withDerEncryptedKey(bundle, tempDir.resolve("client-enc.der"),
+                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
+
+        String haUuid = "ssl-test-der-encrypted";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", derEncBundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", derEncBundle.passphrase());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
     // Key format: PKCS#8 DER unencrypted
     @Test
     void testSSLConnectionWithDerKey() throws Exception {
@@ -83,6 +154,52 @@ class HAPostgresSSLTest {
         Map<String, Object> dbParams = buildBaseDbParams();
         dbParams.put("sslkey", derBundle.clientKey().toString());
         dbParams.put("sslcert", bundle.clientCert().toString());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
+    // Key format: unencrypted PEM PKCS#1
+    @Test
+    void testSSLConnectionWithUnencryptedPkcs1PemKey() throws Exception {
+        SSLTestCertificateGenerator.CertBundle pkcs1Bundle =
+                SSLTestCertificateGenerator.withUnencryptedPkcs1PemKey(bundle, tempDir.resolve("client-pkcs1.pem"));
+
+        String haUuid = "ssl-test-unencrypted-pkcs1-pem";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", pkcs1Bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        try {
+            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+            stateManager.enableLeader();
+
+            verifyBasicOperations(stateManager, haUuid);
+        } finally {
+            stateManager.shutdown();
+        }
+    }
+
+    // Key format: PKCS#8 encrypted PEM (PBES2)
+    @Test
+    void testSSLConnectionWithPkcs8EncryptedPemKey() throws Exception {
+        SSLTestCertificateGenerator.CertBundle encBundle =
+                SSLTestCertificateGenerator.withPkcs8EncryptedPemKey(bundle, tempDir.resolve("client-pkcs8-enc.pem"),
+                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
+
+        String haUuid = "ssl-test-pkcs8-encrypted-pem";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", encBundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", encBundle.passphrase());
 
         HAStateManager stateManager = HAStateManagerFactory.create("postgres");
         try {

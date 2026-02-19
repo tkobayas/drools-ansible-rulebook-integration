@@ -61,26 +61,51 @@ public final class PemToKeyStoreConverter {
         try {
             PrivateKey privateKey = readPrivateKey(pemKeyPath, passphrase);
             Certificate[] certChain = readCertificateChain(pemCertPath);
-
-            KeyStore keyStore = KeyStore.getInstance("PKCS12");
-            keyStore.load(null, passphrase);
-            keyStore.setKeyEntry("user", privateKey, passphrase, certChain);
-
-            Path tempDir = Files.createTempDirectory("drools-ha-ssl-");
-            Path p12Path = tempDir.resolve("client-keystore.p12");
-            try (OutputStream os = Files.newOutputStream(p12Path)) {
-                keyStore.store(os, passphrase);
-            }
-
-            // Safety net: delete on JVM exit
-            p12Path.toFile().deleteOnExit();
-            tempDir.toFile().deleteOnExit();
-
-            logger.info("Created temporary PKCS#12 keystore at {}", p12Path);
-            return p12Path;
+            return buildP12Keystore(privateKey, certChain, passphrase);
         } catch (Exception e) {
             throw new RuntimeException("Failed to convert PEM to PKCS#12 keystore", e);
         }
+    }
+
+    /**
+     * Convert an encrypted PKCS#8 DER private key and certificate to a PKCS#12 keystore file.
+     * <p>
+     * pgjdbc's {@code LazyKeyManager} cannot decrypt PBES2-encrypted DER keys because the
+     * standard JDK does not support "PBES2" as a cipher name. This method uses BouncyCastle
+     * to decrypt the key and package it into a PKCS#12 keystore that pgjdbc can use.
+     *
+     * @param derKeyPath  path to the encrypted PKCS#8 DER private key file
+     * @param pemCertPath path to the PEM client certificate file
+     * @param passphrase  passphrase for the encrypted key (also used as the PKCS#12 keystore password)
+     * @return path to the temporary .p12 keystore file
+     */
+    public static Path convertDerToP12(String derKeyPath, String pemCertPath, char[] passphrase) {
+        try {
+            PrivateKey privateKey = readDerPrivateKey(derKeyPath, passphrase);
+            Certificate[] certChain = readCertificateChain(pemCertPath);
+            return buildP12Keystore(privateKey, certChain, passphrase);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to convert encrypted DER to PKCS#12 keystore", e);
+        }
+    }
+
+    private static Path buildP12Keystore(PrivateKey privateKey, Certificate[] certChain, char[] passphrase) throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("PKCS12");
+        keyStore.load(null, passphrase);
+        keyStore.setKeyEntry("user", privateKey, passphrase, certChain);
+
+        Path tempDir = Files.createTempDirectory("drools-ha-ssl-");
+        Path p12Path = tempDir.resolve("client-keystore.p12");
+        try (OutputStream os = Files.newOutputStream(p12Path)) {
+            keyStore.store(os, passphrase);
+        }
+
+        // Safety net: delete on JVM exit
+        p12Path.toFile().deleteOnExit();
+        tempDir.toFile().deleteOnExit();
+
+        logger.info("Created temporary PKCS#12 keystore at {}", p12Path);
+        return p12Path;
     }
 
     /**
@@ -100,6 +125,16 @@ public final class PemToKeyStoreConverter {
         } catch (IOException e) {
             logger.warn("Failed to clean up temporary PKCS#12 keystore at {}: {}", p12Path, e.getMessage());
         }
+    }
+
+    private static PrivateKey readDerPrivateKey(String derKeyPath, char[] passphrase) throws Exception {
+        byte[] derBytes = Files.readAllBytes(Path.of(derKeyPath));
+        JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
+
+        PKCS8EncryptedPrivateKeyInfo encryptedInfo = new PKCS8EncryptedPrivateKeyInfo(derBytes);
+        InputDecryptorProvider decryptor = new JceOpenSSLPKCS8DecryptorProviderBuilder().build(passphrase);
+        PrivateKeyInfo keyInfo = encryptedInfo.decryptPrivateKeyInfo(decryptor);
+        return converter.getPrivateKey(keyInfo);
     }
 
     private static PrivateKey readPrivateKey(String pemKeyPath, char[] passphrase) throws Exception {
