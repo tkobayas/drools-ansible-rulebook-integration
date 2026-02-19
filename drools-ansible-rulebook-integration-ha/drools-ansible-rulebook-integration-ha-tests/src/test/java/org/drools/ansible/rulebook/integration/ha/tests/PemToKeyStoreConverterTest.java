@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Unit tests for PEM-to-PKCS#12 key conversion.
@@ -243,5 +244,88 @@ class PemToKeyStoreConverterTest {
         } finally {
             PemToKeyStoreConverter.cleanup(p12Path);
         }
+    }
+
+    // --- Negative tests ---
+
+    @Test
+    void testCorruptedPemFile() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-corrupt"));
+
+        // Write garbage data as a PEM key file
+        Path corruptKey = tempDir.resolve("corrupt.pem");
+        Files.writeString(corruptKey, "not a valid PEM file at all\ngarbage data\n");
+
+        assertThatThrownBy(() -> PemToKeyStoreConverter.convertPemToP12(
+                corruptKey.toString(),
+                bundle.clientCert().toString(),
+                "passphrase".toCharArray()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to convert PEM to PKCS#12 keystore");
+    }
+
+    @Test
+    void testWrongPassphrase() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-wrongpass"));
+
+        // The default bundle has a traditional encrypted PEM key with TEST_PASSPHRASE
+        assertThatThrownBy(() -> PemToKeyStoreConverter.convertPemToP12(
+                bundle.clientKey().toString(),
+                bundle.clientCert().toString(),
+                "wrong-passphrase".toCharArray()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to convert PEM to PKCS#12 keystore");
+    }
+
+    @Test
+    void testEmptyCertificateFile() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-emptycert"));
+
+        // Create an empty certificate file
+        Path emptyCert = tempDir.resolve("empty.crt");
+        Files.writeString(emptyCert, "");
+
+        assertThatThrownBy(() -> PemToKeyStoreConverter.convertPemToP12(
+                bundle.clientKey().toString(),
+                emptyCert.toString(),
+                bundle.passphrase().toCharArray()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to convert PEM to PKCS#12 keystore")
+                .cause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No certificates found in");
+    }
+
+    @Test
+    void testCorruptedDerFile() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-corrupt-der"));
+
+        // Write garbage bytes as a DER key file
+        Path corruptDer = tempDir.resolve("corrupt.der");
+        Files.write(corruptDer, new byte[]{0x30, 0x00, 0x01, 0x02, 0x03});
+
+        assertThatThrownBy(() -> PemToKeyStoreConverter.convertDerToP12(
+                corruptDer.toString(),
+                bundle.clientCert().toString(),
+                "passphrase".toCharArray()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to convert encrypted DER to PKCS#12 keystore");
+    }
+
+    @Test
+    void testUnsupportedPemObjectType() throws Exception {
+        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-unsupported"));
+
+        // Pass the certificate file as the key file — PEMParser will parse it as
+        // X509CertificateHolder, which is not a supported key type
+        assertThatThrownBy(() -> PemToKeyStoreConverter.convertPemToP12(
+                bundle.clientCert().toString(),
+                bundle.clientCert().toString(),
+                "passphrase".toCharArray()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Failed to convert PEM to PKCS#12 keystore")
+                .cause()
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unsupported PEM object type");
     }
 }
