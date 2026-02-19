@@ -67,6 +67,14 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     public PostgreSQLStateManager() {
     }
 
+    /**
+     * Returns the path to the temporary PKCS#12 keystore file created during SSL key conversion,
+     * or {@code null} if no conversion was performed.
+     */
+    public Path getTempP12KeystorePath() {
+        return tempP12KeystorePath;
+    }
+
     @Override
     public void initializeHA(String uuid, String workerName, Map<String, Object> dbParams, Map<String, Object> config) {
         logger.info("Initializing PostgreSQL HA mode with UUID: {}, workerName: {}", uuid, workerName);

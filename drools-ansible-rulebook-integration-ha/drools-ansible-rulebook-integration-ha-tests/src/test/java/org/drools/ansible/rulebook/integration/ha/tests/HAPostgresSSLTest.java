@@ -7,6 +7,7 @@ import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
+import org.drools.ansible.rulebook.integration.ha.postgres.PostgreSQLStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.junit.jupiter.api.AfterAll;
@@ -363,6 +364,30 @@ class HAPostgresSSLTest {
         assertThatThrownBy(() ->
                 stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
                 .isInstanceOf(RuntimeException.class);
+    }
+
+    // Temp P12 cleanup: after initializeHA() with a PEM key, a temp .p12 file is created.
+    // After shutdown(), the temp file should be deleted.
+    @Test
+    void testTempP12CleanupOnShutdown() throws Exception {
+        String haUuid = "ssl-test-p12-cleanup";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", bundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+        dbParams.put("sslpassword", bundle.passphrase());
+
+        PostgreSQLStateManager stateManager = (PostgreSQLStateManager) HAStateManagerFactory.create("postgres");
+        stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
+
+        Path tempP12 = stateManager.getTempP12KeystorePath();
+        assertThat(tempP12).isNotNull();
+        assertThat(tempP12).exists();
+
+        stateManager.shutdown();
+
+        assertThat(tempP12).doesNotExist();
+        assertThat(tempP12.getParent()).doesNotExist();
+        assertThat(stateManager.getTempP12KeystorePath()).isNull();
     }
 
     private Map<String, Object> buildBaseDbParams() {
