@@ -103,99 +103,6 @@ class HAPostgresSSLTest {
         }
     }
 
-    // Key format: PKCS#12 with password
-    @Test
-    void testSSLConnectionWithPkcs12Key() throws Exception {
-        SSLTestCertificateGenerator.CertBundle p12Bundle =
-                SSLTestCertificateGenerator.withPkcs12Key(bundle, tempDir.resolve("client.p12"),
-                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
-
-        String haUuid = "ssl-test-p12";
-        Map<String, Object> dbParams = buildBaseDbParams();
-        dbParams.put("sslkey", p12Bundle.clientKey().toString());
-        dbParams.put("sslcert", bundle.clientCert().toString());
-        dbParams.put("sslpassword", p12Bundle.passphrase());
-
-        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
-        try {
-            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
-            stateManager.enableLeader();
-
-            verifyBasicOperations(stateManager, haUuid);
-        } finally {
-            stateManager.shutdown();
-        }
-    }
-
-    // Key format: PKCS#12 without password
-    @Test
-    void testSSLConnectionWithPkcs12KeyNoPassword() throws Exception {
-        SSLTestCertificateGenerator.CertBundle p12Bundle =
-                SSLTestCertificateGenerator.withPkcs12KeyNoPassword(bundle, tempDir.resolve("client-nopass.p12"));
-
-        String haUuid = "ssl-test-p12-nopass";
-        Map<String, Object> dbParams = buildBaseDbParams();
-        dbParams.put("sslkey", p12Bundle.clientKey().toString());
-        dbParams.put("sslcert", bundle.clientCert().toString());
-        dbParams.put("sslpassword", p12Bundle.passphrase());
-
-        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
-        try {
-            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
-            stateManager.enableLeader();
-
-            verifyBasicOperations(stateManager, haUuid);
-        } finally {
-            stateManager.shutdown();
-        }
-    }
-
-    // Key format: PKCS#8 DER encrypted (PBES2, PBKDF2-HMAC-SHA256, AES-256-CBC)
-    @Test
-    void testSSLConnectionWithDerEncryptedKey() throws Exception {
-        SSLTestCertificateGenerator.CertBundle derEncBundle =
-                SSLTestCertificateGenerator.withDerEncryptedKey(bundle, tempDir.resolve("client-enc.der"),
-                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
-
-        String haUuid = "ssl-test-der-encrypted";
-        Map<String, Object> dbParams = buildBaseDbParams();
-        dbParams.put("sslkey", derEncBundle.clientKey().toString());
-        dbParams.put("sslcert", bundle.clientCert().toString());
-        dbParams.put("sslpassword", derEncBundle.passphrase());
-
-        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
-        try {
-            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
-            stateManager.enableLeader();
-
-            verifyBasicOperations(stateManager, haUuid);
-        } finally {
-            stateManager.shutdown();
-        }
-    }
-
-    // Key format: PKCS#8 DER unencrypted
-    @Test
-    void testSSLConnectionWithDerKey() throws Exception {
-        SSLTestCertificateGenerator.CertBundle derBundle =
-                SSLTestCertificateGenerator.withDerUnencryptedKey(bundle, tempDir.resolve("client.der"));
-
-        String haUuid = "ssl-test-der";
-        Map<String, Object> dbParams = buildBaseDbParams();
-        dbParams.put("sslkey", derBundle.clientKey().toString());
-        dbParams.put("sslcert", bundle.clientCert().toString());
-
-        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
-        try {
-            stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1));
-            stateManager.enableLeader();
-
-            verifyBasicOperations(stateManager, haUuid);
-        } finally {
-            stateManager.shutdown();
-        }
-    }
-
     // Key format: unencrypted PEM PKCS#1
     @Test
     void testSSLConnectionWithUnencryptedPkcs1PemKey() throws Exception {
@@ -330,25 +237,42 @@ class HAPostgresSSLTest {
                 .isInstanceOf(RuntimeException.class);
     }
 
-    // Unencrypted DER + sslpassword: PostgreSQLStateManager assumes DER is encrypted when
-    // sslpassword is provided, so it tries to decrypt the unencrypted file and fails.
-    // This documents a known heuristic limitation.
+    // PKCS#12 format is not supported — should throw UnsupportedOperationException
     @Test
-    void testUnencryptedDerWithSslpasswordFails() throws Exception {
-        SSLTestCertificateGenerator.CertBundle derBundle =
-                SSLTestCertificateGenerator.withDerUnencryptedKey(bundle, tempDir.resolve("client-unenc-limit.der"));
+    void testPkcs12KeyFormatRejected() throws Exception {
+        SSLTestCertificateGenerator.CertBundle p12Bundle =
+                SSLTestCertificateGenerator.withPkcs12Key(bundle, tempDir.resolve("client-rejected.p12"),
+                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
 
-        String haUuid = "ssl-test-der-unenc-limit";
+        String haUuid = "ssl-test-p12-rejected";
         Map<String, Object> dbParams = buildBaseDbParams();
-        dbParams.put("sslkey", derBundle.clientKey().toString());
+        dbParams.put("sslkey", p12Bundle.clientKey().toString());
         dbParams.put("sslcert", bundle.clientCert().toString());
-        dbParams.put("sslpassword", "some-passphrase"); // triggers encrypted DER path
+        dbParams.put("sslpassword", p12Bundle.passphrase());
 
         HAStateManager stateManager = HAStateManagerFactory.create("postgres");
         assertThatThrownBy(() ->
                 stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Failed to convert encrypted DER to PKCS#12 keystore");
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("PKCS#12 format (.p12/.pfx) is not supported");
+    }
+
+    // DER format is not supported — should throw UnsupportedOperationException
+    @Test
+    void testDerKeyFormatRejected() throws Exception {
+        SSLTestCertificateGenerator.CertBundle derBundle =
+                SSLTestCertificateGenerator.withDerUnencryptedKey(bundle, tempDir.resolve("client-rejected.der"));
+
+        String haUuid = "ssl-test-der-rejected";
+        Map<String, Object> dbParams = buildBaseDbParams();
+        dbParams.put("sslkey", derBundle.clientKey().toString());
+        dbParams.put("sslcert", bundle.clientCert().toString());
+
+        HAStateManager stateManager = HAStateManagerFactory.create("postgres");
+        assertThatThrownBy(() ->
+                stateManager.initializeHA(haUuid, WORKER_NAME, dbParams, Map.of("write_after", 1)))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("DER format (.pk8/.der) is not supported");
     }
 
     // Wrong passphrase for the traditional encrypted PEM key
