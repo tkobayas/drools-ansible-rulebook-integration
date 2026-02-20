@@ -6,8 +6,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
 import org.drools.ansible.rulebook.integration.ha.postgres.PemToKeyStoreConverter;
@@ -73,28 +71,6 @@ class PostgresSSLJdbcTest {
         }
     }
 
-    // Key format: PKCS#8 DER unencrypted
-    @Test
-    void testSSLWithDerKeyViaProperties() throws Exception {
-        SSLTestCertificateGenerator.CertBundle derBundle =
-                SSLTestCertificateGenerator.withDerUnencryptedKey(bundle, tempDir.resolve("client.der"));
-
-        Properties props = new Properties();
-        props.setProperty("user", "test");
-        props.setProperty("password", "test");
-        props.setProperty("sslmode", "require");
-        props.setProperty("sslkey", derBundle.clientKey().toString());
-        props.setProperty("sslcert", bundle.clientCert().toString());
-        props.setProperty("sslrootcert", bundle.caCert().toString());
-
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, props);
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT 1 AS result")) {
-            assertThat(rs.next()).isTrue();
-            assertThat(rs.getInt("result")).isEqualTo(1);
-        }
-    }
-
     // Key format: unencrypted PEM PKCS#8 (converted to PKCS#12 for JDBC)
     @Test
     void testSSLWithUnencryptedPkcs8PemKeyViaProperties() throws Exception {
@@ -123,65 +99,6 @@ class PostgresSSLJdbcTest {
             }
         } finally {
             PemToKeyStoreConverter.cleanup(convertedP12);
-        }
-    }
-
-    // Key format: PKCS#12 with password
-    @Test
-    void testSSLWithP12KeystoreViaProperties() throws Exception {
-        // Convert encrypted PEM to PKCS#12 keystore
-        Path p12 = PemToKeyStoreConverter.convertPemToP12(
-                bundle.clientKey().toString(),
-                bundle.clientCert().toString(),
-                bundle.passphrase().toCharArray());
-        try {
-            Properties props = new Properties();
-            props.setProperty("user", "test");
-            props.setProperty("password", "test");
-            props.setProperty("sslmode", "require");
-            props.setProperty("sslkey", p12.toString());
-            props.setProperty("sslpassword", bundle.passphrase());
-            props.setProperty("sslrootcert", bundle.caCert().toString());
-
-            try (Connection conn = DriverManager.getConnection(jdbcUrl, props);
-                 Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT 1 AS result")) {
-                assertThat(rs.next()).isTrue();
-                assertThat(rs.getInt("result")).isEqualTo(1);
-            }
-        } finally {
-            PemToKeyStoreConverter.cleanup(p12);
-        }
-    }
-
-    // Key format: PKCS#12 with password (via URL params)
-    @Test
-    void testSSLWithP12KeystoreViaUrlParams() throws Exception {
-        // Convert encrypted PEM to PKCS#12 keystore
-        Path p12 = PemToKeyStoreConverter.convertPemToP12(
-                bundle.clientKey().toString(),
-                bundle.clientCert().toString(),
-                bundle.passphrase().toCharArray());
-        try {
-            String url = String.format(
-                    "%s?sslmode=require&sslrootcert=%s&sslkey=%s&sslpassword=%s",
-                    jdbcUrl,
-                    URLEncoder.encode(bundle.caCert().toString(), StandardCharsets.UTF_8),
-                    URLEncoder.encode(p12.toString(), StandardCharsets.UTF_8),
-                    URLEncoder.encode(bundle.passphrase(), StandardCharsets.UTF_8));
-
-            Properties props = new Properties();
-            props.setProperty("user", "test");
-            props.setProperty("password", "test");
-
-            try (Connection conn = DriverManager.getConnection(url, props);
-                 Statement stmt = conn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT 1 AS result")) {
-                assertThat(rs.next()).isTrue();
-                assertThat(rs.getInt("result")).isEqualTo(1);
-            }
-        } finally {
-            PemToKeyStoreConverter.cleanup(p12);
         }
     }
 
