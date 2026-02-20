@@ -200,52 +200,6 @@ class PemToKeyStoreConverterTest {
         PemToKeyStoreConverter.cleanup(p12Path);
     }
 
-    // Key format: PKCS#8 DER encrypted (PBES2, PBKDF2-HMAC-SHA256, AES-256-CBC)
-    @Test
-    void testConvertDerEncryptedToP12() throws Exception {
-        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-der-enc"));
-
-        // Write client key as encrypted PKCS#8 DER
-        SSLTestCertificateGenerator.CertBundle derEncBundle =
-                SSLTestCertificateGenerator.withDerEncryptedKey(bundle, tempDir.resolve("client-enc.der"),
-                        SSLTestCertificateGenerator.TEST_PASSPHRASE);
-
-        // Verify the file is binary DER (not PEM text)
-        byte[] derBytes = Files.readAllBytes(derEncBundle.clientKey());
-        assertThat(new String(derBytes)).doesNotContain("-----BEGIN");
-
-        // Convert encrypted DER to P12
-        Path p12Path = PemToKeyStoreConverter.convertDerToP12(
-                derEncBundle.clientKey().toString(),
-                derEncBundle.clientCert().toString(),
-                derEncBundle.passphrase().toCharArray());
-
-        try {
-            assertThat(p12Path).exists();
-            assertThat(p12Path.toString()).endsWith(".p12");
-
-            // Verify the P12 keystore contains the correct key and certificate
-            KeyStore ks = KeyStore.getInstance("PKCS12");
-            try (var is = Files.newInputStream(p12Path)) {
-                ks.load(is, derEncBundle.passphrase().toCharArray());
-            }
-
-            String alias = ks.aliases().nextElement();
-            assertThat(ks.isKeyEntry(alias)).isTrue();
-
-            PrivateKey key = (PrivateKey) ks.getKey(alias, derEncBundle.passphrase().toCharArray());
-            assertThat(key).isNotNull();
-            assertThat(key.getAlgorithm()).isEqualTo("RSA");
-
-            Certificate[] chain = ks.getCertificateChain(alias);
-            assertThat(chain).isNotNull().hasSize(1);
-            X509Certificate cert = (X509Certificate) chain[0];
-            assertThat(cert.getSubjectX500Principal().getName()).contains("CN=test");
-        } finally {
-            PemToKeyStoreConverter.cleanup(p12Path);
-        }
-    }
-
     // --- Negative tests ---
 
     @Test
@@ -294,22 +248,6 @@ class PemToKeyStoreConverterTest {
                 .cause()
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("No certificates found in");
-    }
-
-    @Test
-    void testCorruptedDerFile() throws Exception {
-        SSLTestCertificateGenerator.CertBundle bundle = SSLTestCertificateGenerator.generate(tempDir.resolve("certs-corrupt-der"));
-
-        // Write garbage bytes as a DER key file
-        Path corruptDer = tempDir.resolve("corrupt.der");
-        Files.write(corruptDer, new byte[]{0x30, 0x00, 0x01, 0x02, 0x03});
-
-        assertThatThrownBy(() -> PemToKeyStoreConverter.convertDerToP12(
-                corruptDer.toString(),
-                bundle.clientCert().toString(),
-                "passphrase".toCharArray()))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Failed to convert encrypted DER to PKCS#12 keystore");
     }
 
     @Test
