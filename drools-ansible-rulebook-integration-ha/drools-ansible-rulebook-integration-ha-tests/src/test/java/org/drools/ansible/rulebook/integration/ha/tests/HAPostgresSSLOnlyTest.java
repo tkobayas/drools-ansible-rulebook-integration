@@ -80,40 +80,42 @@ class HAPostgresSSLOnlyTest {
         byte[] serverKeyBytes = Files.readAllBytes(certs.serverKey());
         byte[] serverCertBytes = Files.readAllBytes(certs.serverCert());
 
-        String initScript = "#!/bin/bash\n"
-                + "set -e\n"
-                + "\n"
-                + "# Create test user and grant access\n"
-                + "psql -v ON_ERROR_STOP=1 --username postgres --dbname eda_ha_ssl_test <<-EOSQL\n"
-                + "    CREATE USER test WITH PASSWORD 'test';\n"
-                + "    GRANT ALL PRIVILEGES ON DATABASE eda_ha_ssl_test TO test;\n"
-                + "    GRANT ALL ON SCHEMA public TO test;\n"
-                + "EOSQL\n"
-                + "\n"
-                + "# Copy certs to PGDATA\n"
-                + "cp /tmp/ssl/server.key \"$PGDATA/server.key\"\n"
-                + "cp /tmp/ssl/server.crt \"$PGDATA/server.crt\"\n"
-                + "cp /tmp/ssl/ca.crt \"$PGDATA/ca.crt\"\n"
-                + "\n"
-                + "chmod 600 \"$PGDATA/server.key\"\n"
-                + "chown postgres:postgres \"$PGDATA/server.key\" \"$PGDATA/server.crt\" \"$PGDATA/ca.crt\"\n"
-                + "\n"
-                + "# Enable SSL in postgresql.conf\n"
-                + "echo \"ssl = on\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "echo \"ssl_cert_file = 'server.crt'\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "echo \"ssl_key_file = 'server.key'\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "echo \"ssl_ca_file = 'ca.crt'\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "\n"
-                + "# pg_hba.conf: SSL-only for 'test', non-SSL for 'postgres' (healthcheck)\n"
-                + "cat > \"$PGDATA/pg_hba.conf\" << 'PGEOF'\n"
-                + "local   all   all                       trust\n"
-                + "hostssl all   test      0.0.0.0/0        cert\n"
-                + "hostssl all   test      ::/0             cert\n"
-                + "host    all   postgres  0.0.0.0/0        scram-sha-256\n"
-                + "host    all   postgres  ::/0             scram-sha-256\n"
-                + "PGEOF\n"
-                + "\n"
-                + "pg_ctl reload -D \"$PGDATA\"\n";
+        String initScript = """
+                #!/bin/bash
+                set -e
+
+                # Create test user and grant access
+                psql -v ON_ERROR_STOP=1 --username postgres --dbname eda_ha_ssl_test <<'EOSQL'
+                CREATE USER test WITH PASSWORD 'test';
+                GRANT ALL PRIVILEGES ON DATABASE eda_ha_ssl_test TO test;
+                GRANT ALL ON SCHEMA public TO test;
+                EOSQL
+
+                # Copy certs to PGDATA
+                cp /tmp/ssl/server.key "$PGDATA/server.key"
+                cp /tmp/ssl/server.crt "$PGDATA/server.crt"
+                cp /tmp/ssl/ca.crt "$PGDATA/ca.crt"
+
+                chmod 600 "$PGDATA/server.key"
+                chown postgres:postgres "$PGDATA/server.key" "$PGDATA/server.crt" "$PGDATA/ca.crt"
+
+                # Enable SSL in postgresql.conf
+                echo "ssl = on" >> "$PGDATA/postgresql.conf"
+                echo "ssl_cert_file = 'server.crt'" >> "$PGDATA/postgresql.conf"
+                echo "ssl_key_file = 'server.key'" >> "$PGDATA/postgresql.conf"
+                echo "ssl_ca_file = 'ca.crt'" >> "$PGDATA/postgresql.conf"
+
+                # pg_hba.conf: SSL-only for 'test', non-SSL for 'postgres' (healthcheck)
+                cat > "$PGDATA/pg_hba.conf" << 'PGEOF'
+                local   all   all                       trust
+                hostssl all   test      0.0.0.0/0        cert
+                hostssl all   test      ::/0             cert
+                host    all   postgres  0.0.0.0/0        scram-sha-256
+                host    all   postgres  ::/0             scram-sha-256
+                PGEOF
+
+                pg_ctl reload -D "$PGDATA"
+                """;
 
         return new PostgreSQLContainer<>(DockerImageName.parse("postgres:15-alpine"))
                 .withDatabaseName("eda_ha_ssl_test")
