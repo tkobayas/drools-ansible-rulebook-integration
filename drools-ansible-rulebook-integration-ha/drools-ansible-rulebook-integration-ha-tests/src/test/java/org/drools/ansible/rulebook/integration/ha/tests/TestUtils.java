@@ -94,15 +94,19 @@ public class TestUtils {
     }
 
     public static void dropPostgresTables() {
-        if (dbParams == null || dbParams.isEmpty()) {
+        dropPostgresTables(dbParams);
+    }
+
+    public static void dropPostgresTables(Map<String, Object> params) {
+        if (params == null || params.isEmpty()) {
             return; // No PostgreSQL configured
         }
 
-        String host = (String) dbParams.get("host");
-        Integer port = (Integer) dbParams.get("port");
-        String database = (String) dbParams.get("database");
-        String username = (String) dbParams.get("user");
-        String password = (String) dbParams.get("password");
+        String host = (String) params.get("host");
+        Integer port = (Integer) params.get("port");
+        String database = (String) params.get("database");
+        String username = (String) params.get("user");
+        String password = (String) params.get("password");
 
         String jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s", host, port, database);
 
