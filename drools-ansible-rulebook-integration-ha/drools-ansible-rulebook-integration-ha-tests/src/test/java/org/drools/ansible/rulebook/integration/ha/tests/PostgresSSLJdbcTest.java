@@ -111,38 +111,40 @@ class PostgresSSLJdbcTest {
         byte[] serverKeyBytes = Files.readAllBytes(certs.serverKey());
         byte[] serverCertBytes = Files.readAllBytes(certs.serverCert());
 
-        String initScript = "#!/bin/bash\n"
-                + "set -e\n"
-                + "\n"
-                + "# Copy certs to PGDATA\n"
-                + "cp /tmp/ssl/server.key \"$PGDATA/server.key\"\n"
-                + "cp /tmp/ssl/server.crt \"$PGDATA/server.crt\"\n"
-                + "cp /tmp/ssl/ca.crt \"$PGDATA/ca.crt\"\n"
-                + "\n"
-                + "# PostgreSQL requires strict permissions on the key file\n"
-                + "chmod 600 \"$PGDATA/server.key\"\n"
-                + "chown postgres:postgres \"$PGDATA/server.key\" \"$PGDATA/server.crt\" \"$PGDATA/ca.crt\"\n"
-                + "\n"
-                + "# Enable SSL in postgresql.conf\n"
-                + "echo \"ssl = on\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "echo \"ssl_cert_file = 'server.crt'\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "echo \"ssl_key_file = 'server.key'\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "echo \"ssl_ca_file = 'ca.crt'\" >> \"$PGDATA/postgresql.conf\"\n"
-                + "\n"
-                + "# Write pg_hba.conf:\n"
-                + "# - local connections use trust (for init scripts)\n"
-                + "# - SSL connections from 'test' user require client cert\n"
-                + "# - non-SSL connections use scram-sha-256 (for Testcontainers healthcheck)\n"
-                + "cat > \"$PGDATA/pg_hba.conf\" << 'PGEOF'\n"
-                + "local   all   all                     trust\n"
-                + "hostssl all   test   0.0.0.0/0        cert\n"
-                + "hostssl all   test   ::/0             cert\n"
-                + "host    all   all    0.0.0.0/0        scram-sha-256\n"
-                + "host    all   all    ::/0             scram-sha-256\n"
-                + "PGEOF\n"
-                + "\n"
-                + "# Reload PostgreSQL to apply changes\n"
-                + "pg_ctl reload -D \"$PGDATA\"\n";
+        String initScript = """
+                #!/bin/bash
+                set -e
+
+                # Copy certs to PGDATA
+                cp /tmp/ssl/server.key "$PGDATA/server.key"
+                cp /tmp/ssl/server.crt "$PGDATA/server.crt"
+                cp /tmp/ssl/ca.crt "$PGDATA/ca.crt"
+
+                # PostgreSQL requires strict permissions on the key file
+                chmod 600 "$PGDATA/server.key"
+                chown postgres:postgres "$PGDATA/server.key" "$PGDATA/server.crt" "$PGDATA/ca.crt"
+
+                # Enable SSL in postgresql.conf
+                echo "ssl = on" >> "$PGDATA/postgresql.conf"
+                echo "ssl_cert_file = 'server.crt'" >> "$PGDATA/postgresql.conf"
+                echo "ssl_key_file = 'server.key'" >> "$PGDATA/postgresql.conf"
+                echo "ssl_ca_file = 'ca.crt'" >> "$PGDATA/postgresql.conf"
+
+                # Write pg_hba.conf:
+                # - local connections use trust (for init scripts)
+                # - SSL connections from 'test' user require client cert
+                # - non-SSL connections use scram-sha-256 (for Testcontainers healthcheck)
+                cat > "$PGDATA/pg_hba.conf" << 'PGEOF'
+                local   all   all                     trust
+                hostssl all   test   0.0.0.0/0        cert
+                hostssl all   test   ::/0             cert
+                host    all   all    0.0.0.0/0        scram-sha-256
+                host    all   all    ::/0             scram-sha-256
+                PGEOF
+
+                # Reload PostgreSQL to apply changes
+                pg_ctl reload -D "$PGDATA"
+                """;
 
         return new PostgreSQLContainer<>(DockerImageName.parse("postgres:15-alpine"))
                 .withDatabaseName("eda_ha_ssl_test")
