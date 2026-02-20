@@ -89,6 +89,13 @@
                 <include>**</include>
               </includes>
             </filter>
+            <!-- BouncyCastle crypto provider classes are loaded via reflection -->
+            <filter>
+              <artifact>org.bouncycastle:*</artifact>
+              <includes>
+                <include>**</include>
+              </includes>
+            </filter>
           </filters>
         </configuration>
         <executions>
