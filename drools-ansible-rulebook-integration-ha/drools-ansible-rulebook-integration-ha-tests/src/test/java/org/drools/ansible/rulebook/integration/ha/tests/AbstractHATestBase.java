@@ -124,7 +124,7 @@ abstract class AbstractHATestBase {
      */
     protected void cleanupDatabase() {
         if (USE_POSTGRES) {
-            TestUtils.dropPostgresTables();
+            TestUtils.dropPostgresTables(dbParams);
         } else {
             TestUtils.shutdownH2Database();
             TestUtils.deleteH2Files();
