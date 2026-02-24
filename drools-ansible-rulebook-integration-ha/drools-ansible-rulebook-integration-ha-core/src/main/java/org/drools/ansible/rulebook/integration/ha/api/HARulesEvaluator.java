@@ -1,6 +1,8 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
 import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
@@ -25,6 +27,9 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
     private Long externalSessionId;
 
     private volatile boolean onRecovery = false;
+
+    // Callback for handling auto-clock matches through HA pipeline
+    private volatile Function<List<Match>, List<Map<String, Object>>> scheduledMatchCallback;
 
     public HARulesEvaluator(RulesExecutorSession rulesExecutorSession) {
         super(rulesExecutorSession);
@@ -74,6 +79,27 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
 
     public HASessionContext getHaSessionContext() {
         return ((HARulesExecutorSession) rulesExecutorSession).getHaSessionContext();
+    }
+
+    public void setScheduledMatchCallback(Function<List<Match>, List<Map<String, Object>>> callback) {
+        this.scheduledMatchCallback = callback;
+    }
+
+    @Override
+    protected List<Match> onScheduledMatches(List<Match> matches) {
+        if (onRecovery || matches.isEmpty()) {
+            return matches;
+        }
+        Function<List<Match>, List<Map<String, Object>>> callback = this.scheduledMatchCallback;
+        if (callback != null) {
+            List<Map<String, Object>> haResult = callback.apply(matches);
+            if (haResult != null) {
+                byte[] bytes = channel.write(new Response(getSessionId(), haResult));
+                rulesExecutorSession.registerAsyncResponse(bytes);
+                return matches;
+            }
+        }
+        return super.onScheduledMatches(matches);
     }
 
     @Override
