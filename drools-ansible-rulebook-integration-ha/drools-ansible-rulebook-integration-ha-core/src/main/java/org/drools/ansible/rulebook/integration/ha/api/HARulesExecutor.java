@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
@@ -64,6 +65,10 @@ public class HARulesExecutor extends RulesExecutor {
 
     public void setOnRecovery(boolean onRecovery) {
         ((HARulesEvaluator) rulesEvaluator).setOnRecovery(onRecovery);
+    }
+
+    public void setScheduledMatchCallback(Function<List<Match>, List<Map<String, Object>>> callback) {
+        ((HARulesEvaluator) rulesEvaluator).setScheduledMatchCallback(callback);
     }
 
     public RulesSet getRulesSet() {

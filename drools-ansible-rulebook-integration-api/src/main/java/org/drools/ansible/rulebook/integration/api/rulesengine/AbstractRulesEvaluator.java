@@ -130,7 +130,7 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
 
         return asyncExecutor == null || matches.isEmpty() ?
                 completeFutureOf(matches) :
-                asyncExecutor.submit(() -> writeResponseOnChannel(matches) );
+                asyncExecutor.submit(() -> onScheduledMatches(matches) );
     }
 
     @Override
@@ -232,6 +232,15 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
             rulesExecutorSession.registerAsyncResponse(bytes);
         }
         return matches;
+    }
+
+    /**
+     * Hook called when the automatic pseudo clock triggers rule matches.
+     * Default implementation delegates to writeResponseOnChannel.
+     * HARulesEvaluator overrides this to route through the HA pipeline.
+     */
+    protected List<Match> onScheduledMatches(List<Match> matches) {
+        return writeResponseOnChannel(matches);
     }
 
     private final Lock ruleEvaluationLock = new ReentrantLock();
