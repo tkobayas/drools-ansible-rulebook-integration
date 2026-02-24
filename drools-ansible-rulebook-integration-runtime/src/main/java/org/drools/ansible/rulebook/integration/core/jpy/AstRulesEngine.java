@@ -92,6 +92,7 @@ public class AstRulesEngine implements Closeable {
         }
 
         rulesExecutorContainer.register( executor );
+        configureScheduledMatchCallback(executor);
 
         return executor.getId();
     }
@@ -157,37 +158,45 @@ public class AstRulesEngine implements Closeable {
         List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
 
         try {
-            HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
-            String rulesetName = rulesExecutor.getRulesSet().getName();
-
-            // Get or create in-memory SessionState
-            SessionState sessionState = haStateManager.getInMemorySessionState(rulesetName);
-            if (sessionState == null) {
-                logger.warn("No in-memory SessionState found for {}, skipping HA update", rulesetName);
-                return matchesToJson(matches);
+            if (persistHAStateAndStats(sessionId)) {
+                return buildHaResponse(sessionId, matchList, haStateManager.isLeader());
             }
-
-            // Update in-memory SessionState (common for both leader and non-leader)
-            updateInMemorySessionState(rulesExecutor, sessionState);
-
-            // Leader: persist to database
-            if (haStateManager.isLeader()) {
-                haStateManager.persistSessionState(sessionState);
-
-                HAStats haStats = haStateManager.getHAStats();
-                haStats.incrementEventsProcessed();
-                updateGlobalSessionStats(haStats);
-                haStateManager.persistHAStats();
-            }
-
-            // Both leader and non-leader: build HA response format
-            return buildHaResponse(sessionId, matchList, haStateManager.isLeader());
         } catch (Exception e) {
             logger.warn("Failed to update HA state", e);
         }
 
-        // On error: return standard response
+        // On error or no session state: return standard response
         return matchesToJson(matches);
+    }
+
+    /**
+     * Update in-memory SessionState and persist to database if leader.
+     * Shared by processFactOrEventHA (synchronous path) and handleScheduledMatchesHA (auto-clock path).
+     *
+     * @return true if state was updated successfully, false if no in-memory SessionState found
+     */
+    private boolean persistHAStateAndStats(long sessionId) {
+        HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
+        String rulesetName = rulesExecutor.getRulesSet().getName();
+
+        SessionState sessionState = haStateManager.getInMemorySessionState(rulesetName);
+        if (sessionState == null) {
+            logger.warn("No in-memory SessionState found for {}, skipping HA update", rulesetName);
+            return false;
+        }
+
+        updateInMemorySessionState(rulesExecutor, sessionState);
+
+        if (haStateManager.isLeader()) {
+            haStateManager.persistSessionState(sessionState);
+
+            HAStats haStats = haStateManager.getHAStats();
+            haStats.incrementEventsProcessed();
+            updateGlobalSessionStats(haStats);
+            haStateManager.persistHAStats();
+        }
+
+        return true;
     }
 
     /**
@@ -228,35 +237,69 @@ public class AstRulesEngine implements Closeable {
         if (matchList.isEmpty()) {
             return toJson(matchList);
         }
-
         try {
-            String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
-            List<Map<String, Object>> haMatches = new ArrayList<>(matchList.size());
-            for (Map<String, Map<String, Object>> matchData : matchList) {
-                String ruleName = matchData.keySet().iterator().next();
-                Map<String, Object> eventData = matchData.get(ruleName);
-
-                MatchingEvent me = new MatchingEvent();
-                me.setHaUuid(haStateManager.getHaUuid());
-                me.setRuleSetName(rulesetName);
-                me.setRuleName(ruleName);
-                me.setEventData(toJson(eventData));
-
-                String meUuid;
-                if (persistMatchingEvents) {
-                    meUuid = haStateManager.addMatchingEvent(me);
-                } else {
-                    meUuid = EMPTY_ME_UUID; // Non-leader nodes do not execute actions with ME UUIDs, so empty UUID
-                }
-
-                Map<String, Object> resultEntry = new LinkedHashMap<>();
-                populateHAMatchResponse(resultEntry, ruleName, eventData, meUuid);
-                haMatches.add(resultEntry);
-            }
-            return toJson(haMatches);
+            return toJson(buildHaResponseList(sessionId, matchList, persistMatchingEvents));
         } catch (Exception e) {
             logger.error("Failed to build HA response payload", e);
             return toJson(matchList);
+        }
+    }
+
+    private List<Map<String, Object>> buildHaResponseList(long sessionId, List<Map<String, Map<String, Object>>> matchList, boolean persistMatchingEvents) {
+        String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
+        List<Map<String, Object>> haMatches = new ArrayList<>(matchList.size());
+        for (Map<String, Map<String, Object>> matchData : matchList) {
+            String ruleName = matchData.keySet().iterator().next();
+            Map<String, Object> eventData = matchData.get(ruleName);
+
+            MatchingEvent me = new MatchingEvent();
+            me.setHaUuid(haStateManager.getHaUuid());
+            me.setRuleSetName(rulesetName);
+            me.setRuleName(ruleName);
+            me.setEventData(toJson(eventData));
+
+            String meUuid;
+            if (persistMatchingEvents) {
+                meUuid = haStateManager.addMatchingEvent(me);
+            } else {
+                meUuid = EMPTY_ME_UUID; // Non-leader nodes do not execute actions with ME UUIDs, so empty UUID
+            }
+
+            Map<String, Object> resultEntry = new LinkedHashMap<>();
+            populateHAMatchResponse(resultEntry, ruleName, eventData, meUuid);
+            haMatches.add(resultEntry);
+        }
+        return haMatches;
+    }
+
+    /**
+     * Handle matches triggered by AutomaticPseudoClock through the HA pipeline.
+     * This is called on the asyncExecutor thread via the callback set on HARulesEvaluator.
+     */
+    private List<Map<String, Object>> handleScheduledMatchesHA(long sessionId, List<Match> matches) {
+        List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
+        if (matchList.isEmpty()) {
+            return null;
+        }
+
+        try {
+            if (persistHAStateAndStats(sessionId)) {
+                return buildHaResponseList(sessionId, matchList, haStateManager.isLeader());
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to handle scheduled matches through HA pipeline", e);
+        }
+        return null;
+    }
+
+    /**
+     * Configure the scheduled match callback on a HARulesExecutor so that
+     * auto-clock matches are routed through the HA pipeline.
+     */
+    private void configureScheduledMatchCallback(RulesExecutor executor) {
+        if (haMode && haStateManager != null && executor instanceof HARulesExecutor haExecutor) {
+            long sessionId = haExecutor.getId();
+            haExecutor.setScheduledMatchCallback(m -> handleScheduledMatchesHA(sessionId, m));
         }
     }
 
@@ -442,6 +485,7 @@ public class AstRulesEngine implements Closeable {
         ((HARulesExecutor) recoveredRulesExecutor).setExternalSessionId(previousId);
 
         rulesExecutorContainer.register(recoveredRulesExecutor);
+        configureScheduledMatchCallback(recoveredRulesExecutor);
 
         // Update in-memory state to match recovered state
         haStateManager.registerSessionState(rulesetName, persistedSessionState);

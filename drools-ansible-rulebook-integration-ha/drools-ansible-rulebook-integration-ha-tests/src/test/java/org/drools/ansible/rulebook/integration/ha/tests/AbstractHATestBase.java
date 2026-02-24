@@ -21,7 +21,7 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
  * - Default (H2): mvn test
  * - PostgreSQL: mvn test -Dtest.db.type=postgres
  */
-abstract class AbstractHATestBase {
+public abstract class AbstractHATestBase {
 
     // Determine database type from system property
     protected static final String TEST_DB_TYPE = System.getProperty("test.db.type", "h2");
