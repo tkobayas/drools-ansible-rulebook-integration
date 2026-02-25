@@ -18,6 +18,8 @@ public class SessionState {
 
     private List<EventRecord> partialEvents;
 
+    private List<String> processedEventIds;
+
     private long createdTime;
     private long persistedTime;
 
@@ -63,6 +65,14 @@ public class SessionState {
 
     public void setPartialEvents(List<EventRecord> partialEvents) {
         this.partialEvents = partialEvents;
+    }
+
+    public List<String> getProcessedEventIds() {
+        return processedEventIds;
+    }
+
+    public void setProcessedEventIds(List<String> processedEventIds) {
+        this.processedEventIds = processedEventIds;
     }
 
     public long getPersistedTime() {
@@ -122,6 +132,7 @@ public class SessionState {
         contentMap.put("ruleSetName", ruleSetName);
         contentMap.put("rulebookHash", rulebookHash);
         contentMap.put("partialEvents", partialEvents);
+        contentMap.put("processedEventIds", processedEventIds);
         contentMap.put("createdTime", createdTime);
         contentMap.put("persistedTime", persistedTime);
         // version is excluded - it's a database artifact, not working memory state

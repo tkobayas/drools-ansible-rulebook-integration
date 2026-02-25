@@ -182,6 +182,19 @@ public class H2StateManager extends AbstractHAStateManager {
                     }
                 }
 
+                // Handle processed event IDs
+                String processedEventIdsJson = rs.getString("processed_event_ids");
+                if (processedEventIdsJson != null) {
+                    try {
+                        ObjectMapper objectMapper = new ObjectMapper();
+                        List<String> processedEventIds = objectMapper.readValue(processedEventIdsJson,
+                            new TypeReference<List<String>>() {});
+                        sessionState.setProcessedEventIds(processedEventIds);
+                    } catch (Exception e) {
+                        logger.error("Failed to deserialize processed event IDs", e);
+                    }
+                }
+
                 // Handle persisted time
                 Timestamp persistedTime = rs.getTimestamp("persisted_time");
                 if (persistedTime != null) {
@@ -228,8 +241,8 @@ public class H2StateManager extends AbstractHAStateManager {
             // Insert new version as current
             // Note: SHA is already calculated in updateInMemorySessionState() before this is called
             String sql = "INSERT INTO " + SESSION_STATE
-                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, persisted_time, current_state_sha, version, created_time, leader_id)"
-                    + " VALUES (?, ?, ?, ?, ?, ?,"
+                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha, version, created_time, leader_id)"
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?,"
                     + " COALESCE((SELECT MAX(version) FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,"
                     + " ?, ?)";
 
@@ -245,27 +258,34 @@ public class H2StateManager extends AbstractHAStateManager {
                 }
                 ps.setString(4, partialEventsJson);
 
+                // Handle processed event IDs
+                String processedEventIdsJson = null;
+                if (sessionState.getProcessedEventIds() != null) {
+                    processedEventIdsJson = toJson(sessionState.getProcessedEventIds());
+                }
+                ps.setString(5, processedEventIdsJson);
+
                 // Handle persisted time
                 if (sessionState.getPersistedTime() > 0) {
-                    ps.setTimestamp(5, new Timestamp(sessionState.getPersistedTime()));
+                    ps.setTimestamp(6, new Timestamp(sessionState.getPersistedTime()));
                 } else {
-                    ps.setTimestamp(5, null);
+                    ps.setTimestamp(6, null);
                 }
 
                 // Handle SHA tracking fields
-                ps.setString(6, sessionState.getCurrentStateSHA());
+                ps.setString(7, sessionState.getCurrentStateSHA());
 
-                ps.setString(7, sessionState.getHaUuid());
-                ps.setString(8, sessionState.getRuleSetName());
+                ps.setString(8, sessionState.getHaUuid());
+                ps.setString(9, sessionState.getRuleSetName());
 
                 // Handle created_time
                 if (sessionState.getCreatedTime() > 0) {
-                    ps.setTimestamp(9, new Timestamp(sessionState.getCreatedTime()));
+                    ps.setTimestamp(10, new Timestamp(sessionState.getCreatedTime()));
                 } else {
-                    ps.setTimestamp(9, new Timestamp(System.currentTimeMillis()));
+                    ps.setTimestamp(10, new Timestamp(System.currentTimeMillis()));
                 }
 
-                ps.setString(10, sessionState.getLeaderId());
+                ps.setString(11, sessionState.getLeaderId());
 
                 ps.executeUpdate();
             }

@@ -56,6 +56,7 @@ public class AstRulesEngine implements Closeable {
     private HAStateManager haStateManager;
     private boolean haMode = false;
     private boolean shutdown = false;
+    private int dedupBufferSize = 5;
 
     public long createRuleset(String rulesetString) {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
@@ -209,6 +210,9 @@ public class AstRulesEngine implements Closeable {
 
         // Update partial events from memory
         sessionState.setPartialEvents(new ArrayList<>(recordsInMemory.values()));
+
+        // Update processed event IDs from memory
+        sessionState.setProcessedEventIds(haSessionContext.getProcessedEventIds());
 
         // Update persisted time
         sessionState.setPersistedTime(rulesExecutor.asKieSession().getSessionClock().getCurrentTime());
@@ -394,6 +398,11 @@ public class AstRulesEngine implements Closeable {
             this.haStateManager.initializeHA(uuid, workerName, dbParams, config);
             this.haMode = true;
 
+            // Extract dedup buffer size from config
+            this.dedupBufferSize = config != null
+                    ? ((Number) config.getOrDefault("dedup_buffer_size", 5)).intValue()
+                    : 5;
+
             // HA mode always requires async channel
             rulesExecutorContainer.allowAsync();
 
@@ -513,6 +522,9 @@ public class AstRulesEngine implements Closeable {
                     // Persisted state exists with same rulebook - recover from it
                     RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
 
+                    // Set dedup buffer size on recovered executor
+                    ((HARulesExecutor) recoveredExecutor).getHaSessionContext().setMaxProcessedIds(dedupBufferSize);
+
                     // Register recovered state in memory (for both leader and non-leader)
                     haStateManager.registerSessionState(rulesetName, persistedSessionState);
 
@@ -524,11 +536,15 @@ public class AstRulesEngine implements Closeable {
         // No persisted state or non-leader - create fresh executor and initial SessionState
         RulesExecutor executor = HARulesExecutorFactory.createRulesExecutor(rulesSet, rulesetString);
 
+        // Set dedup buffer size on the new executor
+        ((HARulesExecutor) executor).getHaSessionContext().setMaxProcessedIds(dedupBufferSize);
+
         // Create initial SessionState (same for both leader and non-leader)
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(haStateManager.getHaUuid());
         sessionState.setRuleSetName(rulesetName);
         sessionState.setPartialEvents(new ArrayList<>());
+        sessionState.setProcessedEventIds(new ArrayList<>());
         long currentTime = executor.asKieSession().getSessionClock().getCurrentTime();
         sessionState.setCreatedTime(currentTime);
         sessionState.setPersistedTime(currentTime);
