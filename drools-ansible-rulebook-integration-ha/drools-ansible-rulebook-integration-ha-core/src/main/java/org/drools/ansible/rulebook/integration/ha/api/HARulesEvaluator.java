@@ -2,6 +2,8 @@ package org.drools.ansible.rulebook.integration.ha.api;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.drools.ansible.rulebook.integration.api.domain.RuleMatch;
@@ -31,8 +33,34 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
     // Callback for handling auto-clock matches through HA pipeline
     private volatile Function<List<Match>, List<Map<String, Object>>> scheduledMatchCallback;
 
+    // Stores the last HA-enriched result from advanceTime for sync return by AstRulesEngine
+    private volatile List<Map<String, Object>> lastAdvanceTimeHAResult;
+
     public HARulesEvaluator(RulesExecutorSession rulesExecutorSession) {
         super(rulesExecutorSession);
+    }
+
+    /**
+     * Override advanceTime to route through onScheduledMatches instead of writeResponseOnChannel.
+     * This ensures the HA pipeline enriches the async channel response with matching_uuid.
+     */
+    @Override
+    public CompletableFuture<List<Match>> advanceTime(long amount, TimeUnit unit) {
+        lastAdvanceTimeHAResult = null;
+        if (channel == null) {
+            return engineEvaluate(() -> internalAdvanceTime(amount, unit));
+        }
+        return engineEvaluate(() -> onScheduledMatches(internalAdvanceTime(amount, unit)));
+    }
+
+    /**
+     * Returns the HA-enriched result from the last advanceTime call, or null if not available.
+     * Used by AstRulesEngine to build the sync return value without re-processing.
+     */
+    public List<Map<String, Object>> consumeLastAdvanceTimeHAResult() {
+        List<Map<String, Object>> result = lastAdvanceTimeHAResult;
+        lastAdvanceTimeHAResult = null;
+        return result;
     }
 
     @Override
@@ -94,6 +122,7 @@ public class HARulesEvaluator extends SyncRulesEvaluator {
         if (callback != null) {
             List<Map<String, Object>> haResult = callback.apply(matches);
             if (haResult != null) {
+                lastAdvanceTimeHAResult = haResult;
                 byte[] bytes = channel.write(new Response(getSessionId(), haResult));
                 rulesExecutorSession.registerAsyncResponse(bytes);
                 return matches;
