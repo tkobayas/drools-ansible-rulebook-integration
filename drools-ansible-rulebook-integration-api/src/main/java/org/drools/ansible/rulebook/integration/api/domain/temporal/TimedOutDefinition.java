@@ -155,6 +155,8 @@ public class TimedOutDefinition implements TimeConstraint {
 
     public static final String KEYWORD = "timed_out";
 
+    public static final String TIMED_OUT_CONTROL = "timed_out_control";
+
     private final TimeAmount timeAmount;
 
     private final List<ViewItem> patterns = new ArrayList<>();
@@ -244,6 +246,7 @@ public class TimedOutDefinition implements TimeConstraint {
                                 controlEvent.put( "rulename", name );
                                 controlEvent.put( "event", t1 );
                                 controlEvent.put( "binding", ((RuleContext) drools).getMatch().getDeclarationIds().get(0) );
+                                controlEvent.put( CONTROL_NAME, TIMED_OUT_CONTROL );
                                 ((Drools) drools).insert(controlEvent);
                             })
                     )
@@ -264,6 +267,7 @@ public class TimedOutDefinition implements TimeConstraint {
                             // This control event fires the main rule, so is counted as a matched event in SessionStatsCollector.registerMatchedEvents
                             // Users may think that the main rule is matched with the first event (but the all conditions are not satisfied), which is bound by transformTimedOutMatch method
                             controlEvent.put( COUNT_AS_MATCHED_EVENT, true );
+                            controlEvent.put( CONTROL_NAME, TIMED_OUT_CONTROL );
                             drools.insert(controlEvent);
                         })
                 )
@@ -280,6 +284,7 @@ public class TimedOutDefinition implements TimeConstraint {
                             PrototypeEventInstance controlEvent = controlPrototype.newInstance()
                                     .withExpiration(timeAmount.getAmount(), timeAmount.getTimeUnit());
                             controlEvent.put( "rulename", endTag );
+                            controlEvent.put( CONTROL_NAME, TIMED_OUT_CONTROL );
                             drools.insert(controlEvent);
                         })
                 )
