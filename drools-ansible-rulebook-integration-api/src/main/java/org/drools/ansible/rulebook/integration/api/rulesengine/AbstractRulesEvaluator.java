@@ -151,7 +151,7 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
 
     protected abstract CompletableFuture<List<Match>> engineEvaluate(Supplier<List<Match>> resultSupplier);
 
-    private List<Match> internalAdvanceTime(long amount, TimeUnit unit) {
+    protected List<Match> internalAdvanceTime(long amount, TimeUnit unit) {
         List<Match> matches = atomicRuleEvaluation(false, () -> rulesExecutorSession.advanceTime(amount, unit));
         if (!matches.isEmpty() && log.isInfoEnabled()) {
             log.info("Match(es) caused by automatic clock advance: " + matches);
