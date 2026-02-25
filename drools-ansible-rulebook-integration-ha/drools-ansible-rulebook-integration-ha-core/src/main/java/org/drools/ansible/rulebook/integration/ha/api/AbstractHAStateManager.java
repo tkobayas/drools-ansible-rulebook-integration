@@ -1,8 +1,10 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
@@ -11,6 +13,7 @@ import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord.RecordType;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.kie.api.prototype.PrototypeEventInstance;
+import org.kie.api.prototype.PrototypeFactInstance;
 import org.drools.core.time.impl.PseudoClockScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,10 +36,43 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             ((PseudoClockScheduler) rulesExecutor.asKieSession().getSessionClock()).setStartupTime(sessionState.getCreatedTime());
             long currentTime = sessionState.getCreatedTime();
             List<EventRecord> partialEvents = sessionState.getPartialEvents();
+
+            // Pre-scan: collect EVENT maps that are embedded inside CONTROL_TIMED_OUT records.
+            // These user events must NOT be replayed via processEvents() (which would re-trigger pattern rules).
+            // Instead they will be inserted directly into WM when their parent control is recovered.
+            Set<Map<String, Object>> embeddedEventMaps = new HashSet<>();
+            for (EventRecord er : partialEvents) {
+                if (er.getRecordType() == RecordType.CONTROL_TIMED_OUT) {
+                    Map<String, Object> controlData = JsonMapper.readValueAsMapOfStringAndObject(er.getEventJson());
+                    Object embeddedEvent = controlData.get("event");
+                    if (embeddedEvent instanceof Map) {
+                        embeddedEventMaps.add((Map<String, Object>) embeddedEvent);
+                    }
+                }
+            }
+
             for (EventRecord eventRecord : partialEvents) {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
                 RecordType recordType = eventRecord.getRecordType();
-                if (recordType.isSynthetic()) {
+                if (recordType == RecordType.CONTROL_TIMED_OUT) {
+                    // TimedOut control events hold a reference to the original user event in their "event" property.
+                    // Cleanup rules use `this == $c.event` requiring object identity.
+                    // We insert the embedded user event into WM first, then the control event.
+                    // The control's "event" property already points to the same PrototypeFactInstance object.
+                    Map<String, Object> eventData = normalizeControlEventData(JsonMapper.readValueAsMapOfStringAndObject(eventRecord.getEventJson()));
+                    PrototypeEventInstance controlEvent = recreateControlEvent(eventData, eventRecord.getExpirationDuration());
+                    Object embeddedEvent = controlEvent.get("event");
+                    if (embeddedEvent instanceof PrototypeFactInstance) {
+                        rulesExecutor.asKieSession().insert(embeddedEvent);
+                        LOG.debug("  * Inserted embedded user event for CONTROL_TIMED_OUT at time {}", eventRecord.getInsertedAt());
+                    }
+                    rulesExecutor.asKieSession().insert(controlEvent);
+                    if (eventRecord.getExpirationDuration() != Long.MAX_VALUE) {
+                        LOG.debug("  * Recovered CONTROL_TIMED_OUT at time {}, expiration duration: {} ms : {}", eventRecord.getInsertedAt(), eventRecord.getExpirationDuration(), controlEvent);
+                    } else {
+                        LOG.debug("  * Recovered CONTROL_TIMED_OUT at time {}, no expiration : {}", eventRecord.getInsertedAt(), controlEvent);
+                    }
+                } else if (recordType.isSynthetic()) {
                     // How time constraints are handled??
                     // OnceWithin : If a control event exists (= not yet expired), an event is discarded without firing the rule. [on recover]-> Inserting the control event back is sufficient.
                     // AggregateWithin : A control event holds the number of events. Events are discarded until the threshold is met. [on recover] -> Inserting the control event back is sufficient.
@@ -55,7 +91,15 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                     LOG.debug("  * Replaying fact event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
                     rulesExecutor.processFacts(eventRecord.getEventJson());
                 } else {
-                    // RecordType.EVENT
+                    // RecordType.EVENT — skip if already embedded in a CONTROL_TIMED_OUT record
+                    if (!embeddedEventMaps.isEmpty()) {
+                        Map<String, Object> eventMap = JsonMapper.readValueAsMapOfStringAndObject(eventRecord.getEventJson());
+                        if (embeddedEventMaps.contains(eventMap)) {
+                            LOG.debug("  * Skipping EVENT at time {} (already embedded in CONTROL_TIMED_OUT): {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
+                            currentTime = eventRecord.getInsertedAt();
+                            continue;
+                        }
+                    }
                     LOG.debug("  * Replaying event at time {}: {}", eventRecord.getInsertedAt(), eventRecord.getEventJson());
                     rulesExecutor.processEvents(eventRecord.getEventJson());
                 }
