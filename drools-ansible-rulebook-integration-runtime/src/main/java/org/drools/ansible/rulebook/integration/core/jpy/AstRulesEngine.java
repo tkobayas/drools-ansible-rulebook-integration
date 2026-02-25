@@ -315,8 +315,18 @@ public class AstRulesEngine implements Closeable {
      * @return the events that fired
      */
     public String advanceTime(long sessionId, long amount, String unit) {
-        List<Match> matches = rulesExecutorContainer.get(sessionId).advanceTime(amount, TimeUnit.valueOf(unit.toUpperCase())).join();
+        RulesExecutor executor = rulesExecutorContainer.get(sessionId);
+        List<Match> matches = executor.advanceTime(amount, TimeUnit.valueOf(unit.toUpperCase())).join();
         if (haMode && haStateManager != null) {
+            // In HA mode, HARulesEvaluator.advanceTime() routes through onScheduledMatches
+            // which handles HA state persistence, matching event creation, and enriched channel write.
+            // Use the already-built HA result for the sync return to avoid duplicate processing.
+            if (executor instanceof HARulesExecutor haExecutor) {
+                List<Map<String, Object>> haResult = haExecutor.consumeLastAdvanceTimeHAResult();
+                if (haResult != null) {
+                    return toJson(haResult);
+                }
+            }
             return processFactOrEventHA(sessionId, matches);
         }
         return matchesToJson(matches);

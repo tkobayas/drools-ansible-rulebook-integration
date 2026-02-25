@@ -112,4 +112,8 @@ public class HARulesExecutor extends RulesExecutor {
     public HASessionContext getHaSessionContext() {
         return ((HARulesEvaluator) rulesEvaluator).getHaSessionContext();
     }
+
+    public List<Map<String, Object>> consumeLastAdvanceTimeHAResult() {
+        return ((HARulesEvaluator) rulesEvaluator).consumeLastAdvanceTimeHAResult();
+    }
 }
