@@ -412,6 +412,7 @@ public class AstRulesEngine implements Closeable {
             this.dedupBufferSize = config != null
                     ? ((Number) config.getOrDefault("dedup_buffer_size", 5)).intValue()
                     : 5;
+            logger.info("HA deduplication buffer size set to {}", dedupBufferSize);
 
             // HA mode always requires async channel
             rulesExecutorContainer.allowAsync();
