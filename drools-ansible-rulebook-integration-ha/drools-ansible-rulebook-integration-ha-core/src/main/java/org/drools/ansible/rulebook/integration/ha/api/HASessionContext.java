@@ -1,7 +1,11 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
@@ -19,6 +23,11 @@ public class HASessionContext {
 
     // Associate factHandleIds to identifiers for efficient lookup during updates/deletions
     private final Map<Long, String> factHandleIndex = new HashMap<>();
+
+    // Circular buffer of processed event IDs for duplicate detection
+    private final LinkedHashSet<String> processedEventIds = new LinkedHashSet<>();
+    private static final int DEFAULT_MAX_PROCESSED_IDS = 5;
+    private int maxProcessedIds = DEFAULT_MAX_PROCESSED_IDS;
 
     // Temporarily hold incoming event/fact metadata during insertion flow.
     // Preserves original JSON and identifier from client before Drools processing.
@@ -88,6 +97,34 @@ public class HASessionContext {
         PendingRecord theRecord = pendingRecord;
         pendingRecord = null;
         return theRecord;
+    }
+
+    public void setMaxProcessedIds(int maxProcessedIds) {
+        this.maxProcessedIds = maxProcessedIds;
+    }
+
+    public boolean isAlreadyProcessed(String eventId) {
+        return processedEventIds.contains(eventId);
+    }
+
+    public void recordProcessedEvent(String eventId) {
+        processedEventIds.add(eventId);
+        if (processedEventIds.size() > maxProcessedIds) {
+            Iterator<String> it = processedEventIds.iterator();
+            it.next();
+            it.remove();
+        }
+    }
+
+    public List<String> getProcessedEventIds() {
+        return new ArrayList<>(processedEventIds);
+    }
+
+    public void setProcessedEventIds(List<String> ids) {
+        processedEventIds.clear();
+        if (ids != null) {
+            processedEventIds.addAll(ids);
+        }
     }
 
     public static final class PendingRecord {
