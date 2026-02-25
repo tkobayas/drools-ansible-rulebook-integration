@@ -40,6 +40,7 @@ public class PostgreSQLSchema {
                     + "rule_set_name VARCHAR(255) NOT NULL, "
                     + "rulebook_hash VARCHAR(64), "
                     + "partial_matching_events TEXT, "
+                    + "processed_event_ids TEXT, "
                     + "persisted_time TIMESTAMP, "
                     + "current_state_sha VARCHAR(64), "
                     + "version INT DEFAULT 1, "

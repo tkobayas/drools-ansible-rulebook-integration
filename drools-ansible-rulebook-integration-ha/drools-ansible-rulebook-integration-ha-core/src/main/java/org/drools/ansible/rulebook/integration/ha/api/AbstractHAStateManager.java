@@ -111,6 +111,12 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                 LOG.debug("  Advancing recovered session clock from persisted time to current node time");
                 rulesExecutor.advanceTime(currentTimeAtNewNode - sessionState.getPersistedTime(), java.util.concurrent.TimeUnit.MILLISECONDS);
             }
+
+            // Restore processed event IDs from persisted state for duplicate detection
+            if (rulesExecutor instanceof HARulesExecutor haExecutor && sessionState.getProcessedEventIds() != null) {
+                haExecutor.getHaSessionContext().setProcessedEventIds(sessionState.getProcessedEventIds());
+                LOG.debug("  Restored {} processed event IDs from persisted state", sessionState.getProcessedEventIds().size());
+            }
         });
     }
 

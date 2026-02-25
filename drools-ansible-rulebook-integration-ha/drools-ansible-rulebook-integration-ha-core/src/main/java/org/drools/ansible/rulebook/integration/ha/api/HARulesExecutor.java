@@ -1,5 +1,6 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -86,7 +87,18 @@ public class HARulesExecutor extends RulesExecutor {
                     LOG.warn("Event UUID not found in event data, generating random UUID as fallback");
                     return UUID.randomUUID().toString();
                 });
+
+        // Check for duplicate event
+        if (getHaSessionContext().isAlreadyProcessed(eventUuid)) {
+            LOG.warn("Event {} has already been processed once. Ignoring duplicate.", eventUuid);
+            return CompletableFuture.completedFuture(Collections.emptyList());
+        }
+
         getHaSessionContext().preparePendingRecord(eventUuid, json, EventRecord.RecordType.EVENT);
+
+        // Record the event ID after preparing the pending record
+        getHaSessionContext().recordProcessedEvent(eventUuid);
+
         return rulesEvaluator.processEvents(eventMap);
     }
 
