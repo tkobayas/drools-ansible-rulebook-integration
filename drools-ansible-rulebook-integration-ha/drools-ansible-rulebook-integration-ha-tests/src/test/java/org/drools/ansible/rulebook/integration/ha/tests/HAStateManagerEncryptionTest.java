@@ -1,9 +1,5 @@
 package org.drools.ansible.rulebook.integration.ha.tests;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -92,6 +88,12 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
 
         stateManager.persistSessionState(state);
 
+        // Verify raw DB column is encrypted
+        String rawPartialEvents = TestUtils.queryRawColumn(dbParams,
+                "SELECT partial_matching_events FROM drools_ansible_session_state WHERE ha_uuid = ?", haUuid);
+        assertThat(rawPartialEvents).startsWith("$ENCRYPTED$");
+        assertThat(rawPartialEvents).doesNotContain("temperature");
+
         // Load and verify round trip
         SessionState loaded = stateManager.getPersistedSessionState(RULE_SET_NAME);
         assertThat(loaded).isNotNull();
@@ -107,6 +109,12 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
         MatchingEvent me = createMatchingEvent(haUuid, RULE_SET_NAME, "temp_rule",
                 Map.of("temperature", 35, "host", "server-01"));
         String meUuid = stateManager.addMatchingEvent(me);
+
+        // Verify raw DB column is encrypted
+        String rawEventData = TestUtils.queryRawColumn(dbParams,
+                "SELECT event_data FROM drools_ansible_matching_event WHERE ha_uuid = ?", haUuid);
+        assertThat(rawEventData).startsWith("$ENCRYPTED$");
+        assertThat(rawEventData).doesNotContain("server-01");
 
         List<MatchingEvent> loaded = stateManager.getPendingMatchingEvents();
         assertThat(loaded).hasSize(1);
@@ -125,6 +133,12 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
 
         String actionData = "{\"name\":\"run_playbook\",\"status\":0,\"url\":\"https://server/api\"}";
         stateManager.addActionInfo(meUuid, 0, actionData);
+
+        // Verify raw DB column is encrypted
+        String rawActionData = TestUtils.queryRawColumn(dbParams,
+                "SELECT action_data FROM drools_ansible_action_info WHERE me_uuid = ?", meUuid);
+        assertThat(rawActionData).startsWith("$ENCRYPTED$");
+        assertThat(rawActionData).doesNotContain("run_playbook");
 
         String loaded = stateManager.getActionInfo(meUuid, 0);
         assertThat(loaded).contains("run_playbook");
@@ -247,38 +261,6 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
         assertThatThrownBy(() -> stateManager.getPendingMatchingEvents())
                 .isInstanceOf(HAEncryptionException.class)
                 .hasMessageContaining("no encryption keys configured");
-    }
-
-    @Test
-    void verifyDataIsEncryptedInDatabase() {
-        // This test is H2-specific: verify raw column content starts with $ENCRYPTED$
-        if (USE_POSTGRES) {
-            return; // Skip for PostgreSQL — raw JDBC access differs
-        }
-
-        String key = generateBase64Key();
-        stateManager = createManager(configWithEncryption(key, null));
-
-        MatchingEvent me = createMatchingEvent(haUuid, RULE_SET_NAME, "rule1",
-                Map.of("secret", "should-be-encrypted"));
-        stateManager.addMatchingEvent(me);
-
-        // Direct JDBC access to H2 to check raw column value
-        String dbFilePath = TestUtils.TEST_H2_FILE_PATH;
-        String jdbcUrl = "jdbc:h2:file:" + dbFilePath + ";MODE=PostgreSQL";
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, "sa", "");
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT event_data FROM drools_ansible_matching_event WHERE ha_uuid = ?")) {
-            ps.setString(1, haUuid);
-            ResultSet rs = ps.executeQuery();
-            assertThat(rs.next()).isTrue();
-            String rawEventData = rs.getString("event_data");
-            assertThat(rawEventData).startsWith("$ENCRYPTED$");
-            // Verify it does NOT contain the plaintext
-            assertThat(rawEventData).doesNotContain("should-be-encrypted");
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to read raw database", e);
-        }
     }
 
     @Test
