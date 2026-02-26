@@ -103,6 +103,8 @@ public class H2StateManager extends AbstractHAStateManager {
             logger.error("Failed to initialize HA schema", e);
             throw new RuntimeException("Failed to initialize HA schema", e);
         }
+
+        commonInit(config);
     }
 
     @Override
@@ -170,11 +172,11 @@ public class H2StateManager extends AbstractHAStateManager {
                 sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
                 // Handle partial events
-                String partialEventsJson = rs.getString("partial_matching_events");
+                String partialEventsJson = decryptIfEnabled(rs.getString("partial_matching_events"));
                 if (partialEventsJson != null) {
                     try {
                         ObjectMapper objectMapper = new ObjectMapper();
-                        List<EventRecord> partialEvents = objectMapper.readValue(partialEventsJson, 
+                        List<EventRecord> partialEvents = objectMapper.readValue(partialEventsJson,
                             new TypeReference<List<EventRecord>>() {});
                         sessionState.setPartialEvents(partialEvents);
                     } catch (Exception e) {
@@ -254,7 +256,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 // Handle partial events
                 String partialEventsJson = null;
                 if (sessionState.getPartialEvents() != null) {
-                    partialEventsJson = toJson(sessionState.getPartialEvents());
+                    partialEventsJson = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
                 }
                 ps.setString(4, partialEventsJson);
 
@@ -322,7 +324,7 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(2, matchingEvent.getHaUuid());
             ps.setString(3, matchingEvent.getRuleSetName());
             ps.setString(4, matchingEvent.getRuleName());
-            ps.setString(5, matchingEvent.getEventData());
+            ps.setString(5, encryptIfEnabled(matchingEvent.getEventData()));
             ps.setLong(6, matchingEvent.getCreatedAt());
 
             ps.executeUpdate();
@@ -354,7 +356,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 event.setHaUuid(rs.getString("ha_uuid"));
                 event.setRuleSetName(rs.getString("rule_set_name"));
                 event.setRuleName(rs.getString("rule_name"));
-                event.setEventData(rs.getString("event_data"));
+                event.setEventData(decryptIfEnabled(rs.getString("event_data")));
                 event.setCreatedAt(rs.getLong("created_at"));
                 events.add(event);
             }
@@ -384,7 +386,7 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(2, haUuid);
             ps.setString(3, matchingUuid);
             ps.setInt(4, index);
-            ps.setString(5, action);
+            ps.setString(5, encryptIfEnabled(action));
 
             ps.executeUpdate();
 
@@ -413,7 +415,7 @@ public class H2StateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, action);
+            ps.setString(1, encryptIfEnabled(action));
             ps.setString(2, matchingUuid);
             ps.setInt(3, index);
 
@@ -468,7 +470,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
-                String actionData = rs.getString("action_data");
+                String actionData = decryptIfEnabled(rs.getString("action_data"));
                 if (actionData != null) {
                     return actionData;
                 }
@@ -744,7 +746,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
-                return extractStatus(rs.getString("action_data"));
+                return extractStatus(decryptIfEnabled(rs.getString("action_data")));
             }
         } catch (SQLException e) {
             logger.error("Failed to fetch action status", e);

@@ -179,6 +179,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             loadOrCreateHAStats();
 
             logger.info("PostgreSQL HA initialization completed successfully");
+
+            commonInit(config);
         } catch (Exception e) {
             // Clean up temp P12 keystore if initialization fails after conversion
             if (tempP12KeystorePath != null) {
@@ -258,7 +260,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
                 // Handle partial events
-                String partialEventsJson = rs.getString("partial_matching_events");
+                String partialEventsJson = decryptIfEnabled(rs.getString("partial_matching_events"));
                 if (partialEventsJson != null) {
                     try {
                         ObjectMapper objectMapper = new ObjectMapper();
@@ -342,7 +344,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 // Handle partial events
                 String partialEventsJson = null;
                 if (sessionState.getPartialEvents() != null) {
-                    partialEventsJson = toJson(sessionState.getPartialEvents());
+                    partialEventsJson = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
                 }
                 ps.setString(4, partialEventsJson);
 
@@ -413,7 +415,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setString(2, matchingEvent.getHaUuid());
             ps.setString(3, matchingEvent.getRuleSetName());
             ps.setString(4, matchingEvent.getRuleName());
-            ps.setString(5, matchingEvent.getEventData());
+            ps.setString(5, encryptIfEnabled(matchingEvent.getEventData()));
             ps.setLong(6, matchingEvent.getCreatedAt());
 
             ps.executeUpdate();
@@ -447,7 +449,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 me.setHaUuid(rs.getString("ha_uuid"));
                 me.setRuleSetName(rs.getString("rule_set_name"));
                 me.setRuleName(rs.getString("rule_name"));
-                me.setEventData(rs.getString("event_data"));
+                me.setEventData(decryptIfEnabled(rs.getString("event_data")));
                 me.setCreatedAt(rs.getLong("created_at"));
                 events.add(me);
             }
@@ -481,7 +483,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setString(2, haUuid);
             ps.setObject(3, UUID.fromString(matchingUuid));
             ps.setInt(4, index);
-            ps.setString(5, actionData);
+            ps.setString(5, encryptIfEnabled(actionData));
 
             ps.executeUpdate();
 
@@ -509,7 +511,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            ps.setString(1, actionData);
+            ps.setString(1, encryptIfEnabled(actionData));
             ps.setObject(2, UUID.fromString(matchingUuid));
             ps.setInt(3, index);
 
@@ -561,7 +563,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
-                String actionData = rs.getString("action_data");
+                String actionData = decryptIfEnabled(rs.getString("action_data"));
                 logger.debug("Retrieved action info for matching event: {}, index: {}", matchingUuid, index);
                 return actionData;
             }
@@ -843,7 +845,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
             ResultSet rs = ps.executeQuery();
             if (rs.next()) {
-                return extractStatus(rs.getString("action_data"));
+                return extractStatus(decryptIfEnabled(rs.getString("action_data")));
             }
         } catch (SQLException e) {
             logger.error("Failed to fetch action status from PostgreSQL", e);
