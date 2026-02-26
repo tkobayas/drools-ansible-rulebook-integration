@@ -49,9 +49,14 @@ public class EventRecord {
     private RecordType recordType = RecordType.EVENT;
 
     // For control events: expiration duration in milliseconds (not absolute time)
+    // null for non-control events
     private Long expirationDuration;
 
     public EventRecord() {
+    }
+
+    public EventRecord(String eventJson, long insertedAt, RecordType recordType) {
+        this(eventJson, insertedAt, recordType, null);
     }
 
     public EventRecord(String eventJson, long insertedAt, RecordType recordType, Long expirationDuration) {

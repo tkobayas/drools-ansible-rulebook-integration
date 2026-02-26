@@ -29,6 +29,51 @@ public abstract class AbstractHAStateManager implements HAStateManager {
 
     private final Map<String, SessionState> sessionStateMap = new HashMap<>();
 
+    private HAEncryption encryption; // null = disabled
+
+    /**
+     * Common initialization for cross-cutting concerns (encryption, future features).
+     * Must be called by every subclass at the end of {@code initializeHA()}.
+     */
+    protected final void commonInit(Map<String, Object> config) {
+        initializeEncryption(config);
+    }
+
+    private void initializeEncryption(Map<String, Object> config) {
+        if (config == null) return;
+        String primaryKey = (String) config.get("encryption_key_primary");
+        String secondaryKey = (String) config.get("encryption_key_secondary");
+        if (primaryKey != null && !primaryKey.isEmpty()) {
+            this.encryption = new HAEncryption(primaryKey, secondaryKey);
+            LOG.info("HA encryption enabled (primary key configured, secondary key {})",
+                     secondaryKey != null && !secondaryKey.isEmpty() ? "configured" : "not configured");
+        } else {
+            LOG.info("HA encryption disabled (no encryption_key_primary in config)");
+        }
+    }
+
+    protected String encryptIfEnabled(String plaintext) {
+        if (encryption == null || plaintext == null || plaintext.isEmpty()) return plaintext;
+        return encryption.encrypt(plaintext);
+    }
+
+    protected String decryptIfEnabled(String data) {
+        if (data == null) return data;
+        if (encryption == null) {
+            if (HAEncryption.isEncrypted(data)) {
+                throw new HAEncryptionException(
+                        "FATAL: Encrypted data found in database but no encryption keys configured. "
+                        + "Provide encryption_key_primary before restarting.");
+            }
+            return data;
+        }
+        HAEncryption.DecryptResult result = encryption.decrypt(data);
+        if (result.usedSecondaryKey()) {
+            LOG.info("Data decrypted with secondary key (will be re-encrypted with primary on next write)");
+        }
+        return result.plaintext();
+    }
+
     @Override
     public RulesExecutor recoverSession(String rulesetString, SessionState sessionState, long currentTimeAtNewNode) {
         return HARulesExecutorFactory.createRulesExecutorWithRecovery(rulesetString, rulesExecutor -> {
