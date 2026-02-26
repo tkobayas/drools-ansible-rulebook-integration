@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.List;
@@ -120,6 +123,44 @@ public class TestUtils {
             PostgreSQLSchema.dropSchema(dataSource);
         } catch (SQLException e) {
             throw new RuntimeException("Failed to drop PostgreSQL tables", e);
+        }
+    }
+
+    /**
+     * Query a raw column value from the database via direct JDBC, bypassing the state manager's decryption.
+     * Useful for verifying that data is actually encrypted at rest.
+     *
+     * @param params database connection parameters (must contain db_type, and for postgres: host, port, database, user, password)
+     * @param sql SQL query with a single ? placeholder
+     * @param paramValue value to bind to the ? placeholder
+     * @return the first column value of the first row
+     */
+    public static String queryRawColumn(Map<String, Object> params, String sql, String paramValue) {
+        String jdbcUrl;
+        String user;
+        String password;
+        if ("postgres".equalsIgnoreCase((String) params.get("db_type"))) {
+            String host = (String) params.get("host");
+            Integer port = (Integer) params.get("port");
+            String database = (String) params.get("database");
+            jdbcUrl = String.format("jdbc:postgresql://%s:%d/%s", host, port, database);
+            user = (String) params.get("user");
+            password = (String) params.get("password");
+        } else {
+            jdbcUrl = "jdbc:h2:file:" + TEST_H2_FILE_PATH + ";MODE=PostgreSQL";
+            user = "sa";
+            password = "";
+        }
+        try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, paramValue);
+            ResultSet rs = ps.executeQuery();
+            if (!rs.next()) {
+                throw new RuntimeException("No rows returned for query: " + sql + " with param: " + paramValue);
+            }
+            return rs.getString(1);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read raw database", e);
         }
     }
 
