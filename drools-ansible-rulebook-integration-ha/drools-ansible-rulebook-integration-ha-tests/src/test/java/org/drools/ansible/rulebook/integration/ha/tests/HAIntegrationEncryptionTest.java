@@ -138,6 +138,16 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
         String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
         assertThat(meUuid).isNotEmpty();
 
+        // Verify raw DB columns are encrypted
+        String rawEventData = TestUtils.queryRawColumn(dbParams,
+                "SELECT event_data FROM drools_ansible_matching_event WHERE ha_uuid = ?", HA_UUID);
+        assertThat(rawEventData).startsWith("$ENCRYPTED$");
+        assertThat(rawEventData).doesNotContain("temperature");
+
+        String rawPartialEvents = TestUtils.queryRawColumn(dbParams,
+                "SELECT partial_matching_events FROM drools_ansible_session_state WHERE ha_uuid = ?", HA_UUID);
+        assertThat(rawPartialEvents).startsWith("$ENCRYPTED$");
+
         // Verify matching event is persisted and readable with encryption
         HAStateManager assertionManager = createEncryptedStateManager();
         try {
@@ -158,6 +168,12 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
         String event = createEvent("{\"temperature\": 45}");
         String result = rulesEngine1.assertEvent(sessionId1, event);
         String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
+
+        // Verify raw DB column is encrypted
+        String rawEventData = TestUtils.queryRawColumn(dbParams,
+                "SELECT event_data FROM drools_ansible_matching_event WHERE ha_uuid = ?", HA_UUID);
+        assertThat(rawEventData).startsWith("$ENCRYPTED$");
+        assertThat(rawEventData).doesNotContain("temperature");
 
         // Failover: node1 stops leading, node2 becomes leader
         rulesEngine1.disableLeader();
@@ -186,6 +202,12 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
         String result = rulesEngine1.assertEvent(sessionId1, event);
         String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
         assertThat(meUuid).isNotEmpty();
+
+        // Verify raw DB column is encrypted with original key
+        String rawEventData = TestUtils.queryRawColumn(dbParams,
+                "SELECT event_data FROM drools_ansible_matching_event WHERE ha_uuid = ?", HA_UUID);
+        assertThat(rawEventData).startsWith("$ENCRYPTED$");
+        assertThat(rawEventData).doesNotContain("temperature");
 
         // Simulate crash + key rotation: node1 goes down, node2 starts with rotated key (+ old key as secondary)
         rulesEngine1.disableLeader();
