@@ -151,9 +151,18 @@ public class TestUtils {
             user = "sa";
             password = "";
         }
+        boolean isPostgres = "postgres".equalsIgnoreCase((String) params.get("db_type"));
         try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, paramValue);
+            if (isPostgres) {
+                try {
+                    ps.setObject(1, UUID.fromString(paramValue));
+                } catch (IllegalArgumentException e) {
+                    ps.setString(1, paramValue);
+                }
+            } else {
+                ps.setString(1, paramValue);
+            }
             ResultSet rs = ps.executeQuery();
             if (!rs.next()) {
                 throw new RuntimeException("No rows returned for query: " + sql + " with param: " + paramValue);
