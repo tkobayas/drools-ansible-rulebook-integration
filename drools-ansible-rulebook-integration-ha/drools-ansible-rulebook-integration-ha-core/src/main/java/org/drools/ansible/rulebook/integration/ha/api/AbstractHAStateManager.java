@@ -8,24 +8,24 @@ import java.util.Set;
 
 import org.drools.ansible.rulebook.integration.api.RulesExecutor;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
-import org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
 import org.drools.ansible.rulebook.integration.ha.model.EventRecord.RecordType;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
+import org.drools.core.time.impl.PseudoClockScheduler;
 import org.kie.api.prototype.PrototypeEventInstance;
 import org.kie.api.prototype.PrototypeFactInstance;
-import org.drools.core.time.impl.PseudoClockScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static org.drools.ansible.rulebook.integration.api.domain.temporal.OnceAbstractTimeConstraint.recreateControlEvent;
-import static org.drools.ansible.rulebook.integration.api.rulesmodel.PrototypeFactory.SYNTHETIC_PROTOTYPE_NAME;
-import static org.drools.ansible.rulebook.integration.api.rulesmodel.PrototypeFactory.getPrototypeEvent;
 import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.normalizeControlEventData;
 
 public abstract class AbstractHAStateManager implements HAStateManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractHAStateManager.class);
+
+    protected static final String DROOLS_VERSION_KEY = "drools_version";
+    public static final String DROOLS_VERSION = "ha-poc-0.0.7";
 
     private final Map<String, SessionState> sessionStateMap = new HashMap<>();
 
@@ -72,6 +72,10 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             LOG.info("Data decrypted with secondary key (will be re-encrypted with primary on next write)");
         }
         return result.plaintext();
+    }
+
+    protected void ensureVersionInMetadata(Map<String, Object> metadata) {
+        metadata.put(DROOLS_VERSION_KEY, DROOLS_VERSION);
     }
 
     @Override

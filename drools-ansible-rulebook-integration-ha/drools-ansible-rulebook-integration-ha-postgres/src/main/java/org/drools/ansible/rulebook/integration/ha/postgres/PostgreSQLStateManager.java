@@ -333,6 +333,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             throw new IllegalArgumentException("SessionState.ruleSetName must be set");
         }
 
+        ensureVersionInMetadata(sessionState.getMetadata());
+
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
@@ -418,6 +420,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             matchingEvent.setCreatedAt(System.currentTimeMillis());
         }
 
+        ensureVersionInMetadata(matchingEvent.getMetadata());
+
         String sql = "INSERT INTO " + MATCHING_EVENT
                 + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
                 + " metadata, properties, settings, ext)"
@@ -498,7 +502,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         String sql = "INSERT INTO " + ACTION_INFO
                 + " (id, ha_uuid, me_uuid, index, action_data,"
                 + " metadata, properties, settings, ext)"
-                + " VALUES (?::uuid, ?, ?::uuid, ?, ?, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)";
+                + " VALUES (?::uuid, ?, ?::uuid, ?, ?, ?::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -509,6 +513,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setObject(3, UUID.fromString(matchingUuid));
             ps.setInt(4, index);
             ps.setString(5, encryptIfEnabled(actionData));
+            ps.setString(6, mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION)));
 
             ps.executeUpdate();
 
@@ -717,6 +722,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
         String globalSessionStatsJson = haStats.getGlobalSessionStats() == null ? null : toJson(haStats.getGlobalSessionStats());
+
+        ensureVersionInMetadata(haStats.getMetadata());
 
         // PostgreSQL: Use INSERT ... ON CONFLICT instead of MERGE
         String sql = "INSERT INTO " + HA_STATS
