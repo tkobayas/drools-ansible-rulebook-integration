@@ -41,6 +41,10 @@ public class H2Schema {
                     + "version INT DEFAULT 1, "
                     + "created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                     + "leader_id VARCHAR(255), "
+                    + "metadata CLOB DEFAULT '{}', "
+                    + "properties CLOB DEFAULT '{}', "
+                    + "settings CLOB DEFAULT '{}', "
+                    + "ext CLOB DEFAULT '{}', "
                     + "UNIQUE(ha_uuid, rule_set_name, version)"
                     + ")";
             stmt.execute(createSessionStateTable);
@@ -53,7 +57,11 @@ public class H2Schema {
                     + "rule_set_name VARCHAR(255), "
                     + "rule_name VARCHAR(255) NOT NULL, "
                     + "event_data CLOB, "
-                    + "created_at BIGINT DEFAULT 0"
+                    + "created_at BIGINT DEFAULT 0, "
+                    + "metadata CLOB DEFAULT '{}', "
+                    + "properties CLOB DEFAULT '{}', "
+                    + "settings CLOB DEFAULT '{}', "
+                    + "ext CLOB DEFAULT '{}'"
                     + ")";
             stmt.execute(createMatchingEventTable);
 
@@ -65,6 +73,10 @@ public class H2Schema {
                     + "me_uuid VARCHAR(36) NOT NULL, "
                     + "index INT NOT NULL, "
                     + "action_data CLOB, "
+                    + "metadata CLOB DEFAULT '{}', "
+                    + "properties CLOB DEFAULT '{}', "
+                    + "settings CLOB DEFAULT '{}', "
+                    + "ext CLOB DEFAULT '{}', "
                     + "UNIQUE(me_uuid, index), "
                     + "FOREIGN KEY (me_uuid) REFERENCES " + MATCHING_EVENT + "(me_uuid) ON DELETE CASCADE"
                     + ")";
@@ -96,12 +108,43 @@ public class H2Schema {
                     + "partial_fulfilled_rules INT DEFAULT 0, "
                     + "session_state_size BIGINT DEFAULT 0, "
                     + "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                    + "metadata CLOB DEFAULT '{}', "
+                    + "properties CLOB DEFAULT '{}', "
+                    + "settings CLOB DEFAULT '{}', "
+                    + "ext CLOB DEFAULT '{}', "
                     + "UNIQUE(ha_uuid)"
                     + ")";
             stmt.execute(createHAStatsTable);
 
             conn.commit();
             logger.info("H2 schema creation completed successfully");
+        }
+    }
+
+    /**
+     * Migrate existing tables to add extensibility columns.
+     * H2 does not support ADD COLUMN IF NOT EXISTS, so each ALTER TABLE is wrapped
+     * in a try-catch that silently ignores "column already exists" errors.
+     */
+    public static void migrateSchema(DataSource dataSource) throws SQLException {
+        String[] tables = {SESSION_STATE, MATCHING_EVENT, ACTION_INFO, HA_STATS};
+        String[] columns = {"metadata", "properties", "settings", "ext"};
+
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement()) {
+
+            for (String table : tables) {
+                for (String column : columns) {
+                    try {
+                        stmt.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " CLOB DEFAULT '{}'");
+                    } catch (SQLException e) {
+                        // Column already exists — ignore
+                    }
+                }
+            }
+
+            conn.commit();
+            logger.debug("H2 schema migration completed");
         }
     }
 

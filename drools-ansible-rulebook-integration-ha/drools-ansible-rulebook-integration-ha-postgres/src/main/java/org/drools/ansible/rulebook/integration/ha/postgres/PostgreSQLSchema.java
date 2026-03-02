@@ -46,6 +46,10 @@ public class PostgreSQLSchema {
                     + "version INT DEFAULT 1, "
                     + "created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                     + "leader_id VARCHAR(255), "
+                    + "metadata JSONB DEFAULT '{}'::jsonb, "
+                    + "properties JSONB DEFAULT '{}'::jsonb, "
+                    + "settings JSONB DEFAULT '{}'::jsonb, "
+                    + "ext JSONB DEFAULT '{}'::jsonb, "
                     + "UNIQUE(ha_uuid, rule_set_name, version)"
                     + ")";
             stmt.execute(createSessionStateTable);
@@ -61,7 +65,11 @@ public class PostgreSQLSchema {
                     + "rule_set_name VARCHAR(255), "
                     + "rule_name VARCHAR(255) NOT NULL, "
                     + "event_data TEXT, "
-                    + "created_at BIGINT DEFAULT 0"
+                    + "created_at BIGINT DEFAULT 0, "
+                    + "metadata JSONB DEFAULT '{}'::jsonb, "
+                    + "properties JSONB DEFAULT '{}'::jsonb, "
+                    + "settings JSONB DEFAULT '{}'::jsonb, "
+                    + "ext JSONB DEFAULT '{}'::jsonb"
                     + ")";
             stmt.execute(createMatchingEventTable);
 
@@ -76,6 +84,10 @@ public class PostgreSQLSchema {
                     + "me_uuid UUID NOT NULL, "
                     + "index INT NOT NULL, "
                     + "action_data TEXT, "
+                    + "metadata JSONB DEFAULT '{}'::jsonb, "
+                    + "properties JSONB DEFAULT '{}'::jsonb, "
+                    + "settings JSONB DEFAULT '{}'::jsonb, "
+                    + "ext JSONB DEFAULT '{}'::jsonb, "
                     + "UNIQUE(me_uuid, index), "
                     + "FOREIGN KEY (me_uuid) REFERENCES " + MATCHING_EVENT + "(me_uuid) ON DELETE CASCADE"
                     + ")";
@@ -109,12 +121,40 @@ public class PostgreSQLSchema {
                     + "partial_fulfilled_rules INT DEFAULT 0, "
                     + "session_state_size BIGINT DEFAULT 0, "
                     + "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                    + "metadata JSONB DEFAULT '{}'::jsonb, "
+                    + "properties JSONB DEFAULT '{}'::jsonb, "
+                    + "settings JSONB DEFAULT '{}'::jsonb, "
+                    + "ext JSONB DEFAULT '{}'::jsonb, "
                     + "UNIQUE(ha_uuid)"
                     + ")";
             stmt.execute(createHAStatsTable);
 
             conn.commit();
             logger.info("PostgreSQL schema creation completed successfully");
+        }
+    }
+
+    /**
+     * Migrate existing tables to add extensibility columns.
+     * PostgreSQL supports ADD COLUMN IF NOT EXISTS.
+     */
+    public static void migrateSchema(DataSource dataSource) throws SQLException {
+        String[] tables = {SESSION_STATE, MATCHING_EVENT, ACTION_INFO, HA_STATS};
+        String[] columns = {"metadata", "properties", "settings", "ext"};
+
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement()) {
+
+            conn.setAutoCommit(false);
+
+            for (String table : tables) {
+                for (String column : columns) {
+                    stmt.execute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS " + column + " JSONB DEFAULT '{}'::jsonb");
+                }
+            }
+
+            conn.commit();
+            logger.debug("PostgreSQL schema migration completed");
         }
     }
 
