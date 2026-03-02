@@ -7,6 +7,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -96,6 +97,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
         try {
             H2Schema.createSchema(dataSource);
+            H2Schema.migrateSchema(dataSource);
 
             // Initialize or load HA stats
             loadOrCreateHAStats();
@@ -216,6 +218,12 @@ public class H2StateManager extends AbstractHAStateManager {
                     sessionState.setCreatedTime(createdTime.getTime());
                 }
 
+                // Handle extensibility columns
+                sessionState.setMetadata(jsonToMap(rs.getString("metadata")));
+                sessionState.setProperties(jsonToMap(rs.getString("properties")));
+                sessionState.setSettings(jsonToMap(rs.getString("settings")));
+                sessionState.setExt(jsonToMap(rs.getString("ext")));
+
                 logger.info("Loaded SessionState from database: {}", ruleSetName);
 
                 return sessionState;
@@ -243,10 +251,11 @@ public class H2StateManager extends AbstractHAStateManager {
             // Insert new version as current
             // Note: SHA is already calculated in updateInMemorySessionState() before this is called
             String sql = "INSERT INTO " + SESSION_STATE
-                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha, version, created_time, leader_id)"
+                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha, version, created_time, leader_id,"
+                    + " metadata, properties, settings, ext)"
                     + " VALUES (?, ?, ?, ?, ?, ?, ?,"
                     + " COALESCE((SELECT MAX(version) FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,"
-                    + " ?, ?)";
+                    + " ?, ?, ?, ?, ?, ?)";
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, sessionState.getHaUuid());
@@ -289,6 +298,12 @@ public class H2StateManager extends AbstractHAStateManager {
 
                 ps.setString(11, sessionState.getLeaderId());
 
+                // Extensibility columns
+                ps.setString(12, mapToJson(sessionState.getMetadata()));
+                ps.setString(13, mapToJson(sessionState.getProperties()));
+                ps.setString(14, mapToJson(sessionState.getSettings()));
+                ps.setString(15, mapToJson(sessionState.getExt()));
+
                 ps.executeUpdate();
             }
 
@@ -314,8 +329,9 @@ public class H2StateManager extends AbstractHAStateManager {
         }
 
         String sql = "INSERT INTO " + MATCHING_EVENT
-                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at)"
-                + " VALUES (?, ?, ?, ?, ?, ?)";
+                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
+                + " metadata, properties, settings, ext)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -326,6 +342,10 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(4, matchingEvent.getRuleName());
             ps.setString(5, encryptIfEnabled(matchingEvent.getEventData()));
             ps.setLong(6, matchingEvent.getCreatedAt());
+            ps.setString(7, mapToJson(matchingEvent.getMetadata()));
+            ps.setString(8, mapToJson(matchingEvent.getProperties()));
+            ps.setString(9, mapToJson(matchingEvent.getSettings()));
+            ps.setString(10, mapToJson(matchingEvent.getExt()));
 
             ps.executeUpdate();
 
@@ -358,6 +378,10 @@ public class H2StateManager extends AbstractHAStateManager {
                 event.setRuleName(rs.getString("rule_name"));
                 event.setEventData(decryptIfEnabled(rs.getString("event_data")));
                 event.setCreatedAt(rs.getLong("created_at"));
+                event.setMetadata(jsonToMap(rs.getString("metadata")));
+                event.setProperties(jsonToMap(rs.getString("properties")));
+                event.setSettings(jsonToMap(rs.getString("settings")));
+                event.setExt(jsonToMap(rs.getString("ext")));
                 events.add(event);
             }
         } catch (SQLException e) {
@@ -376,8 +400,9 @@ public class H2StateManager extends AbstractHAStateManager {
         String actionId = UUID.randomUUID().toString();
 
         String sql = "INSERT INTO " + ACTION_INFO
-                + " (id, ha_uuid, me_uuid, index, action_data)"
-                + " VALUES (?, ?, ?, ?, ?)";
+                + " (id, ha_uuid, me_uuid, index, action_data,"
+                + " metadata, properties, settings, ext)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -387,6 +412,10 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(3, matchingUuid);
             ps.setInt(4, index);
             ps.setString(5, encryptIfEnabled(action));
+            ps.setString(6, "{}");
+            ps.setString(7, "{}");
+            ps.setString(8, "{}");
+            ps.setString(9, "{}");
 
             ps.executeUpdate();
 
@@ -576,6 +605,10 @@ public class H2StateManager extends AbstractHAStateManager {
                 }
                 haStats.setPartialFulfilledRules(rs.getInt("partial_fulfilled_rules"));
                 haStats.setSessionStateSize(rs.getLong("session_state_size"));
+                haStats.setMetadata(jsonToMap(rs.getString("metadata")));
+                haStats.setProperties(jsonToMap(rs.getString("properties")));
+                haStats.setSettings(jsonToMap(rs.getString("settings")));
+                haStats.setExt(jsonToMap(rs.getString("ext")));
 
                 logger.info("Restored HA stats from database");
             } else {
@@ -612,8 +645,9 @@ public class H2StateManager extends AbstractHAStateManager {
         String h2Sql = "MERGE INTO " + HA_STATS
                 + " (ha_uuid, current_leader, leader_switches, current_term_started_at,"
                 + " events_processed_in_term, actions_processed_in_term, incomplete_matching_events,"
-                + " partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at)"
-                + " KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at,"
+                + " metadata, properties, settings, ext)"
+                + " KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(h2Sql)) {
@@ -630,6 +664,10 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setInt(10, haStats.getPartialFulfilledRules());
             ps.setLong(11, haStats.getSessionStateSize());
             ps.setTimestamp(12, Timestamp.from(Instant.now()));
+            ps.setString(13, mapToJson(haStats.getMetadata()));
+            ps.setString(14, mapToJson(haStats.getProperties()));
+            ps.setString(15, mapToJson(haStats.getSettings()));
+            ps.setString(16, mapToJson(haStats.getExt()));
 
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -647,6 +685,10 @@ public class H2StateManager extends AbstractHAStateManager {
                 + " OCTET_LENGTH(rule_set_name) +"
                 + " COALESCE(OCTET_LENGTH(rulebook_hash), 0) +"
                 + " COALESCE(OCTET_LENGTH(partial_matching_events), 0) +"
+                + " COALESCE(OCTET_LENGTH(metadata), 0) +"
+                + " COALESCE(OCTET_LENGTH(properties), 0) +"
+                + " COALESCE(OCTET_LENGTH(settings), 0) +"
+                + " COALESCE(OCTET_LENGTH(ext), 0) +"
                 + " 8 + 8 + 8 + 8 AS total_size"
                 + " FROM " + SESSION_STATE
                 + " WHERE ha_uuid = ?"
@@ -752,6 +794,21 @@ public class H2StateManager extends AbstractHAStateManager {
             logger.error("Failed to fetch action status", e);
         }
         return null;
+    }
+
+    private String mapToJson(Map<String, Object> map) {
+        if (map == null || map.isEmpty()) return "{}";
+        return toJson(map);
+    }
+
+    private Map<String, Object> jsonToMap(String json) {
+        if (json == null || json.isBlank() || "{}".equals(json)) return new HashMap<>();
+        try {
+            return readValueAsMapOfStringAndObject(json);
+        } catch (Exception e) {
+            logger.warn("Failed to parse JSON map, returning empty: {}", e.getMessage());
+            return new HashMap<>();
+        }
     }
 
     private Integer extractStatus(String actionJson) {

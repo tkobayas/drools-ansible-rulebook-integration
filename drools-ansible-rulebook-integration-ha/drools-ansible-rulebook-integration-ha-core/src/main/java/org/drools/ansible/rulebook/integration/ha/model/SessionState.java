@@ -1,6 +1,7 @@
 package org.drools.ansible.rulebook.integration.ha.model;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,12 @@ public class SessionState {
 
     // For integrity checks
     private String currentStateSHA;      // SHA256 of current state
+
+    // Extensibility columns for future use without schema migration
+    private Map<String, Object> metadata = new HashMap<>();
+    private Map<String, Object> properties = new HashMap<>();
+    private Map<String, Object> settings = new HashMap<>();
+    private Map<String, Object> ext = new HashMap<>();
 
     public SessionState() {
         this.createdTime = Instant.now().toEpochMilli();
@@ -116,11 +123,44 @@ public class SessionState {
     }
 
 
+    public Map<String, Object> getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Map<String, Object> metadata) {
+        this.metadata = metadata != null ? metadata : new HashMap<>();
+    }
+
+    public Map<String, Object> getProperties() {
+        return properties;
+    }
+
+    public void setProperties(Map<String, Object> properties) {
+        this.properties = properties != null ? properties : new HashMap<>();
+    }
+
+    public Map<String, Object> getSettings() {
+        return settings;
+    }
+
+    public void setSettings(Map<String, Object> settings) {
+        this.settings = settings != null ? settings : new HashMap<>();
+    }
+
+    public Map<String, Object> getExt() {
+        return ext;
+    }
+
+    public void setExt(Map<String, Object> ext) {
+        this.ext = ext != null ? ext : new HashMap<>();
+    }
+
     /**
      * Returns a canonical representation of this SessionState for SHA calculation.
      * Excludes fields that are not part of the semantic working memory state:
      * - currentStateSHA: can't hash itself (circular dependency)
      * - version: database-managed persistence version counter, not working memory state
+     * - metadata, properties, settings, ext: extensibility placeholders, not semantic state
      *
      * @return JSON string with deterministic field ordering for consistent hashing
      */
