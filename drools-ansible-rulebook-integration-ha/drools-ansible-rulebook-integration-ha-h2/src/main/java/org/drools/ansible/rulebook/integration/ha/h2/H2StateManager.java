@@ -245,6 +245,8 @@ public class H2StateManager extends AbstractHAStateManager {
             throw new IllegalArgumentException("SessionState.ruleSetName must be set");
         }
 
+        ensureVersionInMetadata(sessionState.getMetadata());
+
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
@@ -327,6 +329,8 @@ public class H2StateManager extends AbstractHAStateManager {
         if (matchingEvent.getCreatedAt() == 0L) {
             matchingEvent.setCreatedAt(System.currentTimeMillis());
         }
+
+        ensureVersionInMetadata(matchingEvent.getMetadata());
 
         String sql = "INSERT INTO " + MATCHING_EVENT
                 + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
@@ -412,7 +416,7 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(3, matchingUuid);
             ps.setInt(4, index);
             ps.setString(5, encryptIfEnabled(action));
-            ps.setString(6, "{}");
+            ps.setString(6, mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION)));
             ps.setString(7, "{}");
             ps.setString(8, "{}");
             ps.setString(9, "{}");
@@ -640,6 +644,8 @@ public class H2StateManager extends AbstractHAStateManager {
         haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
         String globalSessionStatsJson = haStats.getGlobalSessionStats() == null ? null : toJson(haStats.getGlobalSessionStats());
+
+        ensureVersionInMetadata(haStats.getMetadata());
 
         // For H2, use MERGE statement
         String h2Sql = "MERGE INTO " + HA_STATS
