@@ -2,6 +2,8 @@ package org.drools.ansible.rulebook.integration.ha.model;
 
 import java.io.Serializable;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
@@ -12,7 +14,7 @@ import org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats;
  */
 public class HAStats implements Serializable {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private String haUuid;
     private String currentLeader;
@@ -25,6 +27,12 @@ public class HAStats implements Serializable {
     private int partialFulfilledRules;
     private SessionStats globalSessionStats;
     private Long sessionStateSize;  // Size in bytes of the latest SessionState record
+
+    // Extensibility columns for future use without schema migration
+    private Map<String, Object> metadata = new HashMap<>();
+    private Map<String, Object> properties = new HashMap<>();
+    private Map<String, Object> settings = new HashMap<>();
+    private Map<String, Object> ext = new HashMap<>();
 
     public HAStats() {
         this.leaderSwitches = 0;
@@ -246,6 +254,38 @@ public class HAStats implements Serializable {
         this.sessionStateSize = sessionStateSize;
     }
 
+    public Map<String, Object> getMetadata() {
+        return metadata;
+    }
+
+    public void setMetadata(Map<String, Object> metadata) {
+        this.metadata = metadata != null ? metadata : new HashMap<>();
+    }
+
+    public Map<String, Object> getProperties() {
+        return properties;
+    }
+
+    public void setProperties(Map<String, Object> properties) {
+        this.properties = properties != null ? properties : new HashMap<>();
+    }
+
+    public Map<String, Object> getSettings() {
+        return settings;
+    }
+
+    public void setSettings(Map<String, Object> settings) {
+        this.settings = settings != null ? settings : new HashMap<>();
+    }
+
+    public Map<String, Object> getExt() {
+        return ext;
+    }
+
+    public void setExt(Map<String, Object> ext) {
+        this.ext = ext != null ? ext : new HashMap<>();
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -265,14 +305,19 @@ public class HAStats implements Serializable {
                 Objects.equals(haUuid, haStats.haUuid) &&
                 Objects.equals(currentLeader, haStats.currentLeader) &&
                 Objects.equals(currentTermStartedAt, haStats.currentTermStartedAt) &&
-                Objects.equals(sessionStateSize, haStats.sessionStateSize);
+                Objects.equals(sessionStateSize, haStats.sessionStateSize) &&
+                Objects.equals(metadata, haStats.metadata) &&
+                Objects.equals(properties, haStats.properties) &&
+                Objects.equals(settings, haStats.settings) &&
+                Objects.equals(ext, haStats.ext);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(haUuid, currentLeader, leaderSwitches, currentTermStartedAt,
                             eventsProcessedInTerm, actionsProcessedInTerm, incompleteMatchingEvents,
-                            partialEventsInMemory, partialFulfilledRules, globalSessionStats, sessionStateSize);
+                            partialEventsInMemory, partialFulfilledRules, globalSessionStats, sessionStateSize,
+                            metadata, properties, settings, ext);
     }
 
     @Override
@@ -289,6 +334,10 @@ public class HAStats implements Serializable {
                 ", partialFulfilledRules=" + partialFulfilledRules +
                 ", globalSessionStats=" + globalSessionStats +
                 ", sessionStateSize=" + sessionStateSize +
+                ", metadata=" + metadata +
+                ", properties=" + properties +
+                ", settings=" + settings +
+                ", ext=" + ext +
                 '}';
     }
 }
