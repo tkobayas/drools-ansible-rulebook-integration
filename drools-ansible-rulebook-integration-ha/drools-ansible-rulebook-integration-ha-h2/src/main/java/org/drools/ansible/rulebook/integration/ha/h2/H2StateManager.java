@@ -8,6 +8,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -55,11 +56,10 @@ public class H2StateManager extends AbstractHAStateManager {
     public void printDatabaseContents() {
         try (var conn = dataSource.getConnection();
              var stmt = conn.createStatement()) {
-            try (var rs = stmt.executeQuery("SELECT ha_uuid, current_leader, global_session_stats FROM " + HA_STATS)) {
+            try (var rs = stmt.executeQuery("SELECT ha_uuid, properties FROM " + HA_STATS)) {
                 while (rs.next()) {
                     logger.info("#### HAStats row: ha_uuid=" + rs.getString("ha_uuid")
-                                               + ", current_leader=" + rs.getString("current_leader")
-                                               + ", global_session_stats=" + rs.getString("global_session_stats"));
+                                               + ", properties=" + rs.getString("properties"));
                 }
             }
         } catch (Exception e) {
@@ -596,24 +596,10 @@ public class H2StateManager extends AbstractHAStateManager {
 
             if (rs.next()) {
                 haStats.setHaUuid(rs.getString("ha_uuid"));
-                haStats.setCurrentLeader(rs.getString("current_leader"));
-                haStats.setLeaderSwitches(rs.getInt("leader_switches"));
-                haStats.setCurrentTermStartedAt(rs.getString("current_term_started_at"));
-                haStats.setEventsProcessedInTerm(rs.getInt("events_processed_in_term"));
-                haStats.setActionsProcessedInTerm(rs.getInt("actions_processed_in_term"));
-                haStats.setIncompleteMatchingEvents(rs.getInt("incomplete_matching_events"));
-                haStats.setPartialEventsInMemory(rs.getInt("partial_events_in_memory"));
-                String globalSessionStatsJson = rs.getString("global_session_stats");
-                if (globalSessionStatsJson != null && !globalSessionStatsJson.isBlank()) {
-                    haStats.setGlobalSessionStats(readValue(globalSessionStatsJson, org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats.class));
-                }
-                haStats.setPartialFulfilledRules(rs.getInt("partial_fulfilled_rules"));
-                haStats.setSessionStateSize(rs.getLong("session_state_size"));
+                populateHAStatsFromJson(rs.getString("properties"), haStats);
                 haStats.setMetadata(jsonToMap(rs.getString("metadata")));
-                haStats.setProperties(jsonToMap(rs.getString("properties")));
                 haStats.setSettings(jsonToMap(rs.getString("settings")));
                 haStats.setExt(jsonToMap(rs.getString("ext")));
-
                 logger.info("Restored HA stats from database");
             } else {
                 // Create initial stats
@@ -643,37 +629,25 @@ public class H2StateManager extends AbstractHAStateManager {
         haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
         haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
-        String globalSessionStatsJson = haStats.getGlobalSessionStats() == null ? null : toJson(haStats.getGlobalSessionStats());
 
         ensureVersionInMetadata(haStats.getMetadata());
 
+        String propertiesJson = haStatsToJson(haStats);
+
         // For H2, use MERGE statement
         String h2Sql = "MERGE INTO " + HA_STATS
-                + " (ha_uuid, current_leader, leader_switches, current_term_started_at,"
-                + " events_processed_in_term, actions_processed_in_term, incomplete_matching_events,"
-                + " partial_events_in_memory, global_session_stats, partial_fulfilled_rules, session_state_size, updated_at,"
-                + " metadata, properties, settings, ext)"
-                + " KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                + " (ha_uuid, properties, updated_at, metadata, settings, ext)"
+                + " KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?)";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(h2Sql)) {
 
             ps.setString(1, haStats.getHaUuid());
-            ps.setString(2, haStats.getCurrentLeader());
-            ps.setInt(3, haStats.getLeaderSwitches());
-            ps.setString(4, haStats.getCurrentTermStartedAt());
-            ps.setInt(5, haStats.getEventsProcessedInTerm());
-            ps.setInt(6, haStats.getActionsProcessedInTerm());
-            ps.setInt(7, haStats.getIncompleteMatchingEvents());
-            ps.setInt(8, haStats.getPartialEventsInMemory());
-            ps.setString(9, globalSessionStatsJson);
-            ps.setInt(10, haStats.getPartialFulfilledRules());
-            ps.setLong(11, haStats.getSessionStateSize());
-            ps.setTimestamp(12, Timestamp.from(Instant.now()));
-            ps.setString(13, mapToJson(haStats.getMetadata()));
-            ps.setString(14, mapToJson(haStats.getProperties()));
-            ps.setString(15, mapToJson(haStats.getSettings()));
-            ps.setString(16, mapToJson(haStats.getExt()));
+            ps.setString(2, propertiesJson);
+            ps.setTimestamp(3, Timestamp.from(Instant.now()));
+            ps.setString(4, mapToJson(haStats.getMetadata()));
+            ps.setString(5, mapToJson(haStats.getSettings()));
+            ps.setString(6, mapToJson(haStats.getExt()));
 
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -800,6 +774,50 @@ public class H2StateManager extends AbstractHAStateManager {
             logger.error("Failed to fetch action status", e);
         }
         return null;
+    }
+
+    private String haStatsToJson(HAStats stats) {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("current_leader", stats.getCurrentLeader());
+        props.put("leader_switches", stats.getLeaderSwitches());
+        props.put("current_term_started_at", stats.getCurrentTermStartedAt());
+        props.put("events_processed_in_term", stats.getEventsProcessedInTerm());
+        props.put("actions_processed_in_term", stats.getActionsProcessedInTerm());
+        props.put("incomplete_matching_events", stats.getIncompleteMatchingEvents());
+        props.put("partial_events_in_memory", stats.getPartialEventsInMemory());
+        props.put("global_session_stats", stats.getGlobalSessionStats());
+        props.put("partial_fulfilled_rules", stats.getPartialFulfilledRules());
+        props.put("session_state_size", stats.getSessionStateSize());
+        // metadata, settings, ext are stored in separate DB columns
+        return toJson(props);
+    }
+
+    private void populateHAStatsFromJson(String json, HAStats stats) {
+        if (json == null || json.isBlank() || "{}".equals(json)) {
+            return;
+        }
+        Map<String, Object> props = jsonToMap(json);
+        stats.setCurrentLeader((String) props.get("current_leader"));
+        stats.setLeaderSwitches(getIntFromMap(props, "leader_switches"));
+        stats.setCurrentTermStartedAt((String) props.get("current_term_started_at"));
+        stats.setEventsProcessedInTerm(getIntFromMap(props, "events_processed_in_term"));
+        stats.setActionsProcessedInTerm(getIntFromMap(props, "actions_processed_in_term"));
+        stats.setIncompleteMatchingEvents(getIntFromMap(props, "incomplete_matching_events"));
+        stats.setPartialEventsInMemory(getIntFromMap(props, "partial_events_in_memory"));
+        Object gss = props.get("global_session_stats");
+        if (gss != null) {
+            stats.setGlobalSessionStats(readValue(toJson(gss),
+                    org.drools.ansible.rulebook.integration.api.rulesengine.SessionStats.class));
+        }
+        stats.setPartialFulfilledRules(getIntFromMap(props, "partial_fulfilled_rules"));
+        Object ssSize = props.get("session_state_size");
+        stats.setSessionStateSize(ssSize instanceof Number ? ((Number) ssSize).longValue() : 0L);
+        // metadata, settings, ext are loaded from separate DB columns
+    }
+
+    private int getIntFromMap(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        return value instanceof Number ? ((Number) value).intValue() : 0;
     }
 
     private String mapToJson(Map<String, Object> map) {
