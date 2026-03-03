@@ -24,7 +24,7 @@ public class HARulesExecutorFactory extends RulesExecutorFactory {
     }
 
     // takes rulesetString for clean RulesSet generation, because RulesSet contains model generation state
-    public static RulesExecutor createRulesExecutorWithRecovery(String rulesetString, Consumer<RulesExecutor> recovery) {
+    public static RulesExecutor createRulesExecutorWithRecovery(String rulesetString, Consumer<HARulesExecutor> recovery) {
         LOG.info("**** Creating RulesExecutor in recovery mode ****");
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
         HARulesExecutor rulesExecutor = new HARulesExecutor(createRulesExecutorSession(rulesSet), rulesetString);

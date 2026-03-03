@@ -495,6 +495,10 @@ public class AstRulesEngine implements Closeable {
         }
 
         RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesetString(), persistedSessionState, executor.asKieSession().getSessionClock().getCurrentTime());
+
+        // Persist grace-period recovery matches before replacing the executor
+        persistRecoveryMatches(recoveredRulesExecutor);
+
         long previousId = executor.getId();
         RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
         if (removed != null) {
@@ -532,6 +536,9 @@ public class AstRulesEngine implements Closeable {
                 } else {
                     // Persisted state exists with same rulebook - recover from it
                     RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
+
+                    // Persist grace-period recovery matches
+                    persistRecoveryMatches(recoveredExecutor);
 
                     // Set dedup buffer size on recovered executor
                     ((HARulesExecutor) recoveredExecutor).getHaSessionContext().setMaxProcessedIds(dedupBufferSize);
@@ -766,6 +773,35 @@ public class AstRulesEngine implements Closeable {
 
         haStats.setGlobalSessionStats(merged);
         lastAggregatedSessionStatsByLeader.put(haStateManager.getLeaderId(), currentAggregate);
+    }
+
+    /**
+     * Consume grace-period-eligible recovery matches from the executor and persist them
+     * as MatchingEvent entries in the database. These will be dispatched to Python via
+     * the existing recoverPendingMatchingEvents() flow.
+     */
+    private void persistRecoveryMatches(RulesExecutor executor) {
+        if (!(executor instanceof HARulesExecutor haExecutor)) return;
+
+        List<Match> recoveryMatches = haExecutor.consumeRecoveryMatches();
+        if (recoveryMatches == null || recoveryMatches.isEmpty()) return;
+
+        String rulesetName = executor.getRuleSetName();
+        List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(recoveryMatches);
+
+        for (Map<String, Map<String, Object>> matchData : matchList) {
+            String ruleName = matchData.keySet().iterator().next();
+            Map<String, Object> eventData = matchData.get(ruleName);
+
+            MatchingEvent me = new MatchingEvent();
+            me.setHaUuid(haStateManager.getHaUuid());
+            me.setRuleSetName(rulesetName);
+            me.setRuleName(ruleName);
+            me.setEventData(toJson(eventData));
+
+            String meUuid = haStateManager.addMatchingEvent(me);
+            logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}", ruleName, meUuid);
+        }
     }
 
     /**

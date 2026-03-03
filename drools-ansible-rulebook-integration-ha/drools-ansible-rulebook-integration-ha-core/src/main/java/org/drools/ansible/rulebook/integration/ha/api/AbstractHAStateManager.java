@@ -1,5 +1,7 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -14,6 +16,7 @@ import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.core.time.impl.PseudoClockScheduler;
 import org.kie.api.prototype.PrototypeEventInstance;
 import org.kie.api.prototype.PrototypeFactInstance;
+import org.kie.api.runtime.rule.Match;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,12 +34,30 @@ public abstract class AbstractHAStateManager implements HAStateManager {
 
     private HAEncryption encryption; // null = disabled
 
+    protected long gracePeriodMs = 0;
+
     /**
      * Common initialization for cross-cutting concerns (encryption, future features).
      * Must be called by every subclass at the end of {@code initializeHA()}.
      */
     protected final void commonInit(Map<String, Object> config) {
         initializeEncryption(config);
+        initializeGracePeriod(config);
+    }
+
+    private void initializeGracePeriod(Map<String, Object> config) {
+        if (config == null) return;
+        Object value = config.get("expired_window_grace_period");
+        if (value instanceof Number) {
+            long seconds = ((Number) value).longValue();
+            if (seconds < 0) {
+                seconds = 0;
+            }
+            this.gracePeriodMs = seconds * 1000L;
+            if (this.gracePeriodMs > 0) {
+                LOG.info("Expired window grace period set to {} seconds ({}ms)", seconds, this.gracePeriodMs);
+            }
+        }
     }
 
     private void initializeEncryption(Map<String, Object> config) {
@@ -100,6 +121,26 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                 }
             }
 
+            // Grace period pre-scan: build map of rule name → window expiry time
+            // for grace-eligible controls (CONTROL_ONCE_AFTER and CONTROL_TIMED_OUT)
+            Map<String, Long> ruleExpiryTimes = new HashMap<>();
+            if (gracePeriodMs > 0) {
+                for (EventRecord er : partialEvents) {
+                    if (isGracePeriodEligible(er)) {
+                        long expiryTime = er.getInsertedAt() + er.getExpirationDuration();
+                        if (expiryTime <= currentTimeAtNewNode) { // already expired, candidate for grace period
+                            String ruleName = extractUserRuleNameFromControl(er);
+                            if (ruleName != null) {
+                                ruleExpiryTimes.merge(ruleName, expiryTime, Math::max);
+                            }
+                        }
+                    }
+                }
+                if (!ruleExpiryTimes.isEmpty()) {
+                    LOG.info("Grace period pre-scan found {} rules with expired windows: {}", ruleExpiryTimes.size(), ruleExpiryTimes.keySet());
+                }
+            }
+
             for (EventRecord eventRecord : partialEvents) {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
                 RecordType recordType = eventRecord.getRecordType();
@@ -154,19 +195,94 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                 }
                 currentTime = eventRecord.getInsertedAt();
             }
-            rulesExecutor.advanceTime(sessionState.getPersistedTime() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
+
+            // Advance clock to persisted time and then to current node time, capturing matches
+            List<Match> catchUpMatches = rulesExecutor.advanceTime(sessionState.getPersistedTime() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS).join();
+            List<Match> nodeTimeMatches = Collections.emptyList();
             // TODO: Do we need to consider clock drift between nodes?
             if (currentTimeAtNewNode > sessionState.getPersistedTime()) {
                 LOG.debug("  Advancing recovered session clock from persisted time to current node time");
-                rulesExecutor.advanceTime(currentTimeAtNewNode - sessionState.getPersistedTime(), java.util.concurrent.TimeUnit.MILLISECONDS);
+                nodeTimeMatches = rulesExecutor.advanceTime(currentTimeAtNewNode - sessionState.getPersistedTime(), java.util.concurrent.TimeUnit.MILLISECONDS).join();
             }
 
             // Restore processed event IDs from persisted state for duplicate detection
-            if (rulesExecutor instanceof HARulesExecutor haExecutor && sessionState.getProcessedEventIds() != null) {
-                haExecutor.getHaSessionContext().setProcessedEventIds(sessionState.getProcessedEventIds());
+            if (sessionState.getProcessedEventIds() != null) {
+                rulesExecutor.getHaSessionContext().setProcessedEventIds(sessionState.getProcessedEventIds());
                 LOG.debug("  Restored {} processed event IDs from persisted state", sessionState.getProcessedEventIds().size());
             }
+
+            // Grace period: filter recovery matches and store eligible ones on the executor
+            if (gracePeriodMs > 0) {
+                List<Match> allRecoveryMatches = new ArrayList<>(catchUpMatches);
+                allRecoveryMatches.addAll(nodeTimeMatches);
+                filterAndStoreGracePeriodMatches(allRecoveryMatches, ruleExpiryTimes, currentTimeAtNewNode, rulesExecutor);
+            }
         });
+    }
+
+    /**
+     * Filter recovery matches by grace period eligibility and store eligible ones on the executor.
+     */
+    private void filterAndStoreGracePeriodMatches(List<Match> recoveryMatches, Map<String, Long> ruleExpiryTimes,
+                                                  long currentTimeAtNewNode, HARulesExecutor haExecutor) {
+        if (recoveryMatches.isEmpty()) return;
+
+        List<Match> eligibleMatches = new ArrayList<>();
+        for (Match match : recoveryMatches) {
+            String matchRuleName = match.getRule().getName();
+            Long expiryTime = ruleExpiryTimes.get(matchRuleName);
+            if (expiryTime == null) {
+                LOG.debug("Skipping recovery match for rule '{}' (not found in grace period pre-scan)", matchRuleName);
+                continue;
+            }
+            long lateness = currentTimeAtNewNode - expiryTime;
+
+            if (lateness <= gracePeriodMs) {
+                LOG.info("Recovery match within grace period for rule '{}' (expired {}ms ago, grace={}ms)",
+                        matchRuleName, lateness, gracePeriodMs);
+                eligibleMatches.add(match);
+            } else {
+                LOG.warn("Dropping expired recovery match for rule '{}' (expired {}ms ago, grace={}ms)",
+                        matchRuleName, lateness, gracePeriodMs);
+            }
+        }
+
+        if (!eligibleMatches.isEmpty()) {
+            haExecutor.addRecoveryMatches(eligibleMatches);
+        }
+    }
+
+    /**
+     * Check if an event record is eligible for grace period recovery.
+     * Only once_after and timed_out (not_all+timeout) controls with finite expiration are grace-eligible.
+     */
+    private static boolean isGracePeriodEligible(EventRecord er) {
+        if (er.getExpirationDuration() == null || er.getExpirationDuration() == Long.MAX_VALUE) return false;
+        return er.getRecordType() == RecordType.CONTROL_ONCE_AFTER || er.getRecordType() == RecordType.CONTROL_TIMED_OUT;
+    }
+
+    /**
+     * Extract the user rule name from a grace-eligible control event record.
+     * For CONTROL_ONCE_AFTER: looks for "start_once_after" field in the event JSON.
+     * For CONTROL_TIMED_OUT: looks for "rulename" field with "start_" prefix.
+     * Returns null if the rule name cannot be extracted (safe fallback — event is skipped).
+     */
+    private String extractUserRuleNameFromControl(EventRecord er) {
+        try {
+            Map<String, Object> data = JsonMapper.readValueAsMapOfStringAndObject(er.getEventJson());
+            if (er.getRecordType() == RecordType.CONTROL_ONCE_AFTER) {
+                Object val = data.get("start_once_after");
+                return val instanceof String ? (String) val : null;
+            } else if (er.getRecordType() == RecordType.CONTROL_TIMED_OUT) {
+                Object val = data.get("rulename");
+                if (val instanceof String rn && rn.startsWith("start_")) {
+                    return rn.substring("start_".length());
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("Failed to extract rule name from control event: {}", e.getMessage());
+        }
+        return null;
     }
 
     @Override
