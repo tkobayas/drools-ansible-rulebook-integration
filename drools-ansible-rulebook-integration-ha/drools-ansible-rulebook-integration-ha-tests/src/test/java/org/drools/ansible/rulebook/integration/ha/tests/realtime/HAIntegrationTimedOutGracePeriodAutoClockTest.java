@@ -10,7 +10,6 @@ import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.tests.AbstractHATestBase;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,55 +19,57 @@ import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
- * Grace period tests with AutomaticPseudoClock (real-time).
- * Unlike HAIntegrationGracePeriodTest which uses FULLY_MANUAL_PSEUDOCLOCK,
- * these tests let the auto-clock run naturally so windows expire via
+ * Grace period tests for not_all+timeout rules with AutomaticPseudoClock (real-time).
+ * Unlike HAIntegrationTimedOutGracePeriodTest which uses FULLY_MANUAL_PSEUDOCLOCK,
+ * these tests let the auto-clock run naturally so timeouts expire via
  * the daemon thread's scheduledAdvanceTimeToMills() path.
  *
- * Scenario: Insert event on Node1 leader, failover before the window expires,
- * Node2 recovers and the once_after window expires during recovery clock jump.
+ * Scenario: Insert partial match on Node1 leader, failover before the timeout expires,
+ * Node2 recovers and the timeout expires during recovery clock jump.
  * The grace period determines whether the match is dispatched.
  */
-class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
+class HAIntegrationTimedOutGracePeriodAutoClockTest extends AbstractHATestBase {
 
-    private static final String HA_UUID = "grace-autoclock-ha-1";
+    private static final String HA_UUID = "grace-timedout-autoclock-ha-1";
 
-    private static final String RULE_SET_ONCE_AFTER_3S = """
+    private static final String RULE_SET_TIMED_OUT_3S = """
             {
-                "name": "GracePeriod AutoClock Ruleset",
+                "name": "GracePeriod TimedOut AutoClock Ruleset",
                 "rules": [
                     {"Rule": {
-                        "name": "alert_throttle",
+                        "name": "maint failed",
                         "condition": {
-                            "AllCondition": [
+                            "NotAllCondition": [
                                 {
                                     "EqualsExpression": {
                                         "lhs": {
-                                            "Event": "alert.type"
+                                            "Event": "alert.code"
                                         },
                                         "rhs": {
-                                            "String": "warning"
+                                            "Integer": 1001
+                                        }
+                                    }
+                                },
+                                {
+                                    "EqualsExpression": {
+                                        "lhs": {
+                                            "Event": "alert.code"
+                                        },
+                                        "rhs": {
+                                            "Integer": 1002
                                         }
                                     }
                                 }
                             ],
-                            "throttle": {
-                                "group_by_attributes": [
-                                    "event.alert.host"
-                                ],
-                                "once_after": "3 seconds"
-                            }
+                            "timeout": "3 seconds"
                         },
                         "action": {
-                            "run_playbook": [
-                                {
-                                    "name": "alert_handler.yml",
-                                    "extra_vars": {
-                                        "message": "Alert received"
-                                    }
-                                }
-                            ]
-                        }
+                            "Action": {
+                                "action": "print_event",
+                                "action_args": {}
+                            }
+                        },
+                        "enabled": true
                     }}
                 ]
             }
@@ -76,7 +77,7 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
 
     static {
         if (USE_POSTGRES) {
-            initializePostgres("eda_ha_grace_autoclock_test", "Grace period auto-clock tests");
+            initializePostgres("eda_ha_grace_timedout_autoclock_test", "Grace period TimedOut auto-clock tests");
         } else {
             initializeH2();
         }
@@ -101,13 +102,13 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
         consumer1.startConsuming(rulesEngine1.port());
         rulesEngine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, haConfigJson);
         // No FULLY_MANUAL_PSEUDOCLOCK — auto-clock runs naturally
-        sessionId1 = rulesEngine1.createRuleset(RULE_SET_ONCE_AFTER_3S);
+        sessionId1 = rulesEngine1.createRuleset(RULE_SET_TIMED_OUT_3S);
 
         rulesEngine2 = new AstRulesEngine();
         consumer2 = new HAIntegrationOnceAfterAutoClockTest.ThreadSafeAsyncConsumer("consumer2");
         consumer2.startConsuming(rulesEngine2.port());
         rulesEngine2.initializeHA(HA_UUID, "worker-2", dbParamsJson, haConfigJson);
-        sessionId2 = rulesEngine2.createRuleset(RULE_SET_ONCE_AFTER_3S);
+        sessionId2 = rulesEngine2.createRuleset(RULE_SET_TIMED_OUT_3S);
     }
 
     @AfterEach
@@ -126,9 +127,9 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
     }
 
     /**
-     * Insert event on Node1 leader, failover before window expires.
-     * Wait for the 3s window to expire in real time on Node2, then enable leader.
-     * The window expired only a few seconds ago — well within grace period.
+     * Insert partial match on Node1 leader, failover before timeout expires.
+     * Wait for the 3s timeout to expire in real time, then Node2 enables leader.
+     * The timeout expired only a few seconds ago — well within grace period.
      * The match should be dispatched as MATCHING_EVENT_RECOVERY.
      */
     @Test
@@ -137,11 +138,11 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
 
         rulesEngine1.enableLeader();
 
-        // Insert event on Node1
-        String event = createEvent("{\"alert\":{\"type\":\"warning\",\"host\":\"h1\"}}");
+        // Insert partial match (code=1001 only, need code=1002 too for all conditions)
+        String event = createEvent("{\"alert\":{\"code\":1001,\"message\":\"Applying maintenance\"}}");
         rulesEngine1.assertEvent(sessionId1, event);
 
-        // Failover immediately (before the 3s window expires)
+        // Failover immediately (before the 3s timeout expires)
         rulesEngine1.disableLeader();
         rulesEngine1.dispose(sessionId1);
         rulesEngine1.close();
@@ -149,11 +150,11 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
         consumer1.stop();
         consumer1 = null;
 
-        // Wait for the once_after window to expire in real time (3s + margin)
+        // Wait for the timeout to expire in real time (3s + margin)
         await().pollDelay(4, TimeUnit.SECONDS).atMost(6, TimeUnit.SECONDS).until(() -> true);
 
-        // Node2 becomes leader — recovery clock jump spans the window expiry
-        // The window expired only ~1-3s ago, well within 600s grace
+        // Node2 becomes leader — recovery clock jump spans the timeout expiry
+        // The timeout expired only ~1-3s ago, well within 600s grace
         rulesEngine2.enableLeader();
 
         // Wait for MATCHING_EVENT_RECOVERY on consumer2
@@ -179,7 +180,7 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
         Map<String, Object> resp = parseAsyncMessage(recoveryMessage);
         Map<String, Object> result = getResult(resp);
         assertThat(result)
-                .containsEntry("name", "alert_throttle")
+                .containsEntry("name", "maint failed")
                 .containsEntry("type", "MATCHING_EVENT_RECOVERY")
                 .containsKey("matching_uuid");
 
@@ -189,14 +190,14 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
             List<MatchingEvent> pendingEvents = assertionManager.getPendingMatchingEvents();
             assertThat(pendingEvents)
                     .extracting(MatchingEvent::getRuleName)
-                    .contains("alert_throttle");
+                    .contains("maint failed");
         } finally {
             assertionManager.shutdown();
         }
     }
 
     /**
-     * Grace period = 0 (default). Failover, window expires in real time, recovery.
+     * Grace period = 0 (default). Failover, timeout expires in real time, recovery.
      * The match fires during recovery but is silently dropped (no dispatch).
      */
     @Test
@@ -205,8 +206,8 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
 
         rulesEngine1.enableLeader();
 
-        // Insert event on Node1
-        String event = createEvent("{\"alert\":{\"type\":\"warning\",\"host\":\"h1\"}}");
+        // Insert partial match
+        String event = createEvent("{\"alert\":{\"code\":1001,\"message\":\"Applying maintenance\"}}");
         rulesEngine1.assertEvent(sessionId1, event);
 
         // Failover immediately
@@ -217,7 +218,7 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
         consumer1.stop();
         consumer1 = null;
 
-        // Wait for the once_after window to expire in real time
+        // Wait for the timeout to expire in real time
         await().pollDelay(4, TimeUnit.SECONDS).atMost(6, TimeUnit.SECONDS).until(() -> true);
 
         // Node2 becomes leader — grace=0 means no dispatch
@@ -241,9 +242,9 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
         HAStateManager assertionManager = createHAStateManagerForAssertion();
         try {
             List<MatchingEvent> pendingEvents = assertionManager.getPendingMatchingEvents();
-            boolean hasAlertThrottle = pendingEvents.stream()
-                    .anyMatch(e -> "alert_throttle".equals(e.getRuleName()));
-            assertThat(hasAlertThrottle)
+            boolean hasMaintFailed = pendingEvents.stream()
+                    .anyMatch(e -> "maint failed".equals(e.getRuleName()));
+            assertThat(hasMaintFailed)
                     .as("Grace period=0 should not persist recovery matches")
                     .isFalse();
         } finally {
@@ -252,7 +253,7 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
     }
 
     /**
-     * Insert event on Node1, wait for auto-clock to fire normally (no crash),
+     * Insert partial match on Node1, wait for auto-clock to fire normally (no crash),
      * then failover. Node2 recovers the pending MatchingEvent via
      * recoverPendingMatchingEvents (not grace period). This verifies that
      * grace period config does not interfere with the normal auto-clock path.
@@ -263,8 +264,8 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
 
         rulesEngine1.enableLeader();
 
-        // Insert event on Node1
-        String event = createEvent("{\"alert\":{\"type\":\"warning\",\"host\":\"h1\"}}");
+        // Insert partial match on Node1
+        String event = createEvent("{\"alert\":{\"code\":1001,\"message\":\"Applying maintenance\"}}");
         rulesEngine1.assertEvent(sessionId1, event);
 
         // Wait for auto-clock to fire the match on Node1 normally
@@ -276,7 +277,7 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
         Map<String, Object> node1Resp = parseAsyncMessage(consumer1.getReceivedMessages().get(0));
         Map<String, Object> node1Result = getResult(node1Resp);
         assertThat(node1Result)
-                .containsEntry("name", "alert_throttle")
+                .containsEntry("name", "maint failed")
                 .containsKey("matching_uuid");
         String matchingUuid = (String) node1Result.get("matching_uuid");
 
@@ -297,16 +298,16 @@ class HAIntegrationGracePeriodAutoClockTest extends AbstractHATestBase {
                 .until(() -> consumer2.getReceivedMessages().stream()
                         .anyMatch(msg -> {
                             Map<String, Object> resp = parseAsyncMessage(msg);
-                            Map<String, Object> result = getResult(resp);
-                            return result != null && "MATCHING_EVENT_RECOVERY".equals(result.get("type"));
+                            Map<String, Object> r = getResult(resp);
+                            return r != null && "MATCHING_EVENT_RECOVERY".equals(r.get("type"));
                         }));
 
         // Verify recovery message has the same matching_uuid
         String recoveryMessage = consumer2.getReceivedMessages().stream()
                 .filter(msg -> {
                     Map<String, Object> resp = parseAsyncMessage(msg);
-                    Map<String, Object> result = getResult(resp);
-                    return result != null && "MATCHING_EVENT_RECOVERY".equals(result.get("type"));
+                    Map<String, Object> r = getResult(resp);
+                    return r != null && "MATCHING_EVENT_RECOVERY".equals(r.get("type"));
                 })
                 .findFirst()
                 .orElseThrow();

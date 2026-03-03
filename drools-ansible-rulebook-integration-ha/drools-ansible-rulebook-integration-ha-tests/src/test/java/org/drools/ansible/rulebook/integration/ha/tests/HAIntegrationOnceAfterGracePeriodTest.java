@@ -11,16 +11,17 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsListOfMapOfStringAndObject;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.readValueAsMapOfStringAndObject;
 import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
- * Tests for the expired_window_grace_period configuration option.
+ * Tests for the expired_window_grace_period configuration option with once_after rules.
  *
  * When a crash happens before a time-window expires and the window expires during the outage,
  * the grace period controls whether the match is captured and dispatched or dropped.
  */
-class HAIntegrationGracePeriodTest extends AbstractHATestBase {
+class HAIntegrationOnceAfterGracePeriodTest extends AbstractHATestBase {
 
     private static final String HA_UUID = "grace-period-test-ha-1";
 
@@ -329,6 +330,19 @@ class HAIntegrationGracePeriodTest extends AbstractHATestBase {
             assertThat(me)
                     .as("Multi-event grace period recovery match should be persisted")
                     .isNotNull();
+
+            // Verify the match contains 3 aggregated events
+            // Structure: {"m": {"alert": {...}, "meta": {"rule_engine": {"events_in_window": 3, ...}}}}
+            Map<String, Object> eventData = readValueAsMapOfStringAndObject(me.getEventData());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> m = (Map<String, Object>) eventData.get("m");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> meta = (Map<String, Object>) m.get("meta");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> ruleEngine = (Map<String, Object>) meta.get("rule_engine");
+            assertThat(ruleEngine)
+                    .as("Match should have events_in_window=3")
+                    .containsEntry("events_in_window", 3);
 
             assertionManager.shutdown();
         } finally {
