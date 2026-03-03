@@ -107,39 +107,11 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             long currentTime = sessionState.getCreatedTime();
             List<EventRecord> partialEvents = sessionState.getPartialEvents();
 
-            // Pre-scan: collect EVENT maps that are embedded inside CONTROL_TIMED_OUT records.
-            // These user events must NOT be replayed via processEvents() (which would re-trigger pattern rules).
-            // Instead they will be inserted directly into WM when their parent control is recovered.
-            Set<Map<String, Object>> embeddedEventMaps = new HashSet<>();
-            for (EventRecord er : partialEvents) {
-                if (er.getRecordType() == RecordType.CONTROL_TIMED_OUT) {
-                    Map<String, Object> controlData = JsonMapper.readValueAsMapOfStringAndObject(er.getEventJson());
-                    Object embeddedEvent = controlData.get("event");
-                    if (embeddedEvent instanceof Map) {
-                        embeddedEventMaps.add((Map<String, Object>) embeddedEvent);
-                    }
-                }
-            }
+            // pre-scan for embedded user events inside CONTROL_TIMED_OUT records to avoid double-replaying them
+            Set<Map<String, Object>> embeddedEventMaps = preScanEmbeddedEventsInControlTimedOut(partialEvents);
 
-            // Grace period pre-scan: build map of rule name → window expiry time
-            // for grace-eligible controls (CONTROL_ONCE_AFTER and CONTROL_TIMED_OUT)
-            Map<String, Long> ruleExpiryTimes = new HashMap<>();
-            if (gracePeriodMs > 0) {
-                for (EventRecord er : partialEvents) {
-                    if (isGracePeriodEligible(er)) {
-                        long expiryTime = er.getInsertedAt() + er.getExpirationDuration();
-                        if (expiryTime <= currentTimeAtNewNode) { // already expired, candidate for grace period
-                            String ruleName = extractUserRuleNameFromControl(er);
-                            if (ruleName != null) {
-                                ruleExpiryTimes.merge(ruleName, expiryTime, Math::max);
-                            }
-                        }
-                    }
-                }
-                if (!ruleExpiryTimes.isEmpty()) {
-                    LOG.info("Grace period pre-scan found {} rules with expired windows: {}", ruleExpiryTimes.size(), ruleExpiryTimes.keySet());
-                }
-            }
+            // pre-scan for grace-eligible controls to determine which rules may produce matches that are eligible for grace period recovery
+            Map<String, Long> ruleExpiryTimes = preScanExpiredGraceEligibleControl(currentTimeAtNewNode, partialEvents);
 
             for (EventRecord eventRecord : partialEvents) {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
@@ -218,6 +190,46 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                 filterAndStoreGracePeriodMatches(allRecoveryMatches, ruleExpiryTimes, currentTimeAtNewNode, rulesExecutor);
             }
         });
+    }
+
+    private Map<String, Long> preScanExpiredGraceEligibleControl(long currentTimeAtNewNode, List<EventRecord> partialEvents) {
+        // Grace period pre-scan: build map of rule name → window expiry time
+        // for grace-eligible controls (CONTROL_ONCE_AFTER and CONTROL_TIMED_OUT)
+        Map<String, Long> ruleExpiryTimes = new HashMap<>();
+        if (gracePeriodMs > 0) {
+            for (EventRecord er : partialEvents) {
+                if (isGracePeriodEligible(er)) {
+                    long expiryTime = er.getInsertedAt() + er.getExpirationDuration();
+                    if (expiryTime <= currentTimeAtNewNode) { // already expired, candidate for grace period
+                        String ruleName = extractUserRuleNameFromControl(er);
+                        if (ruleName != null) {
+                            ruleExpiryTimes.merge(ruleName, expiryTime, Math::max);
+                        }
+                    }
+                }
+            }
+            if (!ruleExpiryTimes.isEmpty()) {
+                LOG.info("Grace period pre-scan found {} rules with expired windows: {}", ruleExpiryTimes.size(), ruleExpiryTimes.keySet());
+            }
+        }
+        return ruleExpiryTimes;
+    }
+
+    private static Set<Map<String, Object>> preScanEmbeddedEventsInControlTimedOut(List<EventRecord> partialEvents) {
+        // Pre-scan: collect EVENT maps that are embedded inside CONTROL_TIMED_OUT records.
+        // These user events must NOT be replayed via processEvents() (which would re-trigger pattern rules).
+        // Instead they will be inserted directly into WM when their parent control is recovered.
+        Set<Map<String, Object>> embeddedEventMaps = new HashSet<>();
+        for (EventRecord er : partialEvents) {
+            if (er.getRecordType() == RecordType.CONTROL_TIMED_OUT) {
+                Map<String, Object> controlData = JsonMapper.readValueAsMapOfStringAndObject(er.getEventJson());
+                Object embeddedEvent = controlData.get("event");
+                if (embeddedEvent instanceof Map) {
+                    embeddedEventMaps.add((Map<String, Object>) embeddedEvent);
+                }
+            }
+        }
+        return embeddedEventMaps;
     }
 
     /**
