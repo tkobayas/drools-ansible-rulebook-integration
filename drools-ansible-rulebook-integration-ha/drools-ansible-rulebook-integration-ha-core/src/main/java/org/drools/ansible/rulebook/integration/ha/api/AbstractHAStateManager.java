@@ -254,8 +254,8 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                         matchRuleName, lateness, gracePeriodMs);
                 eligibleMatches.add(match);
             } else {
-                LOG.warn("Dropping expired recovery match for rule '{}' (expired {}ms ago, grace={}ms)",
-                        matchRuleName, lateness, gracePeriodMs);
+                LOG.warn("Dropping expired recovery match for rule '{}' (expired {}ms ago, grace={}ms), events={}",
+                        matchRuleName, lateness, gracePeriodMs, match.getObjects());
             }
         }
 
