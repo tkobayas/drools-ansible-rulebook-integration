@@ -1,5 +1,6 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,9 @@ public class HARulesExecutor extends RulesExecutor {
 
     // Retain ruleset string for clean KieBase generation during recovery
     private String rulesetString;
+
+    // Matches captured during session recovery (grace period feature)
+    private List<Match> recoveryMatches;
 
     public HARulesExecutor(RulesExecutorSession rulesExecutorSession, String rulesetString) {
         super(createRulesEvaluator(rulesExecutorSession));
@@ -115,5 +119,18 @@ public class HARulesExecutor extends RulesExecutor {
 
     public List<Map<String, Object>> consumeLastAdvanceTimeHAResult() {
         return ((HARulesEvaluator) rulesEvaluator).consumeLastAdvanceTimeHAResult();
+    }
+
+    public void addRecoveryMatches(List<Match> matches) {
+        if (this.recoveryMatches == null) {
+            this.recoveryMatches = new ArrayList<>();
+        }
+        this.recoveryMatches.addAll(matches);
+    }
+
+    public List<Match> consumeRecoveryMatches() {
+        List<Match> result = this.recoveryMatches;
+        this.recoveryMatches = null;
+        return result;
     }
 }
