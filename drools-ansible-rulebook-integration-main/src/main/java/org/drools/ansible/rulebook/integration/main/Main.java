@@ -49,21 +49,32 @@ public class Main {
 
     public static void main(String[] args) throws InterruptedException {
         boolean haEnabled = false;
+        String haDbParamsJson = null;
         List<String> positionalArgs = new ArrayList<>();
-        for (String arg : args) {
-            if ("--ha".equals(arg)) {
+        for (int i = 0; i < args.length; i++) {
+            if ("--ha".equals(args[i])) {
                 haEnabled = true;
+            } else if ("--ha-db-params".equals(args[i])) {
+                haEnabled = true;
+                if (i + 1 < args.length) {
+                    haDbParamsJson = args[++i];
+                } else {
+                    System.err.println("ERROR: --ha-db-params requires a JSON argument");
+                    System.exit(1);
+                }
             } else {
-                positionalArgs.add(arg);
+                positionalArgs.add(args[i]);
             }
         }
         String jsonFile = positionalArgs.isEmpty() ? DEFAULT_JSON : positionalArgs.get(0);
-        parallelExecute(jsonFile, haEnabled);
+        parallelExecute(jsonFile, haEnabled, haDbParamsJson);
 
         // for test script convenience, print the information about the execution to STDERR
         StringBuilder sb = new StringBuilder();
         sb.append(jsonFile);
-        if (haEnabled) {
+        if (haDbParamsJson != null) {
+            sb.append(" (HA-custom)");
+        } else if (haEnabled) {
             sb.append(" (HA)");
         }
         sb.append(", ")
@@ -73,12 +84,12 @@ public class Main {
         System.err.println(sb.toString());
     }
 
-    private static void parallelExecute(String jsonFile, boolean haEnabled) throws InterruptedException {
+    private static void parallelExecute(String jsonFile, boolean haEnabled, String haDbParamsJson) throws InterruptedException {
         ExecutorService executor = Executors.newFixedThreadPool(THREADS_NR);
 
         for (int n = 0; n < THREADS_NR; n++) {
             executor.execute(() -> {
-                ExecuteResult result = execute(jsonFile, haEnabled);
+                ExecuteResult result = execute(jsonFile, haEnabled, haDbParamsJson);
                 LOGGER.info("Executed in " + result.getDuration() + " msecs");
             });
         }
@@ -93,11 +104,11 @@ public class Main {
     }
 
     public static ExecuteResult execute(String jsonFile) {
-        return execute(jsonFile, false);
+        return execute(jsonFile, false, null);
     }
 
-    public static ExecuteResult execute(String jsonFile, boolean haEnabled) {
-        if (haEnabled) {
+    public static ExecuteResult execute(String jsonFile, boolean haEnabled, String haDbParamsJson) {
+        if (haEnabled && haDbParamsJson == null) {
             cleanH2Files();
         }
         try (AstRulesEngine engine = new AstRulesEngine()) {
@@ -109,20 +120,21 @@ public class Main {
             RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, JSON_OF_JSONRULESET);
 
             if (haEnabled) {
-                return executeHA(engine, rulesSet, JSON_OF_JSONRULESET, payload);
+                return executeHA(engine, rulesSet, JSON_OF_JSONRULESET, payload, haDbParamsJson);
             }
 
             // Non-HA path (original)
             long id = engine.createRuleset(rulesSet);
             int port = engine.port();
 
+            LOGGER.info("*** Start measuring execution time");
             Instant start = Instant.now();
             List<Map> returnedMatches = executePayload(engine, rulesSet, id, port, payload);
+            long duration = Duration.between(start, Instant.now()).toMillis();
+            LOGGER.info("*** End measuring execution time , duration = {} ms", duration);
 
             String stats = engine.sessionStats(id);
             LOGGER.info(stats);
-
-            long duration = Duration.between(start, Instant.now()).toMillis();
 
             payload = null; // allow GC to collect the payload object because it can be large
             timeTaken.set(duration);
@@ -142,10 +154,10 @@ public class Main {
         }
     }
 
-    private static ExecuteResult executeHA(AstRulesEngine engine, RulesSet rulesSet, String rulesetJson, Payload payload) {
+    private static ExecuteResult executeHA(AstRulesEngine engine, RulesSet rulesSet, String rulesetJson, Payload payload, String customDbParamsJson) {
         // 1. Initialize HA (also calls allowAsync() internally)
         String haUuid = "loadtest-ha-" + System.currentTimeMillis();
-        String dbParamsJson = "{\"db_type\":\"h2\",\"db_file_path\":\"./target/loadtest_ha_db\"}";
+        String dbParamsJson = customDbParamsJson != null ? customDbParamsJson : "{\"db_type\":\"h2\",\"db_file_path\":\"./target/loadtest_ha_db\"}";
         String configJson = "{\"write_after\":1}";
         engine.initializeHA(haUuid, "loadtest-worker", dbParamsJson, configJson);
 
@@ -165,9 +177,11 @@ public class Main {
             // 4. Enable leader
             engine.enableLeader();
 
+            LOGGER.info("*** Start measuring execution time");
             Instant start = Instant.now();
             List<Map> returnedMatches = payload.execute(engine, id);
-            LOGGER.info("Returned matches (HA): " + returnedMatches.size());
+            long duration = Duration.between(start, Instant.now()).toMillis();
+            LOGGER.info("*** End measuring execution time , duration = {} ms", duration);
 
             if (EXPECTED_MATCHES >= 0 && returnedMatches.size() != EXPECTED_MATCHES) {
                 LOGGER.error("Unexpected number of matches, expected = " + EXPECTED_MATCHES + " actual = " + returnedMatches.size());
@@ -176,8 +190,6 @@ public class Main {
 
             String stats = engine.sessionStats(id);
             LOGGER.info(stats);
-
-            long duration = Duration.between(start, Instant.now()).toMillis();
 
             payload = null;
             timeTaken.set(duration);
@@ -218,7 +230,7 @@ public class Main {
             return runAsyncExec(engine, id, port, payload);
         } else {
             List<Map> returnedMatches = payload.execute(engine, id);
-            LOGGER.info("Returned matches: " + returnedMatches.size());
+            //LOGGER.info("Returned matches: " + returnedMatches.size());
             //returnedMatches.forEach(map -> LOGGER.info("  " + map.entrySet()));
 
             if (EXPECTED_MATCHES >= 0 && returnedMatches.size() != EXPECTED_MATCHES) {
