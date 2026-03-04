@@ -9,11 +9,10 @@ import java.util.concurrent.TimeUnit;
 import javax.crypto.KeyGenerator;
 
 import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
-import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
+import org.drools.ansible.rulebook.integration.ha.api.HAEncryption;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
-import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,11 +33,11 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
     private static final String HA_UUID = "enc-integration-ha-1";
 
     private static final String ENCRYPTION_KEY;
-    private static final String ENCRYPTION_KEY_ROTATED;
+    private static final String NEW_ENCRYPTION_KEY;
 
     static {
         ENCRYPTION_KEY = generateBase64Key();
-        ENCRYPTION_KEY_ROTATED = generateBase64Key();
+        NEW_ENCRYPTION_KEY = generateBase64Key();
 
         if (USE_POSTGRES) {
             initializePostgres("eda_ha_enc_test", "HA encryption integration tests");
@@ -221,7 +220,7 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
         rulesEngine2.close();
 
         Map<String, Object> rotatedConfig = new HashMap<>(dbHAConfig);
-        rotatedConfig.put("encryption_key_primary", ENCRYPTION_KEY_ROTATED);
+        rotatedConfig.put("encryption_key_primary", NEW_ENCRYPTION_KEY);
         rotatedConfig.put("encryption_key_secondary", ENCRYPTION_KEY);
         String rotatedConfigJson = toJson(rotatedConfig);
 
@@ -244,6 +243,79 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
         List<Map<String, Object>> resultList = (List<Map<String, Object>>) asyncResultMap.get("result");
         assertThat(resultList).isNotEmpty();
         assertThat(resultList.get(0)).containsEntry("matching_uuid", meUuid);
+    }
+
+    @Test
+    void keyRotationWithRestart() {
+        // Node 1 as leader with original key
+        rulesEngine1.enableLeader();
+
+        String event = createEvent("{\"temperature\": 45}");
+        String result = rulesEngine1.assertEvent(sessionId1, event);
+        String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
+        assertThat(meUuid).isNotEmpty();
+
+        // Verify raw DB column is encrypted with original key
+        String rawEventData = TestUtils.queryRawColumn(dbParams,
+                "SELECT event_data FROM drools_ansible_matching_event WHERE ha_uuid = ?", HA_UUID);
+        assertThat(rawEventData).startsWith("$ENCRYPTED$");
+        assertThat(rawEventData).doesNotContain("temperature");
+
+        // Shut down both nodes (graceful restart, not failover)
+        rulesEngine1.disableLeader();
+        consumer1.stop();
+        rulesEngine1.dispose(sessionId1);
+        rulesEngine1.close();
+        rulesEngine1 = null;
+
+        consumer2.stop();
+        rulesEngine2.dispose(sessionId2);
+        rulesEngine2.close();
+        rulesEngine2 = null;
+
+        System.out.println("=== Restarting node with rotated keys ===");
+
+        // Restart node 1 with rotated keys (new primary + old key as secondary)
+        Map<String, Object> rotatedConfig = new HashMap<>(dbHAConfig);
+        rotatedConfig.put("encryption_key_primary", NEW_ENCRYPTION_KEY);
+        rotatedConfig.put("encryption_key_secondary", ENCRYPTION_KEY);
+        String rotatedConfigJson = toJson(rotatedConfig);
+
+        rulesEngine1 = new AstRulesEngine();
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1-rotated");
+        consumer1.startConsuming(rulesEngine1.port());
+        rulesEngine1.initializeHA(HA_UUID, "worker-1-rotated", dbParamsJson, rotatedConfigJson);
+        sessionId1 = rulesEngine1.createRuleset(RULE_SET, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+        rulesEngine1.enableLeader();
+
+        // Wait for async recovery — should decrypt with secondary key fallback
+        await().atMost(5, TimeUnit.SECONDS)
+                .until(() -> !consumer1.getReceivedMessages().isEmpty());
+
+        String asyncResult = consumer1.getReceivedMessages().get(0);
+        Map<String, Object> asyncResultMap = readValueAsMapOfStringAndObject(asyncResult);
+        assertThat(asyncResultMap).containsKey("result");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> resultList = (List<Map<String, Object>>) asyncResultMap.get("result");
+        assertThat(resultList).isNotEmpty();
+        assertThat(resultList.get(0)).containsEntry("matching_uuid", meUuid);
+
+        // Assert a non-matching event to trigger a session state persist (write_after=1),
+        // which re-encrypts session state with the new primary key
+        String nonMatchingEvent = createEvent("{\"temperature\": 10}");
+        rulesEngine1.assertEvent(sessionId1, nonMatchingEvent);
+
+        // Verify session state is now re-encrypted with the new primary key:
+        // query the latest version from DB and decrypt directly with only the rotated key (no secondary)
+        String reEncryptedData = TestUtils.queryRawColumn(dbParams,
+                "SELECT partial_matching_events FROM drools_ansible_session_state WHERE ha_uuid = ? ORDER BY version DESC LIMIT 1", HA_UUID);
+        assertThat(reEncryptedData).startsWith("$ENCRYPTED$");
+
+        HAEncryption rotatedOnlyEncryption = new HAEncryption(NEW_ENCRYPTION_KEY, null);
+        HAEncryption.DecryptResult decryptResult = rotatedOnlyEncryption.decrypt(reEncryptedData);
+        assertThat(decryptResult.usedSecondaryKey()).isFalse();
+        assertThat(decryptResult.plaintext()).isNotNull();
     }
 
     private HAStateManager createEncryptedStateManager() {
