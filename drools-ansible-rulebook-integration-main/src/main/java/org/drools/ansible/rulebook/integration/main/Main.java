@@ -1,6 +1,7 @@
 package org.drools.ansible.rulebook.integration.main;
 
 import java.io.DataInputStream;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -9,6 +10,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -46,25 +48,37 @@ public class Main {
     private static AtomicLong timeTaken = new AtomicLong();
 
     public static void main(String[] args) throws InterruptedException {
-        String jsonFile = args.length > 0 ? args[0] : DEFAULT_JSON;
-        parallelExecute(jsonFile);
+        boolean haEnabled = false;
+        List<String> positionalArgs = new ArrayList<>();
+        for (String arg : args) {
+            if ("--ha".equals(arg)) {
+                haEnabled = true;
+            } else {
+                positionalArgs.add(arg);
+            }
+        }
+        String jsonFile = positionalArgs.isEmpty() ? DEFAULT_JSON : positionalArgs.get(0);
+        parallelExecute(jsonFile, haEnabled);
 
         // for test script convenience, print the information about the execution to STDERR
         StringBuilder sb = new StringBuilder();
-        sb.append(jsonFile)
-                .append(", ")
+        sb.append(jsonFile);
+        if (haEnabled) {
+            sb.append(" (HA)");
+        }
+        sb.append(", ")
                 .append(usedMemory.get()) // bytes
                 .append(", ")
                 .append(timeTaken.get()); // milliseconds
         System.err.println(sb.toString());
     }
 
-    private static void parallelExecute(String jsonFile) throws InterruptedException {
+    private static void parallelExecute(String jsonFile, boolean haEnabled) throws InterruptedException {
         ExecutorService executor = Executors.newFixedThreadPool(THREADS_NR);
 
         for (int n = 0; n < THREADS_NR; n++) {
             executor.execute(() -> {
-                ExecuteResult result = execute(jsonFile);
+                ExecuteResult result = execute(jsonFile, haEnabled);
                 LOGGER.info("Executed in " + result.getDuration() + " msecs");
             });
         }
@@ -79,6 +93,13 @@ public class Main {
     }
 
     public static ExecuteResult execute(String jsonFile) {
+        return execute(jsonFile, false);
+    }
+
+    public static ExecuteResult execute(String jsonFile, boolean haEnabled) {
+        if (haEnabled) {
+            cleanH2Files();
+        }
         try (AstRulesEngine engine = new AstRulesEngine()) {
             Map jsonRuleSet = getJsonRuleSet(jsonFile);
             Payload payload = Payload.parsePayload(jsonRuleSet);
@@ -86,6 +107,12 @@ public class Main {
             final String JSON_OF_JSONRULESET = JsonMapper.toJson(jsonRuleSet);
 
             RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, JSON_OF_JSONRULESET);
+
+            if (haEnabled) {
+                return executeHA(engine, rulesSet, JSON_OF_JSONRULESET, payload);
+            }
+
+            // Non-HA path (original)
             long id = engine.createRuleset(rulesSet);
             int port = engine.port();
 
@@ -113,6 +140,71 @@ public class Main {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static ExecuteResult executeHA(AstRulesEngine engine, RulesSet rulesSet, String rulesetJson, Payload payload) {
+        // 1. Initialize HA (also calls allowAsync() internally)
+        String haUuid = "loadtest-ha-" + System.currentTimeMillis();
+        String dbParamsJson = "{\"db_type\":\"h2\",\"db_file_path\":\"./target/loadtest_ha_db\"}";
+        String configJson = "{\"write_after\":1}";
+        engine.initializeHA(haUuid, "loadtest-worker", dbParamsJson, configJson);
+
+        // 2. Create ruleset with rulesetString (required for HA session recovery)
+        long id = engine.createRuleset(rulesSet, rulesetJson);
+        int port = engine.port();
+
+        // 3. Connect socket (required for isConnected() checks in HA mode)
+        Socket haSocket;
+        try {
+            haSocket = new Socket("localhost", port);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to connect HA socket", e);
+        }
+
+        try {
+            // 4. Enable leader
+            engine.enableLeader();
+
+            Instant start = Instant.now();
+            List<Map> returnedMatches = payload.execute(engine, id);
+            LOGGER.info("Returned matches (HA): " + returnedMatches.size());
+
+            if (EXPECTED_MATCHES >= 0 && returnedMatches.size() != EXPECTED_MATCHES) {
+                LOGGER.error("Unexpected number of matches, expected = " + EXPECTED_MATCHES + " actual = " + returnedMatches.size());
+                foundError = true;
+            }
+
+            String stats = engine.sessionStats(id);
+            LOGGER.info(stats);
+
+            long duration = Duration.between(start, Instant.now()).toMillis();
+
+            payload = null;
+            timeTaken.set(duration);
+            System.gc();
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            System.gc();
+            usedMemory.set(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory());
+
+            return new ExecuteResult(returnedMatches, duration);
+        } finally {
+            try {
+                haSocket.close();
+            } catch (IOException e) {
+                LOGGER.warn("Failed to close HA socket", e);
+            }
+        }
+    }
+
+    private static final String H2_DB_PATH = "./target/loadtest_ha_db";
+
+    private static void cleanH2Files() {
+        new File(H2_DB_PATH + ".mv.db").delete();
+        new File(H2_DB_PATH + ".trace.db").delete();
     }
 
     private static Map getJsonRuleSet(String jsonFile) {
