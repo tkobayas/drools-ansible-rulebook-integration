@@ -4,6 +4,7 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
@@ -137,12 +138,20 @@ public class Payload {
             this.sessionId = sessionId;
         }
 
+        /**
+         * Inject a unique meta.uuid into the event JSON to avoid
+         * "Event UUID not found" warnings in HA mode and prevent false dedup.
+         */
+        private static String injectMetaUuid(String json) {
+            return "{\"meta\":{\"uuid\":\"" + UUID.randomUUID() + "\"}," + json.substring(1);
+        }
+
         @Override
         public void run() {
             long start = System.currentTimeMillis();
             for (int i = 0; i < payload.loopCount; i++) {
                 for (String p : payload.list) {
-                    String resultJson = engine.assertEvent(sessionId, p);
+                    String resultJson = engine.assertEvent(sessionId, injectMetaUuid(p));
                     if (!payload.discardMatchedEvents) {
                         returnedMatches.addAll(JsonMapper.readValueAsListOfMapOfStringAndObject(resultJson));
                     }
