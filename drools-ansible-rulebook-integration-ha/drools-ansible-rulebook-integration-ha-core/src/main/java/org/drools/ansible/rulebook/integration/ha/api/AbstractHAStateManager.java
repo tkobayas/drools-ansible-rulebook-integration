@@ -183,34 +183,32 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                 LOG.debug("  Restored {} processed event IDs from persisted state", sessionState.getProcessedEventIds().size());
             }
 
-            // Grace period: filter recovery matches and store eligible ones on the executor
-            if (gracePeriodMs > 0) {
-                List<Match> allRecoveryMatches = new ArrayList<>(catchUpMatches);
-                allRecoveryMatches.addAll(nodeTimeMatches);
-                filterAndStoreGracePeriodMatches(allRecoveryMatches, ruleExpiryTimes, currentTimeAtNewNode, rulesExecutor);
-            }
+            // Filter recovery matches: log WARN for dropped matches, store eligible ones (within grace period) on the executor
+            List<Match> allRecoveryMatches = new ArrayList<>(catchUpMatches);
+            allRecoveryMatches.addAll(nodeTimeMatches);
+            filterAndStoreGracePeriodMatches(allRecoveryMatches, ruleExpiryTimes, currentTimeAtNewNode, rulesExecutor);
         });
     }
 
     private Map<String, Long> preScanExpiredGraceEligibleControl(long currentTimeAtNewNode, List<EventRecord> partialEvents) {
-        // Grace period pre-scan: build map of rule name → window expiry time
-        // for grace-eligible controls (CONTROL_ONCE_AFTER and CONTROL_TIMED_OUT)
+        // Pre-scan: build map of rule name → window expiry time
+        // for grace-eligible controls (CONTROL_ONCE_AFTER and CONTROL_TIMED_OUT).
+        // This runs unconditionally so expired windows are always detected and logged,
+        // even when gracePeriodMs = 0 (all expired matches will be WARN-logged and dropped).
         Map<String, Long> ruleExpiryTimes = new HashMap<>();
-        if (gracePeriodMs > 0) {
-            for (EventRecord er : partialEvents) {
-                if (isGracePeriodEligible(er)) {
-                    long expiryTime = er.getInsertedAt() + er.getExpirationDuration();
-                    if (expiryTime <= currentTimeAtNewNode) { // already expired, candidate for grace period
-                        String ruleName = extractUserRuleNameFromControl(er);
-                        if (ruleName != null) {
-                            ruleExpiryTimes.merge(ruleName, expiryTime, Math::max);
-                        }
+        for (EventRecord er : partialEvents) {
+            if (isGracePeriodEligible(er)) {
+                long expiryTime = er.getInsertedAt() + er.getExpirationDuration();
+                if (expiryTime <= currentTimeAtNewNode) { // already expired
+                    String ruleName = extractUserRuleNameFromControl(er);
+                    if (ruleName != null) {
+                        ruleExpiryTimes.merge(ruleName, expiryTime, Math::max);
                     }
                 }
             }
-            if (!ruleExpiryTimes.isEmpty()) {
-                LOG.info("Grace period pre-scan found {} rules with expired windows: {}", ruleExpiryTimes.size(), ruleExpiryTimes.keySet());
-            }
+        }
+        if (!ruleExpiryTimes.isEmpty()) {
+            LOG.info("Recovery pre-scan found {} rules with expired windows: {}", ruleExpiryTimes.size(), ruleExpiryTimes.keySet());
         }
         return ruleExpiryTimes;
     }
