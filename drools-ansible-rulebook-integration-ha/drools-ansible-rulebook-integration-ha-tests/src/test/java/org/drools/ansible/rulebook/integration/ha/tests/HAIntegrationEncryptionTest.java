@@ -318,6 +318,84 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
         assertThat(decryptResult.plaintext()).isNotNull();
     }
 
+    @Test
+    void keyRotationWithNewKeyOnly_noEncryptedDataInDB() {
+        // Edge case: all actions have been completed and there are no partial events in the DB.
+        // The user rotates to a brand-new encryption key without knowing the old key.
+        // This should work because there is no encrypted data to decrypt.
+
+        // Phase 1: Run with original key, trigger a match, and complete the action
+        rulesEngine1.enableLeader();
+
+        String event = createEvent("{\"temperature\": 45}");
+        String result = rulesEngine1.assertEvent(sessionId1, event);
+        String meUuid = TestUtils.extractMatchingUuidFromResponse(result);
+        assertThat(meUuid).isNotEmpty();
+
+        // Complete the action — removes matching_event and action_info rows from DB
+        rulesEngine1.deleteActionInfo(sessionId1, meUuid);
+
+        // Verify no pending matching events remain
+        HAStateManager verifyManager = createEncryptedStateManager();
+        try {
+            List<MatchingEvent> pendingEvents = verifyManager.getPendingMatchingEvents();
+            assertThat(pendingEvents).isEmpty();
+        } finally {
+            verifyManager.shutdown();
+        }
+
+        // Shut down both nodes
+        rulesEngine1.disableLeader();
+        consumer1.stop();
+        rulesEngine1.dispose(sessionId1);
+        rulesEngine1.close();
+        rulesEngine1 = null;
+
+        consumer2.stop();
+        rulesEngine2.dispose(sessionId2);
+        rulesEngine2.close();
+        rulesEngine2 = null;
+
+        // Wipe the database — now there is truly zero encrypted data to decrypt
+        cleanupDatabase();
+
+        System.out.println("=== Starting fresh node with brand-new key (old key unknown) ===");
+
+        // Phase 2: Start a new node with a completely new key, WITHOUT the old key as secondary
+        String brandNewKey = generateBase64Key();
+        Map<String, Object> newKeyConfig = new HashMap<>(dbHAConfig);
+        newKeyConfig.put("encryption_key_primary", brandNewKey);
+        // Intentionally NO encryption_key_secondary — old key is unknown
+        String newKeyConfigJson = toJson(newKeyConfig);
+
+        rulesEngine1 = new AstRulesEngine();
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1-newkey");
+        consumer1.startConsuming(rulesEngine1.port());
+        rulesEngine1.initializeHA(HA_UUID, "worker-newkey", dbParamsJson, newKeyConfigJson);
+        sessionId1 = rulesEngine1.createRuleset(RULE_SET, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+        rulesEngine1.enableLeader();
+
+        // Process a new event — should work fine with the new key
+        String newEvent = createEvent("{\"temperature\": 50}");
+        String newResult = rulesEngine1.assertEvent(sessionId1, newEvent);
+        assertThat(newResult).isNotNull();
+
+        List<Map<String, Object>> newMatchList = readValueAsListOfMapOfStringAndObject(newResult);
+        assertThat(newMatchList).hasSize(1);
+
+        // Verify new data is encrypted in DB
+        String rawEventData = TestUtils.queryRawColumn(dbParams,
+                "SELECT event_data FROM drools_ansible_matching_event WHERE ha_uuid = ?", HA_UUID);
+        assertThat(rawEventData).startsWith("$ENCRYPTED$");
+        assertThat(rawEventData).doesNotContain("temperature");
+
+        // Verify the new data is decryptable with the new key only (no secondary fallback)
+        HAEncryption newKeyEncryption = new HAEncryption(brandNewKey, null);
+        HAEncryption.DecryptResult decryptResult = newKeyEncryption.decrypt(rawEventData);
+        assertThat(decryptResult.usedSecondaryKey()).isFalse();
+        assertThat(decryptResult.plaintext()).contains("temperature");
+    }
+
     private HAStateManager createEncryptedStateManager() {
         Map<String, Object> encConfig = new HashMap<>(dbHAConfig);
         encConfig.put("encryption_key_primary", ENCRYPTION_KEY);
