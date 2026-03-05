@@ -247,74 +247,122 @@ public class H2StateManager extends AbstractHAStateManager {
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
-
-            // Upsert session state (single-row-per-session design)
-            // Note: SHA is already calculated in updateInMemorySessionState() before this is called
-            String sql = "MERGE INTO " + SESSION_STATE
-                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha,"
-                    + " created_time, leader_id, metadata, properties, settings, ext)"
-                    + " KEY(ha_uuid, rule_set_name)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?,"
-                    + " COALESCE((SELECT created_time FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), ?),"
-                    + " ?, ?, ?, ?, ?)";
-
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, sessionState.getHaUuid());
-                ps.setString(2, sessionState.getRuleSetName());
-                ps.setString(3, sessionState.getRulebookHash());
-
-                // Handle partial events
-                String partialEventsJson = null;
-                if (sessionState.getPartialEvents() != null) {
-                    partialEventsJson = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
-                }
-                ps.setString(4, partialEventsJson);
-
-                // Handle processed event IDs
-                String processedEventIdsJson = null;
-                if (sessionState.getProcessedEventIds() != null) {
-                    processedEventIdsJson = toJson(sessionState.getProcessedEventIds());
-                }
-                ps.setString(5, processedEventIdsJson);
-
-                // Handle persisted time
-                if (sessionState.getPersistedTime() > 0) {
-                    ps.setTimestamp(6, new Timestamp(sessionState.getPersistedTime()));
-                } else {
-                    ps.setTimestamp(6, null);
-                }
-
-                // Handle SHA tracking fields
-                ps.setString(7, sessionState.getCurrentStateSHA());
-
-                // Subquery params for COALESCE(created_time) — preserves original on update
-                ps.setString(8, sessionState.getHaUuid());
-                ps.setString(9, sessionState.getRuleSetName());
-
-                // Fallback created_time for first insert
-                if (sessionState.getCreatedTime() > 0) {
-                    ps.setTimestamp(10, new Timestamp(sessionState.getCreatedTime()));
-                } else {
-                    ps.setTimestamp(10, new Timestamp(System.currentTimeMillis()));
-                }
-
-                ps.setString(11, sessionState.getLeaderId());
-
-                // Extensibility columns
-                ps.setString(12, mapToJson(sessionState.getMetadata()));
-                ps.setString(13, mapToJson(sessionState.getProperties()));
-                ps.setString(14, mapToJson(sessionState.getSettings()));
-                ps.setString(15, mapToJson(sessionState.getExt()));
-
-                ps.executeUpdate();
-            }
-
+            doSessionStateUpsert(conn, sessionState);
             conn.commit();
 
             logger.debug("Persisted SessionState for haUuid: {}", haUuid);
         } catch (SQLException e) {
             logger.error("Failed to persist SessionState", e);
             throw new RuntimeException("Failed to persist SessionState", e);
+        }
+    }
+
+    @Override
+    public void persistSessionStateAndStats(SessionState sessionState) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot persist SessionState - not leader");
+        }
+
+        if (sessionState.getRuleSetName() == null) {
+            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
+        }
+
+        if (haStats == null) {
+            // Fall back to separate calls if no stats
+            persistSessionState(sessionState);
+            return;
+        }
+
+        ensureVersionInMetadata(sessionState.getMetadata());
+
+        // Ensure haUuid is set on stats
+        if (haStats.getHaUuid() == null) {
+            haStats.setHaUuid(haUuid);
+        }
+        ensureVersionInMetadata(haStats.getMetadata());
+
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+
+            // 1. Upsert session state
+            doSessionStateUpsert(conn, sessionState);
+
+            // 2. Calculate session state size (reads the row we just wrote)
+            haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
+
+            // 3. Upsert HA stats
+            doHAStatsUpsert(conn);
+
+            // Single commit for both operations
+            conn.commit();
+
+            logger.debug("Persisted SessionState and HAStats in single transaction for haUuid: {}", haUuid);
+        } catch (SQLException e) {
+            logger.error("Failed to persist SessionState and HAStats", e);
+            throw new RuntimeException("Failed to persist SessionState and HAStats", e);
+        }
+    }
+
+    private void doSessionStateUpsert(Connection conn, SessionState sessionState) throws SQLException {
+        // Upsert session state (single-row-per-session design)
+        // Note: SHA is already calculated in updateInMemorySessionState() before this is called
+        String sql = "MERGE INTO " + SESSION_STATE
+                + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha,"
+                + " created_time, leader_id, metadata, properties, settings, ext)"
+                + " KEY(ha_uuid, rule_set_name)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?,"
+                + " COALESCE((SELECT created_time FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), ?),"
+                + " ?, ?, ?, ?, ?)";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, sessionState.getHaUuid());
+            ps.setString(2, sessionState.getRuleSetName());
+            ps.setString(3, sessionState.getRulebookHash());
+
+            // Handle partial events
+            String partialEventsJson = null;
+            if (sessionState.getPartialEvents() != null) {
+                partialEventsJson = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
+            }
+            ps.setString(4, partialEventsJson);
+
+            // Handle processed event IDs
+            String processedEventIdsJson = null;
+            if (sessionState.getProcessedEventIds() != null) {
+                processedEventIdsJson = toJson(sessionState.getProcessedEventIds());
+            }
+            ps.setString(5, processedEventIdsJson);
+
+            // Handle persisted time
+            if (sessionState.getPersistedTime() > 0) {
+                ps.setTimestamp(6, new Timestamp(sessionState.getPersistedTime()));
+            } else {
+                ps.setTimestamp(6, null);
+            }
+
+            // Handle SHA tracking fields
+            ps.setString(7, sessionState.getCurrentStateSHA());
+
+            // Subquery params for COALESCE(created_time) — preserves original on update
+            ps.setString(8, sessionState.getHaUuid());
+            ps.setString(9, sessionState.getRuleSetName());
+
+            // Fallback created_time for first insert
+            if (sessionState.getCreatedTime() > 0) {
+                ps.setTimestamp(10, new Timestamp(sessionState.getCreatedTime()));
+            } else {
+                ps.setTimestamp(10, new Timestamp(System.currentTimeMillis()));
+            }
+
+            ps.setString(11, sessionState.getLeaderId());
+
+            // Extensibility columns
+            ps.setString(12, mapToJson(sessionState.getMetadata()));
+            ps.setString(13, mapToJson(sessionState.getProperties()));
+            ps.setString(14, mapToJson(sessionState.getSettings()));
+            ps.setString(15, mapToJson(sessionState.getExt()));
+
+            ps.executeUpdate();
         }
     }
 
@@ -626,30 +674,12 @@ public class H2StateManager extends AbstractHAStateManager {
         // Calculate session state size before persisting
         Long sessionStateSize = calculateSessionStateSize();
         haStats.setSessionStateSize(sessionStateSize);
-        haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
-        haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
 
         ensureVersionInMetadata(haStats.getMetadata());
 
-        String propertiesJson = haStatsToJson(haStats);
-
-        // For H2, use MERGE statement
-        String h2Sql = "MERGE INTO " + HA_STATS
-                + " (ha_uuid, properties, updated_at, metadata, settings, ext)"
-                + " KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?)";
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(h2Sql)) {
-
-            ps.setString(1, haStats.getHaUuid());
-            ps.setString(2, propertiesJson);
-            ps.setTimestamp(3, Timestamp.from(Instant.now()));
-            ps.setString(4, mapToJson(haStats.getMetadata()));
-            ps.setString(5, mapToJson(haStats.getSettings()));
-            ps.setString(6, mapToJson(haStats.getExt()));
-
-            ps.executeUpdate();
+        try (Connection conn = dataSource.getConnection()) {
+            doHAStatsUpsert(conn);
         } catch (SQLException e) {
             logger.error("Failed to persist HA stats", e);
         }
@@ -660,6 +690,15 @@ public class H2StateManager extends AbstractHAStateManager {
      * @return size in bytes, or 0 if no session state exists
      */
     private Long calculateSessionStateSize() {
+        try (Connection conn = dataSource.getConnection()) {
+            return doCalculateSessionStateSize(conn);
+        } catch (SQLException e) {
+            logger.warn("Failed to calculate session state size: {}", e.getMessage());
+        }
+        return 0L;
+    }
+
+    private Long doCalculateSessionStateSize(Connection conn) throws SQLException {
         String sql = "SELECT"
                 + " OCTET_LENGTH(ha_uuid) +"
                 + " OCTET_LENGTH(rule_set_name) +"
@@ -673,20 +712,34 @@ public class H2StateManager extends AbstractHAStateManager {
                 + " FROM " + SESSION_STATE
                 + " WHERE ha_uuid = ?";
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, haUuid);
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
                 return rs.getLong("total_size");
             }
-        } catch (SQLException e) {
-            logger.warn("Failed to calculate session state size: {}", e.getMessage());
         }
-
         return 0L;
+    }
+
+    private void doHAStatsUpsert(Connection conn) throws SQLException {
+        String propertiesJson = haStatsToJson(haStats);
+
+        String h2Sql = "MERGE INTO " + HA_STATS
+                + " (ha_uuid, properties, updated_at, metadata, settings, ext)"
+                + " KEY(ha_uuid) VALUES (?, ?, ?, ?, ?, ?)";
+
+        try (PreparedStatement ps = conn.prepareStatement(h2Sql)) {
+            ps.setString(1, haStats.getHaUuid());
+            ps.setString(2, propertiesJson);
+            ps.setTimestamp(3, Timestamp.from(Instant.now()));
+            ps.setString(4, mapToJson(haStats.getMetadata()));
+            ps.setString(5, mapToJson(haStats.getSettings()));
+            ps.setString(6, mapToJson(haStats.getExt()));
+
+            ps.executeUpdate();
+        }
     }
 
     @Override

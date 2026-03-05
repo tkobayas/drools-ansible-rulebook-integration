@@ -168,6 +168,15 @@ public interface HAStateManager {
     void persistHAStats();
 
     /**
+     * Persist session state and HA stats in a single transaction.
+     * Implementations should override to combine into one commit/fsync.
+     */
+    default void persistSessionStateAndStats(SessionState sessionState) {
+        persistSessionState(sessionState);
+        persistHAStats();
+    }
+
+    /**
      * Cleanup resources and close connections
      */
     void shutdown();
