@@ -43,14 +43,13 @@ public class PostgreSQLSchema {
                     + "processed_event_ids TEXT, "
                     + "persisted_time TIMESTAMP, "
                     + "current_state_sha VARCHAR(64), "
-                    + "version INT DEFAULT 1, "
                     + "created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                     + "leader_id VARCHAR(255), "
                     + "metadata JSONB DEFAULT '{}'::jsonb, "
                     + "properties JSONB DEFAULT '{}'::jsonb, "
                     + "settings JSONB DEFAULT '{}'::jsonb, "
                     + "ext JSONB DEFAULT '{}'::jsonb, "
-                    + "UNIQUE(ha_uuid, rule_set_name, version)"
+                    + "UNIQUE(ha_uuid, rule_set_name)"
                     + ")";
             stmt.execute(createSessionStateTable);
 
@@ -142,8 +141,13 @@ public class PostgreSQLSchema {
                 }
             }
 
-            // Clean up legacy rows with version > 1 (single-row-per-session migration)
-            stmt.execute("DELETE FROM " + SESSION_STATE + " WHERE version > 1");
+            // Migration: drop version column and update UNIQUE constraint
+            // Step 1: Drop old constraint (PG naming convention: table_col1_col2_..._key)
+            stmt.execute("ALTER TABLE " + SESSION_STATE + " DROP CONSTRAINT IF EXISTS " + SESSION_STATE + "_ha_uuid_rule_set_name_version_key");
+            // Step 2: Drop version column
+            stmt.execute("ALTER TABLE " + SESSION_STATE + " DROP COLUMN IF EXISTS version");
+            // Step 3: Add new unique constraint (idempotent via CREATE UNIQUE INDEX IF NOT EXISTS)
+            stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_session_state_ha_ruleset ON " + SESSION_STATE + " (ha_uuid, rule_set_name)");
 
             conn.commit();
             logger.debug("PostgreSQL schema migration completed");

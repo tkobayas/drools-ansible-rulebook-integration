@@ -514,7 +514,7 @@ public class AstRulesEngine implements Closeable {
         // Update in-memory state to match recovered state
         haStateManager.registerSessionState(rulesetName, persistedSessionState);
 
-        logger.info("Recovered session {} from persisted SessionState version {}", rulesetName, persistedSessionState.getVersion());
+        logger.info("Recovered session {} from persisted SessionState", rulesetName);
     }
 
     private RulesExecutor createHARulesExecutorWithSessionState(RulesSet rulesSet, String rulesetString) {

@@ -309,7 +309,7 @@ class HAIntegrationEncryptionTest extends AbstractHATestBase {
         // Verify session state is now re-encrypted with the new primary key:
         // query the latest version from DB and decrypt directly with only the rotated key (no secondary)
         String reEncryptedData = TestUtils.queryRawColumn(dbParams,
-                "SELECT partial_matching_events FROM drools_ansible_session_state WHERE ha_uuid = ? AND version = 1", HA_UUID);
+                "SELECT partial_matching_events FROM drools_ansible_session_state WHERE ha_uuid = ?", HA_UUID);
         assertThat(reEncryptedData).startsWith("$ENCRYPTED$");
 
         HAEncryption rotatedOnlyEncryption = new HAEncryption(NEW_ENCRYPTION_KEY, null);

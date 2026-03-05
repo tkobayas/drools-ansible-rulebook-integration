@@ -8,6 +8,7 @@ import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.MATCHI
 import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.SESSION_STATE;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -38,14 +39,13 @@ public class H2Schema {
                     + "processed_event_ids CLOB, "
                     + "persisted_time TIMESTAMP, "
                     + "current_state_sha VARCHAR(64), "
-                    + "version INT DEFAULT 1, "
                     + "created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                     + "leader_id VARCHAR(255), "
                     + "metadata CLOB DEFAULT '{}', "
                     + "properties CLOB DEFAULT '{}', "
                     + "settings CLOB DEFAULT '{}', "
                     + "ext CLOB DEFAULT '{}', "
-                    + "UNIQUE(ha_uuid, rule_set_name, version)"
+                    + "CONSTRAINT uq_session_state_ha_ruleset UNIQUE(ha_uuid, rule_set_name)"
                     + ")";
             stmt.execute(createSessionStateTable);
 
@@ -134,11 +134,32 @@ public class H2Schema {
                 }
             }
 
-            // Clean up legacy rows with version > 1 (single-row-per-session migration)
+            // Migration: drop version column and update UNIQUE constraint
+            // Step 1: Drop old UNIQUE constraints (auto-generated name unknown in H2)
             try {
-                stmt.execute("DELETE FROM " + SESSION_STATE + " WHERE version > 1");
+                ResultSet rs = stmt.executeQuery(
+                        "SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS "
+                        + "WHERE UPPER(TABLE_NAME) = '" + SESSION_STATE.toUpperCase() + "' AND CONSTRAINT_TYPE = 'UNIQUE'");
+                while (rs.next()) {
+                    String name = rs.getString("CONSTRAINT_NAME");
+                    if (!"UQ_SESSION_STATE_HA_RULESET".equalsIgnoreCase(name)) {
+                        stmt.execute("ALTER TABLE " + SESSION_STATE + " DROP CONSTRAINT " + name);
+                    }
+                }
             } catch (SQLException e) {
-                // Ignore — table may not have any rows yet
+                // Ignore — constraint may not exist
+            }
+            // Step 2: Drop version column (H2 lacks DROP COLUMN IF EXISTS)
+            try {
+                stmt.execute("ALTER TABLE " + SESSION_STATE + " DROP COLUMN version");
+            } catch (SQLException e) {
+                // Ignore — column may already be dropped
+            }
+            // Step 3: Add new constraint (idempotent via named constraint)
+            try {
+                stmt.execute("ALTER TABLE " + SESSION_STATE + " ADD CONSTRAINT uq_session_state_ha_ruleset UNIQUE(ha_uuid, rule_set_name)");
+            } catch (SQLException e) {
+                // Ignore — constraint may already exist
             }
 
             conn.commit();
