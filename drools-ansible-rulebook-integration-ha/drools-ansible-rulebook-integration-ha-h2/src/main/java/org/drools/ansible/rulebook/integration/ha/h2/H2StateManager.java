@@ -157,8 +157,7 @@ public class H2StateManager extends AbstractHAStateManager {
     @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
         String sql = "SELECT * FROM " + SESSION_STATE
-                + " WHERE ha_uuid = ? AND rule_set_name = ?"
-                + " ORDER BY version DESC LIMIT 1";
+                + " WHERE ha_uuid = ? AND rule_set_name = ? AND version = 1";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -250,14 +249,15 @@ public class H2StateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
-            // Insert new version as current
+            // Upsert session state with version = 1 (single-row-per-session design)
             // Note: SHA is already calculated in updateInMemorySessionState() before this is called
-            String sql = "INSERT INTO " + SESSION_STATE
-                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha, version, created_time, leader_id,"
-                    + " metadata, properties, settings, ext)"
-                    + " VALUES (?, ?, ?, ?, ?, ?, ?,"
-                    + " COALESCE((SELECT MAX(version) FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), 0) + 1,"
-                    + " ?, ?, ?, ?, ?, ?)";
+            String sql = "MERGE INTO " + SESSION_STATE
+                    + " (ha_uuid, rule_set_name, version, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha,"
+                    + " created_time, leader_id, metadata, properties, settings, ext)"
+                    + " KEY(ha_uuid, rule_set_name, version)"
+                    + " VALUES (?, ?, 1, ?, ?, ?, ?, ?,"
+                    + " COALESCE((SELECT created_time FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ? AND version = 1), ?),"
+                    + " ?, ?, ?, ?, ?)";
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, sessionState.getHaUuid());
@@ -288,10 +288,11 @@ public class H2StateManager extends AbstractHAStateManager {
                 // Handle SHA tracking fields
                 ps.setString(7, sessionState.getCurrentStateSHA());
 
+                // Subquery params for COALESCE(created_time) — preserves original on update
                 ps.setString(8, sessionState.getHaUuid());
                 ps.setString(9, sessionState.getRuleSetName());
 
-                // Handle created_time
+                // Fallback created_time for first insert
                 if (sessionState.getCreatedTime() > 0) {
                     ps.setTimestamp(10, new Timestamp(sessionState.getCreatedTime()));
                 } else {
@@ -671,8 +672,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 + " COALESCE(OCTET_LENGTH(ext), 0) +"
                 + " 8 + 8 + 8 + 8 AS total_size"
                 + " FROM " + SESSION_STATE
-                + " WHERE ha_uuid = ?"
-                + " ORDER BY version DESC LIMIT 1";
+                + " WHERE ha_uuid = ? AND version = 1";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
