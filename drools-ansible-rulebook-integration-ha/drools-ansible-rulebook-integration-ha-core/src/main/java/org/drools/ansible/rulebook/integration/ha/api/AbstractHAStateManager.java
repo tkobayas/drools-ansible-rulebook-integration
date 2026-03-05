@@ -337,8 +337,8 @@ public abstract class AbstractHAStateManager implements HAStateManager {
         if (!valid) {
             LOG.error("SessionState integrity check FAILED! Stored SHA: {}, Recalculated SHA: {}",
                       storedSHA, recalculatedSHA);
-            LOG.error("SessionState may be corrupted or tampered. RuleSetName: {}, HaUuid: {}, Version: {}",
-                      sessionState.getRuleSetName(), sessionState.getHaUuid(), sessionState.getVersion());
+            LOG.error("SessionState may be corrupted or tampered. RuleSetName: {}, HaUuid: {}",
+                      sessionState.getRuleSetName(), sessionState.getHaUuid());
         } else {
             LOG.debug("SessionState integrity check passed for {}", sessionState.getRuleSetName());
         }

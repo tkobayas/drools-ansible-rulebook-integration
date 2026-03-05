@@ -246,7 +246,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
         String sql = "SELECT * FROM " + SESSION_STATE
-                + " WHERE ha_uuid = ? AND rule_set_name = ? AND version = 1";
+                + " WHERE ha_uuid = ? AND rule_set_name = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -294,7 +294,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 }
 
                 // Handle metadata
-                sessionState.setVersion(rs.getInt("version"));
                 sessionState.setLeaderId(rs.getString("leader_id"));
 
                 // Handle SHA tracking fields
@@ -338,14 +337,14 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
-            // Upsert session state with version = 1 (single-row-per-session design)
+            // Upsert session state (single-row-per-session design)
             // Note: SHA is already calculated in updateInMemorySessionState() before this is called
             String sql = "INSERT INTO " + SESSION_STATE
-                    + " (ha_uuid, rule_set_name, version, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha, created_time, leader_id,"
+                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha, created_time, leader_id,"
                     + " metadata, properties, settings, ext)"
-                    + " VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?,"
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,"
                     + " ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb)"
-                    + " ON CONFLICT (ha_uuid, rule_set_name, version) DO UPDATE SET"
+                    + " ON CONFLICT (ha_uuid, rule_set_name) DO UPDATE SET"
                     + " rulebook_hash = EXCLUDED.rulebook_hash,"
                     + " partial_matching_events = EXCLUDED.partial_matching_events,"
                     + " processed_event_ids = EXCLUDED.processed_event_ids,"
@@ -764,11 +763,10 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 + " COALESCE(pg_column_size(ext), 0) +"
                 + " pg_column_size(persisted_time) +"
                 + " pg_column_size(current_state_sha) +"
-                + " pg_column_size(version) +"
                 + " pg_column_size(created_time) +"
                 + " pg_column_size(leader_id) AS total_size"
                 + " FROM " + SESSION_STATE
-                + " WHERE ha_uuid = ? AND version = 1";
+                + " WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
