@@ -157,7 +157,7 @@ public class H2StateManager extends AbstractHAStateManager {
     @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
         String sql = "SELECT * FROM " + SESSION_STATE
-                + " WHERE ha_uuid = ? AND rule_set_name = ? AND version = 1";
+                + " WHERE ha_uuid = ? AND rule_set_name = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -205,7 +205,6 @@ public class H2StateManager extends AbstractHAStateManager {
                 }
 
                 // Handle metadata
-                sessionState.setVersion(rs.getInt("version"));
                 sessionState.setLeaderId(rs.getString("leader_id"));
 
                 // Handle SHA tracking fields
@@ -249,14 +248,14 @@ public class H2StateManager extends AbstractHAStateManager {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
-            // Upsert session state with version = 1 (single-row-per-session design)
+            // Upsert session state (single-row-per-session design)
             // Note: SHA is already calculated in updateInMemorySessionState() before this is called
             String sql = "MERGE INTO " + SESSION_STATE
-                    + " (ha_uuid, rule_set_name, version, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha,"
+                    + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha,"
                     + " created_time, leader_id, metadata, properties, settings, ext)"
-                    + " KEY(ha_uuid, rule_set_name, version)"
-                    + " VALUES (?, ?, 1, ?, ?, ?, ?, ?,"
-                    + " COALESCE((SELECT created_time FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ? AND version = 1), ?),"
+                    + " KEY(ha_uuid, rule_set_name)"
+                    + " VALUES (?, ?, ?, ?, ?, ?, ?,"
+                    + " COALESCE((SELECT created_time FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?), ?),"
                     + " ?, ?, ?, ?, ?)";
 
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -672,7 +671,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 + " COALESCE(OCTET_LENGTH(ext), 0) +"
                 + " 8 + 8 + 8 + 8 AS total_size"
                 + " FROM " + SESSION_STATE
-                + " WHERE ha_uuid = ? AND version = 1";
+                + " WHERE ha_uuid = ?";
 
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {

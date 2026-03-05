@@ -45,10 +45,10 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
     }
 
     // Revisit this test. Scenario is:
-    // 1. Node1 writes initial state (version 1)
-    // 2. Node1 writes new state (version 2), but assume it crashes before commit
-    // 3. On recovery, Node2 becomes leader and read the state - should see version 1 as current
-    // 4. Node2 can compare with its own state (= version 1). They are the same, so no action needed
+    // 1. Node1 writes initial state
+    // 2. Node1 crashes before completing an update
+    // 3. On recovery, Node2 becomes leader and reads the state
+    // 4. Node2 can compare with its own state. They are the same, so no action needed
     // Note: This is more of an integration test scenario. This unit test should be much simpler.
     @Test
     void testTwoVersionState() {
@@ -123,7 +123,6 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         sessionState.setLeaderId(LEADER_ID);
         sessionState.setPartialEvents(partialEvents);
         sessionState.setPersistedTime(persistedTime);
-        sessionState.setVersion(1);
         sessionState.setCreatedTime(createdTime);
 
         stateManager.persistSessionState(sessionState);
@@ -215,7 +214,6 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
         sessionState.setPartialEvents(List.of(factRecord));
         sessionState.setCreatedTime(createdTime);
         sessionState.setPersistedTime(insertedAt);
-        sessionState.setVersion(1);
         // Calculate SHA from complete state
         sessionState.setCurrentStateSHA(calculateStateSHA(sessionState));
 

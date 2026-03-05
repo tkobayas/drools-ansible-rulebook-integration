@@ -25,7 +25,6 @@ public class SessionState {
     private long persistedTime;
 
     // Metadata
-    private int version;
     private String leaderId;
 
     // For integrity checks
@@ -39,7 +38,6 @@ public class SessionState {
 
     public SessionState() {
         this.createdTime = Instant.now().toEpochMilli();
-        this.version = 1;
     }
 
     public String getHaUuid() {
@@ -88,14 +86,6 @@ public class SessionState {
 
     public void setPersistedTime(long persistedTime) {
         this.persistedTime = persistedTime;
-    }
-
-    public int getVersion() {
-        return version;
-    }
-
-    public void setVersion(int version) {
-        this.version = version;
     }
 
     public long getCreatedTime() {
@@ -159,7 +149,6 @@ public class SessionState {
      * Returns a canonical representation of this SessionState for SHA calculation.
      * Excludes fields that are not part of the semantic working memory state:
      * - currentStateSHA: can't hash itself (circular dependency)
-     * - version: database-managed persistence version counter, not working memory state
      * - metadata, properties, settings, ext: extensibility placeholders, not semantic state
      *
      * @return JSON string with deterministic field ordering for consistent hashing
@@ -175,7 +164,6 @@ public class SessionState {
         contentMap.put("processedEventIds", processedEventIds);
         contentMap.put("createdTime", createdTime);
         contentMap.put("persistedTime", persistedTime);
-        // version is excluded - it's a database artifact, not working memory state
         contentMap.put("leaderId", leaderId);
 
         return JsonMapper.toJson(contentMap);
