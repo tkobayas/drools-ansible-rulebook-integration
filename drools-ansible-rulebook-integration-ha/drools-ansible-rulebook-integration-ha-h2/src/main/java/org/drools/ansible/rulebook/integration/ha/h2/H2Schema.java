@@ -10,6 +10,7 @@ import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.SESSIO
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLWarning;
 import java.sql.Statement;
 
 import javax.sql.DataSource;
@@ -110,7 +111,13 @@ public class H2Schema {
                 stmt.execute(createHAStatsTable);
 
                 conn.commit();
-                logger.info("H2 schema creation completed successfully");
+
+                SQLWarning warning = stmt.getWarnings();
+                if (warning != null) {
+                    logger.info("H2 schema already exists (tables were likely created by another process)");
+                } else {
+                    logger.info("H2 schema created successfully");
+                }
             } catch (SQLException e) {
                 conn.rollback();
                 throw e;
