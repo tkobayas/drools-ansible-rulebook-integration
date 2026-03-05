@@ -189,12 +189,10 @@ public class AstRulesEngine implements Closeable {
         updateInMemorySessionState(rulesExecutor, sessionState);
 
         if (haStateManager.isLeader()) {
-            haStateManager.persistSessionState(sessionState);
-
             HAStats haStats = haStateManager.getHAStats();
             haStats.incrementEventsProcessed();
             updateGlobalSessionStats(haStats);
-            haStateManager.persistHAStats();
+            haStateManager.persistSessionStateAndStats(sessionState);
         }
 
         return true;
