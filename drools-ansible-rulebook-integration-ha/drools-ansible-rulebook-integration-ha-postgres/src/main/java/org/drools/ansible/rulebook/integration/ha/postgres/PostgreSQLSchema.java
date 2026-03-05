@@ -142,6 +142,9 @@ public class PostgreSQLSchema {
                 }
             }
 
+            // Clean up legacy rows with version > 1 (single-row-per-session migration)
+            stmt.execute("DELETE FROM " + SESSION_STATE + " WHERE version > 1");
+
             conn.commit();
             logger.debug("PostgreSQL schema migration completed");
         }

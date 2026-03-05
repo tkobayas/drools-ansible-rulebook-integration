@@ -134,6 +134,13 @@ public class H2Schema {
                 }
             }
 
+            // Clean up legacy rows with version > 1 (single-row-per-session migration)
+            try {
+                stmt.execute("DELETE FROM " + SESSION_STATE + " WHERE version > 1");
+            } catch (SQLException e) {
+                // Ignore — table may not have any rows yet
+            }
+
             conn.commit();
             logger.debug("H2 schema migration completed");
         }
