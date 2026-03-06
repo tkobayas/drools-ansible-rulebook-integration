@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -153,49 +154,46 @@ public class AstRulesEngine implements Closeable {
     /**
      * Common method to handle both event and fact processing in HA mode.
      * Updates in-memory SessionState for both leader and non-leader nodes.
-     * Leader nodes also persist to database.
+     * Leader nodes also persist to database atomically with matching events.
      */
     private String processFactOrEventHA(long sessionId, List<Match> matches) {
         List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(matches);
-
-        try {
-            if (persistHAStateAndStats(sessionId)) {
-                return buildHaResponse(sessionId, matchList, haStateManager.isLeader());
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to update HA state", e);
-        }
-
-        // On error or no session state: return standard response
-        return matchesToJson(matches);
+        return toJson(processMatchesHA(sessionId, matchList));
     }
 
     /**
-     * Update in-memory SessionState and persist to database if leader.
+     * Core HA pipeline: update in-memory state, build matching events, and persist atomically.
      * Shared by processFactOrEventHA (synchronous path) and handleScheduledMatchesHA (auto-clock path).
      *
-     * @return true if state was updated successfully, false if no in-memory SessionState found
+     * @return the HA response list
      */
-    private boolean persistHAStateAndStats(long sessionId) {
+    private List<Map<String, Object>> processMatchesHA(long sessionId,
+                                                        List<Map<String, Map<String, Object>>> matchList) {
         HARulesExecutor rulesExecutor = (HARulesExecutor) rulesExecutorContainer.get(sessionId);
         String rulesetName = rulesExecutor.getRulesSet().getName();
 
         SessionState sessionState = haStateManager.getInMemorySessionState(rulesetName);
         if (sessionState == null) {
-            logger.warn("No in-memory SessionState found for {}, skipping HA update", rulesetName);
-            return false;
+            throw new IllegalStateException("No in-memory SessionState found for " + rulesetName + ". This should never happen — registerSessionState must be called during createRuleset.");
         }
 
         updateInMemorySessionState(rulesExecutor, sessionState);
 
-        if (haStateManager.isLeader()) {
+        boolean isLeader = haStateManager.isLeader();
+
+        // Phase 1: Build matching events in-memory (assign UUIDs, populate fields)
+        List<MatchingEvent> matchingEvents = new ArrayList<>();
+        List<Map<String, Object>> haMatches = buildMatchingEventsAndResponse(sessionId, matchList, isLeader, matchingEvents);
+
+        // Phase 2: Persist state + stats + matching events atomically (leader only)
+        if (isLeader) {
             HAStats haStats = haStateManager.getHAStats();
             haStats.incrementEventsProcessed();
             updateGlobalSessionStats(haStats);
-            haStateManager.persistSessionStateAndStats(sessionState);
+            haStateManager.persistSessionStateStatsAndMatchingEvents(sessionState, matchingEvents);
         }
 
-        return true;
+        return haMatches;
     }
 
     /**
@@ -235,36 +233,46 @@ public class AstRulesEngine implements Closeable {
         sessionState.setCurrentStateSHA(newSHA);
     }
 
-    private String buildHaResponse(long sessionId, List<Map<String, Map<String, Object>>> matchList, boolean persistMatchingEvents) {
+    /**
+     * Build MatchingEvent objects in-memory and construct the HA response list.
+     * No database I/O happens in this method — persistence is done separately.
+     *
+     * @param sessionId the session ID
+     * @param matchList the rule matches
+     * @param isLeader whether this node is the leader (determines UUID assignment)
+     * @param matchingEventsOut output list populated with MatchingEvent objects for leader persistence
+     * @return the HA response list with meUuids populated
+     */
+    private List<Map<String, Object>> buildMatchingEventsAndResponse(long sessionId,
+                                                                      List<Map<String, Map<String, Object>>> matchList,
+                                                                      boolean isLeader,
+                                                                      List<MatchingEvent> matchingEventsOut) {
         if (matchList.isEmpty()) {
-            return toJson(matchList);
+            return new ArrayList<>();
         }
-        try {
-            return toJson(buildHaResponseList(sessionId, matchList, persistMatchingEvents));
-        } catch (Exception e) {
-            logger.error("Failed to build HA response payload", e);
-            return toJson(matchList);
-        }
-    }
 
-    private List<Map<String, Object>> buildHaResponseList(long sessionId, List<Map<String, Map<String, Object>>> matchList, boolean persistMatchingEvents) {
         String rulesetName = rulesExecutorContainer.get(sessionId).getRuleSetName();
         List<Map<String, Object>> haMatches = new ArrayList<>(matchList.size());
         for (Map<String, Map<String, Object>> matchData : matchList) {
             String ruleName = matchData.keySet().iterator().next();
             Map<String, Object> eventData = matchData.get(ruleName);
 
-            MatchingEvent me = new MatchingEvent();
-            me.setHaUuid(haStateManager.getHaUuid());
-            me.setRuleSetName(rulesetName);
-            me.setRuleName(ruleName);
-            me.setEventData(toJson(eventData));
-
             String meUuid;
-            if (persistMatchingEvents) {
-                meUuid = haStateManager.addMatchingEvent(me);
+            if (isLeader) {
+                MatchingEvent me = new MatchingEvent();
+                me.setHaUuid(haStateManager.getHaUuid());
+                me.setRuleSetName(rulesetName);
+                me.setRuleName(ruleName);
+                me.setEventData(toJson(eventData));
+
+                // Assign UUID in-memory (will be persisted later in the combined transaction)
+                meUuid = UUID.randomUUID().toString();
+                me.setMeUuid(meUuid);
+                me.setCreatedAt(System.currentTimeMillis());
+
+                matchingEventsOut.add(me);
             } else {
-                meUuid = EMPTY_ME_UUID; // Non-leader nodes do not execute actions with ME UUIDs, so empty UUID
+                meUuid = EMPTY_ME_UUID; // Non-leader nodes do not execute actions with ME UUIDs
             }
 
             Map<String, Object> resultEntry = new LinkedHashMap<>();
@@ -283,15 +291,7 @@ public class AstRulesEngine implements Closeable {
         if (matchList.isEmpty()) {
             return null;
         }
-
-        try {
-            if (persistHAStateAndStats(sessionId)) {
-                return buildHaResponseList(sessionId, matchList, haStateManager.isLeader());
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to handle scheduled matches through HA pipeline", e);
-        }
-        return null;
+        return processMatchesHA(sessionId, matchList);
     }
 
     /**
