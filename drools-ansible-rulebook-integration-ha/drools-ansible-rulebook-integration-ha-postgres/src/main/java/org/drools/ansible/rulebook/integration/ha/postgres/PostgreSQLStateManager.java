@@ -203,11 +203,39 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         this.leaderId = this.workerName;
         this.isLeader = true;
 
-        // HAStats should be overwritten by the persisted one. Then, adjusted by AstRulesEngine.updateGlobalSessionStats
-        loadOrCreateHAStats();
-        if (haStats != null) {
+        // Load or create HAStats, set leader, and persist in a single transaction
+        String selectSql = "SELECT * FROM " + HA_STATS + " WHERE ha_uuid = ?";
+
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+
+            // Load existing stats
+            try (PreparedStatement ps = conn.prepareStatement(selectSql)) {
+                ps.setString(1, haUuid);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    haStats.setHaUuid(rs.getString("ha_uuid"));
+                    populateHAStatsFromJson(rs.getString("properties"), haStats);
+                    haStats.setMetadata(jsonToMap(rs.getString("metadata")));
+                    haStats.setSettings(jsonToMap(rs.getString("settings")));
+                    haStats.setExt(jsonToMap(rs.getString("ext")));
+                    logger.info("Restored HA stats from PostgreSQL database");
+                }
+            }
+
+            // Update leader and persist
             haStats.setCurrentLeader(this.workerName);
-            persistHAStats();
+            if (haStats.getHaUuid() == null) {
+                haStats.setHaUuid(haUuid);
+            }
+            haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
+            ensureVersionInMetadata(haStats.getMetadata());
+            doHAStatsUpsert(conn);
+
+            conn.commit();
+        } catch (SQLException e) {
+            logger.error("Failed to enable leader in PostgreSQL", e);
+            throw new RuntimeException("Failed to enable leader", e);
         }
 
         logger.info("Leader mode enabled for: {}", this.workerName);

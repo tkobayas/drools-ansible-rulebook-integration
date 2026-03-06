@@ -437,10 +437,8 @@ public class AstRulesEngine implements Closeable {
 
         restoreAllSessions();
 
-        // on leader switch, load or create HAStats
-        //haStateManager.printDatabaseContents();
-        HAStats persistedHaStats = haStateManager.loadOrCreateHAStats();
-        updateGlobalSessionStats(persistedHaStats);
+        // HAStats already loaded by enableLeader(); update global session stats from it
+        updateGlobalSessionStats(haStateManager.getHAStats());
 
         // Recover pending actions when becoming leader
         recoverPendingMatchingEvents();
