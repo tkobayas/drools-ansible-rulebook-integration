@@ -573,6 +573,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
             if (haStats != null) {
                 haStats.incrementActionsProcessed();
+                persistHAStats();
             }
 
             logger.debug("Added action info for matching event: {}, index: {}", matchingUuid, index);
