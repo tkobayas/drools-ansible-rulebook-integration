@@ -169,11 +169,18 @@ public interface HAStateManager {
     HAStats loadOrCreateHAStats();
 
     /**
-     * Get current HA statistics
+     * Get current HA statistics (in-memory only, no DB queries).
      *
      * @return HA statistics object
      */
     HAStats getHAStats();
+
+    /**
+     * Refresh HAStats with values that require DB queries (e.g., incomplete matching events count).
+     * This is expensive (DB round-trip) and should only be called when
+     * fresh counts are needed for reporting (e.g., Python API getHAStats).
+     */
+    void refreshHAStats();
 
     /**
      * Persist current HA statistics
