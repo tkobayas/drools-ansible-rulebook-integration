@@ -636,29 +636,37 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         // Generate UUID for ActionInfo
         UUID actionId = UUID.randomUUID();
 
+        // Pre-compute encryption outside the transaction
+        String encryptedActionData = encryptIfEnabled(actionData);
+        String metadataJson = mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION));
+
         String sql = "INSERT INTO " + ACTION_INFO
                 + " (id, ha_uuid, me_uuid, index, action_data,"
                 + " metadata, properties, settings, ext)"
                 + " VALUES (?::uuid, ?, ?::uuid, ?, ?, ?::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)";
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                // PostgreSQL: Use native UUID type
+                ps.setObject(1, actionId);
+                ps.setString(2, haUuid);
+                ps.setObject(3, UUID.fromString(matchingUuid));
+                ps.setInt(4, index);
+                ps.setString(5, encryptedActionData);
+                ps.setString(6, metadataJson);
 
-            // PostgreSQL: Use native UUID type
-            ps.setObject(1, actionId);
-            ps.setString(2, haUuid);
-            ps.setObject(3, UUID.fromString(matchingUuid));
-            ps.setInt(4, index);
-            ps.setString(5, encryptIfEnabled(actionData));
-            ps.setString(6, mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION)));
-
-            ps.executeUpdate();
+                ps.executeUpdate();
+            }
 
             if (haStats != null) {
                 haStats.incrementActionsProcessed();
-                persistHAStats();
+                haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
+                ensureVersionInMetadata(haStats.getMetadata());
+                doHAStatsUpsert(conn);
             }
 
+            conn.commit();
             logger.debug("Added action info for matching event: {}, index: {}", matchingUuid, index);
         } catch (SQLException e) {
             logger.error("Failed to add action info to PostgreSQL", e);
