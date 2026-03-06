@@ -471,6 +471,46 @@ public class H2StateManager extends AbstractHAStateManager {
         }
     }
 
+    @Override
+    public List<String> addMatchingEvents(List<MatchingEvent> matchingEvents) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot add matching events - not leader");
+        }
+        if (matchingEvents.isEmpty()) {
+            return List.of();
+        }
+
+        // Prepare all matching events: assign UUIDs, timestamps, metadata, and encrypt outside transaction
+        List<String> meUuids = new ArrayList<>();
+        List<String> encryptedEventDataList = new ArrayList<>();
+        for (MatchingEvent me : matchingEvents) {
+            String meUuid = UUID.randomUUID().toString();
+            meUuids.add(meUuid);
+            me.setMeUuid(meUuid);
+            if (me.getCreatedAt() == 0L) {
+                me.setCreatedAt(System.currentTimeMillis());
+            }
+            ensureVersionInMetadata(me.getMetadata());
+            encryptedEventDataList.add(encryptIfEnabled(me.getEventData()));
+        }
+
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            for (int i = 0; i < matchingEvents.size(); i++) {
+                doMatchingEventInsert(conn, matchingEvents.get(i), encryptedEventDataList.get(i));
+            }
+            conn.commit();
+
+            for (String meUuid : meUuids) {
+                logger.debug("Added matching event with UUID: {}", meUuid);
+            }
+            return meUuids;
+        } catch (SQLException e) {
+            logger.error("Failed to add matching events", e);
+            throw new RuntimeException("Failed to add matching events", e);
+        }
+    }
+
     private void doMatchingEventInsert(Connection conn, MatchingEvent matchingEvent, String encryptedEventData) throws SQLException {
         String sql = "INSERT INTO " + MATCHING_EVENT
                 + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
