@@ -533,32 +533,39 @@ public class H2StateManager extends AbstractHAStateManager {
 
         String actionId = UUID.randomUUID().toString();
 
+        // Pre-compute encryption outside the transaction
+        String encryptedAction = encryptIfEnabled(action);
+        String metadataJson = mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION));
+
         String sql = "INSERT INTO " + ACTION_INFO
                 + " (id, ha_uuid, me_uuid, index, action_data,"
                 + " metadata, properties, settings, ext)"
                 + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, actionId);
+                ps.setString(2, haUuid);
+                ps.setString(3, matchingUuid);
+                ps.setInt(4, index);
+                ps.setString(5, encryptedAction);
+                ps.setString(6, metadataJson);
+                ps.setString(7, "{}");
+                ps.setString(8, "{}");
+                ps.setString(9, "{}");
 
-            ps.setString(1, actionId);
-            ps.setString(2, haUuid);
-            ps.setString(3, matchingUuid);
-            ps.setInt(4, index);
-            ps.setString(5, encryptIfEnabled(action));
-            ps.setString(6, mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION)));
-            ps.setString(7, "{}");
-            ps.setString(8, "{}");
-            ps.setString(9, "{}");
-
-            ps.executeUpdate();
-
-            // Update HA stats
-            if (haStats != null) {
-                haStats.incrementActionsProcessed();
-                persistHAStats();
+                ps.executeUpdate();
             }
 
+            if (haStats != null) {
+                haStats.incrementActionsProcessed();
+                haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
+                ensureVersionInMetadata(haStats.getMetadata());
+                doHAStatsUpsert(conn);
+            }
+
+            conn.commit();
             logger.debug("Added action for ME UUID: {}, index: {}", matchingUuid, index);
         } catch (SQLException e) {
             logger.error("Failed to add action", e);
