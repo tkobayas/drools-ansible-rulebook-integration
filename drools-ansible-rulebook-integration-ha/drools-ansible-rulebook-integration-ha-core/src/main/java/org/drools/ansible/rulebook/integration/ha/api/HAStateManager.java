@@ -1,5 +1,6 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -95,6 +96,23 @@ public interface HAStateManager {
      * @return UUID for the matching event
      */
     String addMatchingEvent(MatchingEvent matchingEvent);
+
+    /**
+     * Add multiple matching events in a single transaction.
+     * <p>
+     * The default implementation calls {@link #addMatchingEvent(MatchingEvent)} in a loop (NOT atomic).
+     * Implementations SHOULD override to batch all inserts into a single commit.
+     *
+     * @param matchingEvents The matching events to persist
+     * @return List of UUIDs for the matching events
+     */
+    default List<String> addMatchingEvents(List<MatchingEvent> matchingEvents) {
+        List<String> uuids = new ArrayList<>();
+        for (MatchingEvent me : matchingEvents) {
+            uuids.add(addMatchingEvent(me));
+        }
+        return uuids;
+    }
 
     /**
      * Get all pending matching events based on haUuid
