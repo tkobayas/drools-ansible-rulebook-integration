@@ -177,6 +177,28 @@ public interface HAStateManager {
     }
 
     /**
+     * Persist session state, HA stats, and matching events in a single transaction.
+     * This ensures atomicity: a crash cannot leave session state advanced while matching events are missing.
+     * <p>
+     * When {@code matchingEvents} is empty, this behaves identically to {@link #persistSessionStateAndStats(SessionState)}.
+     * <p>
+     * The default implementation is NOT atomic — it calls {@link #persistSessionStateAndStats(SessionState)}
+     * followed by {@link #addMatchingEvent(MatchingEvent)} in a loop. Implementations SHOULD override
+     * to combine all writes into a single commit.
+     *
+     * @param sessionState the session state to persist
+     * @param matchingEvents the matching events to insert (may be empty)
+     */
+    default void persistSessionStateStatsAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
+        persistSessionStateAndStats(sessionState);
+        if (matchingEvents != null) {
+            for (MatchingEvent me : matchingEvents) {
+                addMatchingEvent(me);
+            }
+        }
+    }
+
+    /**
      * Cleanup resources and close connections
      */
     void shutdown();

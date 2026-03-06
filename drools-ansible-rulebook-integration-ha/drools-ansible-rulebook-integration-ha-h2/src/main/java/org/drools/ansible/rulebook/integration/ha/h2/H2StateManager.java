@@ -268,7 +268,7 @@ public class H2StateManager extends AbstractHAStateManager {
         }
 
         if (haStats == null) {
-            // Fall back to separate calls if no stats
+            // Defensive: haStats should always be initialized before this is called on the hot path
             persistSessionState(sessionState);
             return;
         }
@@ -303,7 +303,86 @@ public class H2StateManager extends AbstractHAStateManager {
         }
     }
 
+    @Override
+    public void persistSessionStateStatsAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot persist SessionState - not leader");
+        }
+
+        if (sessionState.getRuleSetName() == null) {
+            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
+        }
+
+        if (haStats == null) {
+            // Defensive: haStats should always be initialized before this is called on the hot path
+            persistSessionState(sessionState);
+            for (MatchingEvent me : matchingEvents) {
+                addMatchingEvent(me);
+            }
+            return;
+        }
+
+        ensureVersionInMetadata(sessionState.getMetadata());
+
+        if (haStats.getHaUuid() == null) {
+            haStats.setHaUuid(haUuid);
+        }
+        ensureVersionInMetadata(haStats.getMetadata());
+
+        // Pre-compute encrypted data outside the transaction to minimize lock duration
+        String encryptedPartialEvents = null;
+        if (sessionState.getPartialEvents() != null) {
+            encryptedPartialEvents = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
+        }
+
+        // Pre-compute encrypted matching event data and ensure metadata versions
+        List<String> encryptedEventDataList = new ArrayList<>();
+        if (!matchingEvents.isEmpty()) {
+            for (MatchingEvent me : matchingEvents) {
+                ensureVersionInMetadata(me.getMetadata());
+                encryptedEventDataList.add(encryptIfEnabled(me.getEventData()));
+            }
+        }
+
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+
+            // 1. Upsert session state (pass pre-computed encrypted data)
+            doSessionStateUpsert(conn, sessionState, encryptedPartialEvents);
+
+            // 2. Calculate session state size
+            haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
+
+            // 3. Upsert HA stats
+            doHAStatsUpsert(conn);
+
+            // 4. Insert matching events
+            if (!matchingEvents.isEmpty()) {
+                for (int i = 0; i < matchingEvents.size(); i++) {
+                    doMatchingEventInsert(conn, matchingEvents.get(i), encryptedEventDataList.get(i));
+                }
+            }
+
+            // Single commit for all operations
+            conn.commit();
+
+            logger.debug("Persisted SessionState, HAStats, and {} matching events in single transaction for haUuid: {}",
+                         matchingEvents.size(), haUuid);
+        } catch (SQLException e) {
+            logger.error("Failed to persist SessionState, HAStats, and matching events", e);
+            throw new RuntimeException("Failed to persist SessionState, HAStats, and matching events", e);
+        }
+    }
+
     private void doSessionStateUpsert(Connection conn, SessionState sessionState) throws SQLException {
+        String encryptedPartialEvents = null;
+        if (sessionState.getPartialEvents() != null) {
+            encryptedPartialEvents = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
+        }
+        doSessionStateUpsert(conn, sessionState, encryptedPartialEvents);
+    }
+
+    private void doSessionStateUpsert(Connection conn, SessionState sessionState, String encryptedPartialEvents) throws SQLException {
         // Upsert session state (single-row-per-session design)
         // Note: SHA is already calculated in updateInMemorySessionState() before this is called
         String sql = "MERGE INTO " + SESSION_STATE
@@ -319,12 +398,8 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(2, sessionState.getRuleSetName());
             ps.setString(3, sessionState.getRulebookHash());
 
-            // Handle partial events
-            String partialEventsJson = null;
-            if (sessionState.getPartialEvents() != null) {
-                partialEventsJson = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
-            }
-            ps.setString(4, partialEventsJson);
+            // Handle partial events (already encrypted if applicable)
+            ps.setString(4, encryptedPartialEvents);
 
             // Handle processed event IDs
             String processedEventIdsJson = null;
@@ -380,26 +455,11 @@ public class H2StateManager extends AbstractHAStateManager {
 
         ensureVersionInMetadata(matchingEvent.getMetadata());
 
-        String sql = "INSERT INTO " + MATCHING_EVENT
-                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
-                + " metadata, properties, settings, ext)"
-                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        // Pre-compute encrypted event data outside the transaction
+        String encryptedEventData = encryptIfEnabled(matchingEvent.getEventData());
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, meUuid);
-            ps.setString(2, matchingEvent.getHaUuid());
-            ps.setString(3, matchingEvent.getRuleSetName());
-            ps.setString(4, matchingEvent.getRuleName());
-            ps.setString(5, encryptIfEnabled(matchingEvent.getEventData()));
-            ps.setLong(6, matchingEvent.getCreatedAt());
-            ps.setString(7, mapToJson(matchingEvent.getMetadata()));
-            ps.setString(8, mapToJson(matchingEvent.getProperties()));
-            ps.setString(9, mapToJson(matchingEvent.getSettings()));
-            ps.setString(10, mapToJson(matchingEvent.getExt()));
-
-            ps.executeUpdate();
+        try (Connection conn = dataSource.getConnection()) {
+            doMatchingEventInsert(conn, matchingEvent, encryptedEventData);
 
             logger.debug("Added matching event with UUID: {} for rule: {}/{}",
                          meUuid, matchingEvent.getRuleSetName(), matchingEvent.getRuleName());
@@ -408,6 +468,28 @@ public class H2StateManager extends AbstractHAStateManager {
         } catch (SQLException e) {
             logger.error("Failed to add matching event", e);
             throw new RuntimeException("Failed to add matching event", e);
+        }
+    }
+
+    private void doMatchingEventInsert(Connection conn, MatchingEvent matchingEvent, String encryptedEventData) throws SQLException {
+        String sql = "INSERT INTO " + MATCHING_EVENT
+                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
+                + " metadata, properties, settings, ext)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, matchingEvent.getMeUuid());
+            ps.setString(2, matchingEvent.getHaUuid());
+            ps.setString(3, matchingEvent.getRuleSetName());
+            ps.setString(4, matchingEvent.getRuleName());
+            ps.setString(5, encryptedEventData);
+            ps.setLong(6, matchingEvent.getCreatedAt());
+            ps.setString(7, mapToJson(matchingEvent.getMetadata()));
+            ps.setString(8, mapToJson(matchingEvent.getProperties()));
+            ps.setString(9, mapToJson(matchingEvent.getSettings()));
+            ps.setString(10, mapToJson(matchingEvent.getExt()));
+
+            ps.executeUpdate();
         }
     }
 
