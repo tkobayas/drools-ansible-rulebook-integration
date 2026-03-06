@@ -569,6 +569,49 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
     }
 
+    @Override
+    public List<String> addMatchingEvents(List<MatchingEvent> matchingEvents) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot add matching events - not leader");
+        }
+        if (matchingEvents.isEmpty()) {
+            return List.of();
+        }
+
+        // Prepare all matching events: assign UUIDs, timestamps, metadata, and encrypt outside transaction
+        List<UUID> meUuids = new ArrayList<>();
+        List<String> encryptedEventDataList = new ArrayList<>();
+        for (MatchingEvent me : matchingEvents) {
+            UUID meUuid = UUID.randomUUID();
+            meUuids.add(meUuid);
+            me.setMeUuid(meUuid.toString());
+            if (me.getCreatedAt() == 0L) {
+                me.setCreatedAt(System.currentTimeMillis());
+            }
+            ensureVersionInMetadata(me.getMetadata());
+            encryptedEventDataList.add(encryptIfEnabled(me.getEventData()));
+        }
+
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            for (int i = 0; i < matchingEvents.size(); i++) {
+                doMatchingEventInsert(conn, matchingEvents.get(i), meUuids.get(i), encryptedEventDataList.get(i));
+            }
+            conn.commit();
+
+            List<String> uuids = new ArrayList<>();
+            for (UUID meUuid : meUuids) {
+                String uuidStr = meUuid.toString();
+                uuids.add(uuidStr);
+                logger.debug("Added matching event with UUID: {}", uuidStr);
+            }
+            return uuids;
+        } catch (SQLException e) {
+            logger.error("Failed to add matching events to PostgreSQL", e);
+            throw new RuntimeException("Failed to add matching events to PostgreSQL", e);
+        }
+    }
+
     private void doMatchingEventInsert(Connection conn, MatchingEvent matchingEvent, UUID meUuid, String encryptedEventData) throws SQLException {
         String sql = "INSERT INTO " + MATCHING_EVENT
                 + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"

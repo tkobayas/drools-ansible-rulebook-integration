@@ -787,6 +787,7 @@ public class AstRulesEngine implements Closeable {
         String rulesetName = executor.getRuleSetName();
         List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(recoveryMatches);
 
+        List<MatchingEvent> matchingEvents = new ArrayList<>();
         for (Map<String, Map<String, Object>> matchData : matchList) {
             String ruleName = matchData.keySet().iterator().next();
             Map<String, Object> eventData = matchData.get(ruleName);
@@ -796,9 +797,13 @@ public class AstRulesEngine implements Closeable {
             me.setRuleSetName(rulesetName);
             me.setRuleName(ruleName);
             me.setEventData(toJson(eventData));
+            matchingEvents.add(me);
+        }
 
-            String meUuid = haStateManager.addMatchingEvent(me);
-            logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}", ruleName, meUuid);
+        List<String> meUuids = haStateManager.addMatchingEvents(matchingEvents);
+        for (int i = 0; i < matchingEvents.size(); i++) {
+            logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}",
+                         matchingEvents.get(i).getRuleName(), meUuids.get(i));
         }
     }
 
