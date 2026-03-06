@@ -487,7 +487,14 @@ public class H2StateManager extends AbstractHAStateManager {
         String encryptedEventData = encryptIfEnabled(matchingEvent.getEventData());
 
         try (Connection conn = dataSource.getConnection()) {
-            doMatchingEventInsert(conn, matchingEvent, encryptedEventData);
+            conn.setAutoCommit(false);
+            try {
+                doMatchingEventInsert(conn, matchingEvent, encryptedEventData);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
 
             logger.debug("Added matching event with UUID: {} for rule: {}/{}",
                          meUuid, matchingEvent.getRuleSetName(), matchingEvent.getRuleName());
@@ -650,18 +657,24 @@ public class H2StateManager extends AbstractHAStateManager {
 
         String sql = "UPDATE " + ACTION_INFO + " SET action_data = ? WHERE me_uuid = ? AND index = ?";
 
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, encryptIfEnabled(action));
+                ps.setString(2, matchingUuid);
+                ps.setInt(3, index);
 
-            ps.setString(1, encryptIfEnabled(action));
-            ps.setString(2, matchingUuid);
-            ps.setInt(3, index);
+                int updated = ps.executeUpdate();
+                conn.commit();
 
-            int updated = ps.executeUpdate();
-            if (updated > 0) {
-                logger.debug("Updated action for ME UUID: {}, index: {}", matchingUuid, index);
-            } else {
-                logger.warn("No action found to update for ME UUID: {}, index: {}", matchingUuid, index);
+                if (updated > 0) {
+                    logger.debug("Updated action for ME UUID: {}, index: {}", matchingUuid, index);
+                } else {
+                    logger.warn("No action found to update for ME UUID: {}, index: {}", matchingUuid, index);
+                }
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
             }
         } catch (SQLException e) {
             logger.error("Failed to update action", e);
@@ -836,7 +849,14 @@ public class H2StateManager extends AbstractHAStateManager {
         ensureVersionInMetadata(haStats.getMetadata());
 
         try (Connection conn = dataSource.getConnection()) {
-            doHAStatsUpsert(conn);
+            conn.setAutoCommit(false);
+            try {
+                doHAStatsUpsert(conn);
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            }
         } catch (SQLException e) {
             logger.error("Failed to persist HA stats", e);
         }
