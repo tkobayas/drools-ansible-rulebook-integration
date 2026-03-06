@@ -1,6 +1,5 @@
 package org.drools.ansible.rulebook.integration.ha.api;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -107,11 +106,7 @@ public interface HAStateManager {
      * @return List of UUIDs for the matching events
      */
     default List<String> addMatchingEvents(List<MatchingEvent> matchingEvents) {
-        List<String> uuids = new ArrayList<>();
-        for (MatchingEvent me : matchingEvents) {
-            uuids.add(addMatchingEvent(me));
-        }
-        return uuids;
+        throw new UnsupportedOperationException("addMatchingEvents must be implemented by the concrete class");
     }
 
     /**
@@ -190,8 +185,7 @@ public interface HAStateManager {
      * Implementations should override to combine into one commit/fsync.
      */
     default void persistSessionStateAndStats(SessionState sessionState) {
-        persistSessionState(sessionState);
-        persistHAStats();
+        throw new UnsupportedOperationException("persistSessionStateAndStats must be implemented by the concrete class");
     }
 
     /**
@@ -208,12 +202,7 @@ public interface HAStateManager {
      * @param matchingEvents the matching events to insert (may be empty)
      */
     default void persistSessionStateStatsAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
-        persistSessionStateAndStats(sessionState);
-        if (matchingEvents != null) {
-            for (MatchingEvent me : matchingEvents) {
-                addMatchingEvent(me);
-            }
-        }
+        throw new UnsupportedOperationException("persistSessionStateStatsAndMatchingEvents must be implemented by the concrete class");
     }
 
     /**
