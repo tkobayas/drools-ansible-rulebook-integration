@@ -160,7 +160,6 @@ public class H2StateManager extends AbstractHAStateManager {
             if (haStats.getHaUuid() == null) {
                 haStats.setHaUuid(haUuid);
             }
-            haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
             ensureVersionInMetadata(haStats.getMetadata());
             doHAStatsUpsert(conn);
         });
@@ -294,7 +293,6 @@ public class H2StateManager extends AbstractHAStateManager {
 
         executeInTransaction("Failed to persist SessionState and HAStats", conn -> {
             doSessionStateUpsert(conn, sessionState);
-            haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
             doHAStatsUpsert(conn);
         });
 
@@ -334,7 +332,6 @@ public class H2StateManager extends AbstractHAStateManager {
         final String finalEncryptedPartialEvents = encryptedPartialEvents;
         executeInTransaction("Failed to persist SessionState, HAStats, and matching events", conn -> {
             doSessionStateUpsert(conn, sessionState, finalEncryptedPartialEvents);
-            haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
             doHAStatsUpsert(conn);
 
             for (int i = 0; i < matchingEvents.size(); i++) {
@@ -572,7 +569,6 @@ public class H2StateManager extends AbstractHAStateManager {
 
             if (haStats != null) {
                 haStats.incrementActionsProcessed();
-                haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
                 ensureVersionInMetadata(haStats.getMetadata());
                 doHAStatsUpsert(conn);
             }
@@ -687,10 +683,17 @@ public class H2StateManager extends AbstractHAStateManager {
     @Override
     public HAStats getHAStats() {
         if (haStats != null) {
-            haStats.setIncompleteMatchingEvents(countRows("SELECT COUNT(*) AS cnt FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?"));
             haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         }
         return haStats;
+    }
+
+    @Override
+    public void refreshHAStats() {
+        if (haStats != null) {
+            haStats.setIncompleteMatchingEvents(countRows("SELECT COUNT(*) AS cnt FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?"));
+            haStats.setSessionStateSize(calculateSessionStateSize());
+        }
     }
 
     public HAStats loadOrCreateHAStats() {
@@ -722,9 +725,6 @@ public class H2StateManager extends AbstractHAStateManager {
         }
 
         prepareHAStatsForPersist();
-
-        Long sessionStateSize = calculateSessionStateSize();
-        haStats.setSessionStateSize(sessionStateSize);
 
         executeInTransaction("Failed to persist HA stats", conn -> {
             doHAStatsUpsert(conn);

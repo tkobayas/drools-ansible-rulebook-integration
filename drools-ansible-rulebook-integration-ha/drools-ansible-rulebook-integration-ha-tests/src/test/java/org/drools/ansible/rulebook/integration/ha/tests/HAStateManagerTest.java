@@ -77,6 +77,7 @@ class HAStateManagerTest extends HAStateManagerTestBase {
     @Test
     void testHAStats() {
         // Test initial HA stats
+        stateManager.refreshHAStats();
         HAStats stats = stateManager.getHAStats();
         assertThat(stats).isNotNull();
         assertThat(stats.getCurrentLeader()).isNull();
@@ -104,7 +105,8 @@ class HAStateManagerTest extends HAStateManagerTestBase {
         String meUuid = stateManager.addMatchingEvent(me);
         stateManager.addActionInfo(meUuid, 0, "{\"name\":\"test_action\",\"status\":\"running\"}");
 
-        // Check updated stats
+        // Check updated stats - refreshHAStats() needed for incompleteMatchingEvents (DB query)
+        stateManager.refreshHAStats();
         stats = stateManager.getHAStats();
         assertThat(stats.getEventsProcessedInTerm()).isEqualTo(0); // Events processed not incremented in this test
         assertThat(stats.getActionsProcessedInTerm()).isEqualTo(1);
