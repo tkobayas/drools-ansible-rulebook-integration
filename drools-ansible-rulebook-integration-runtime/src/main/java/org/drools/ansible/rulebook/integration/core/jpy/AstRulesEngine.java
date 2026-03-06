@@ -673,6 +673,7 @@ public class AstRulesEngine implements Closeable {
     public String getHAStats() {
         requireHaMode();
 
+        haStateManager.refreshHAStats();
         HAStats stats = haStateManager.getHAStats();
         stats.setPartialFulfilledRules(computePartialFulfilledRules());
         Map<String, Object> result = new HashMap<>();
