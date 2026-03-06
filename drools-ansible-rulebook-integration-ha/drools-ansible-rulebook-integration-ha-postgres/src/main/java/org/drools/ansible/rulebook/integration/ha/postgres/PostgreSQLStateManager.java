@@ -44,6 +44,10 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     private static final Logger logger = LoggerFactory.getLogger(PostgreSQLStateManager.class);
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<EventRecord>> EVENT_RECORD_LIST_TYPE = new TypeReference<>() {};
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
+
     /**
      * SSL key format classification. Determines how the key file is handled:
      * <ul>
@@ -56,6 +60,16 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         PKCS12,
         DER,
         PEM
+    }
+
+    @FunctionalInterface
+    private interface SqlWork {
+        void execute(Connection conn) throws SQLException;
+    }
+
+    @FunctionalInterface
+    private interface SqlWorkWithResult<T> {
+        T execute(Connection conn) throws SQLException;
     }
 
     private HikariDataSource dataSource;
@@ -77,6 +91,43 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         return tempP12KeystorePath;
     }
 
+    // ── Transaction helpers ─────────────────────────────────────────────
+
+    private void executeInTransaction(String errorMessage, SqlWork work) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                work.execute(conn);
+                conn.commit();
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            logger.error(errorMessage, e);
+            throw new RuntimeException(errorMessage, e);
+        }
+    }
+
+    private <T> T executeInTransactionWithResult(String errorMessage, SqlWorkWithResult<T> work) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                T result = work.execute(conn);
+                conn.commit();
+                return result;
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            logger.error(errorMessage, e);
+            throw new RuntimeException(errorMessage, e);
+        }
+    }
+
+    // ── Initialization ──────────────────────────────────────────────────
+
     @Override
     public void initializeHA(String uuid, String workerName, Map<String, Object> dbParams, Map<String, Object> config) {
         logger.info("Initializing PostgreSQL HA mode with UUID: {}, workerName: {}", uuid, workerName);
@@ -85,7 +136,33 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         this.workerName = workerName;
         this.haStats = new HAStats(uuid);
 
-        // Parse PostgreSQL connection parameters
+        // buildDataSource may throw UnsupportedOperationException/IllegalArgumentException
+        // for invalid SSL config — let those propagate directly without wrapping.
+        this.dataSource = buildDataSource(dbParams);
+
+        try {
+            PostgreSQLSchema.createSchema(dataSource);
+            PostgreSQLSchema.migrateSchema(dataSource);
+
+            loadOrCreateHAStats();
+
+            logger.info("PostgreSQL HA initialization completed successfully");
+
+            commonInit(config);
+        } catch (Exception e) {
+            if (tempP12KeystorePath != null) {
+                PemToKeyStoreConverter.cleanup(tempP12KeystorePath);
+                tempP12KeystorePath = null;
+            }
+            if (dataSource != null && !dataSource.isClosed()) {
+                dataSource.close();
+            }
+            logger.error("Failed to initialize PostgreSQL HA", e);
+            throw new RuntimeException("Failed to initialize PostgreSQL HA", e);
+        }
+    }
+
+    private HikariDataSource buildDataSource(Map<String, Object> dbParams) {
         String host = (String) dbParams.getOrDefault("host", "localhost");
         Object portObj = dbParams.getOrDefault("port", 5432);
         Integer port = (portObj instanceof Integer) ? (Integer) portObj : Integer.parseInt(portObj.toString());
@@ -95,13 +172,11 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         String sslmode = (String) dbParams.getOrDefault("sslmode", "prefer");
         String applicationName = (String) dbParams.getOrDefault("application_name", "drools-eda-ha");
 
-        // SSL client certificate parameters
         String sslkey = (String) dbParams.get("sslkey");
         String sslcert = (String) dbParams.get("sslcert");
         String sslrootcert = (String) dbParams.get("sslrootcert");
         String sslpassword = (String) dbParams.get("sslpassword");
 
-        // Detect SSL key format and handle accordingly
         if (sslkey != null && !sslkey.isEmpty()) {
             SslKeyFormat format = detectSslKeyFormat(sslkey);
             logger.info("SSL key format detected: {} for {}", format, sslkey);
@@ -113,7 +188,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 case DER:
                     throw new UnsupportedOperationException(
                             "DER format (.pk8/.der) is not supported. Please use PEM format instead.");
-
                 case PEM:
                     if (sslcert == null || sslcert.isEmpty()) {
                         throw new IllegalArgumentException(
@@ -134,96 +208,63 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             }
         }
 
-        try {
-            StringBuilder jdbcUrlBuilder = new StringBuilder(
-                String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s&ApplicationName=%s",
-                    host, port, database, sslmode, applicationName));
+        StringBuilder jdbcUrlBuilder = new StringBuilder(
+            String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s&ApplicationName=%s",
+                host, port, database, sslmode, applicationName));
 
-            // Append SSL parameters to JDBC URL for pgjdbc compatibility (URL-encoded)
-            if (sslkey != null && !sslkey.isEmpty()) {
-                jdbcUrlBuilder.append("&sslkey=").append(URLEncoder.encode(sslkey, StandardCharsets.UTF_8));
-            }
-            if (sslpassword != null) {
-                jdbcUrlBuilder.append("&sslpassword=").append(URLEncoder.encode(sslpassword, StandardCharsets.UTF_8));
-            }
-            if (sslcert != null && !sslcert.isEmpty()) {
-                jdbcUrlBuilder.append("&sslcert=").append(URLEncoder.encode(sslcert, StandardCharsets.UTF_8));
-            }
-            if (sslrootcert != null && !sslrootcert.isEmpty()) {
-                jdbcUrlBuilder.append("&sslrootcert=").append(URLEncoder.encode(sslrootcert, StandardCharsets.UTF_8));
-            }
-
-            String jdbcUrl = jdbcUrlBuilder.toString();
-            logger.info("Connecting to PostgreSQL at {}:{}/{}", host, port, database);
-
-            // Configure HikariCP connection pool
-            HikariConfig hikariConfig = new HikariConfig();
-            hikariConfig.setJdbcUrl(jdbcUrl);
-            hikariConfig.setUsername(username);
-            hikariConfig.setPassword(password);
-            hikariConfig.setMaximumPoolSize(3);  // Reduced from 10 to avoid "too many clients" in tests
-            hikariConfig.setConnectionTimeout(30000);
-            hikariConfig.setIdleTimeout(600000);
-            hikariConfig.setDriverClassName("org.postgresql.Driver");
-
-            logger.debug("PostgreSQL HAStateManager connecting to database with parameters: jdbcUrl={}, username={}, sslmode={}, applicationName={}",
-                maskSensitiveParams(jdbcUrl), username, sslmode, applicationName);
-
-            // PostgreSQL-specific optimizations
-            hikariConfig.addDataSourceProperty("prepareThreshold", 3);
-            hikariConfig.addDataSourceProperty("preparedStatementCacheQueries", 256);
-
-            this.dataSource = new HikariDataSource(hikariConfig);
-
-            PostgreSQLSchema.createSchema(dataSource);
-            PostgreSQLSchema.migrateSchema(dataSource);
-
-            // Initialize or load HA stats
-            loadOrCreateHAStats();
-
-            logger.info("PostgreSQL HA initialization completed successfully");
-
-            commonInit(config);
-        } catch (Exception e) {
-            // Clean up temp P12 keystore if initialization fails after conversion
-            if (tempP12KeystorePath != null) {
-                PemToKeyStoreConverter.cleanup(tempP12KeystorePath);
-                tempP12KeystorePath = null;
-            }
-            if (dataSource != null && !dataSource.isClosed()) {
-                dataSource.close();
-            }
-            logger.error("Failed to initialize PostgreSQL HA", e);
-            throw new RuntimeException("Failed to initialize PostgreSQL HA", e);
+        if (sslkey != null && !sslkey.isEmpty()) {
+            jdbcUrlBuilder.append("&sslkey=").append(URLEncoder.encode(sslkey, StandardCharsets.UTF_8));
         }
+        if (sslpassword != null) {
+            jdbcUrlBuilder.append("&sslpassword=").append(URLEncoder.encode(sslpassword, StandardCharsets.UTF_8));
+        }
+        if (sslcert != null && !sslcert.isEmpty()) {
+            jdbcUrlBuilder.append("&sslcert=").append(URLEncoder.encode(sslcert, StandardCharsets.UTF_8));
+        }
+        if (sslrootcert != null && !sslrootcert.isEmpty()) {
+            jdbcUrlBuilder.append("&sslrootcert=").append(URLEncoder.encode(sslrootcert, StandardCharsets.UTF_8));
+        }
+
+        String jdbcUrl = jdbcUrlBuilder.toString();
+        logger.info("Connecting to PostgreSQL at {}:{}/{}", host, port, database);
+
+        HikariConfig hikariConfig = new HikariConfig();
+        hikariConfig.setJdbcUrl(jdbcUrl);
+        hikariConfig.setUsername(username);
+        hikariConfig.setPassword(password);
+        hikariConfig.setMaximumPoolSize(3);
+        hikariConfig.setConnectionTimeout(30000);
+        hikariConfig.setIdleTimeout(600000);
+        hikariConfig.setDriverClassName("org.postgresql.Driver");
+
+        logger.debug("PostgreSQL HAStateManager connecting to database with parameters: jdbcUrl={}, username={}, sslmode={}, applicationName={}",
+            maskSensitiveParams(jdbcUrl), username, sslmode, applicationName);
+
+        hikariConfig.addDataSourceProperty("prepareThreshold", 3);
+        hikariConfig.addDataSourceProperty("preparedStatementCacheQueries", 256);
+
+        return new HikariDataSource(hikariConfig);
     }
+
+    // ── Leader management ───────────────────────────────────────────────
 
     @Override
     public void enableLeader() {
         this.leaderId = this.workerName;
         this.isLeader = true;
 
-        // Load or create HAStats, set leader, and persist in a single transaction
         String selectSql = "SELECT * FROM " + HA_STATS + " WHERE ha_uuid = ?";
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // Load existing stats
+        executeInTransaction("Failed to enable leader", conn -> {
             try (PreparedStatement ps = conn.prepareStatement(selectSql)) {
                 ps.setString(1, haUuid);
                 ResultSet rs = ps.executeQuery();
                 if (rs.next()) {
-                    haStats.setHaUuid(rs.getString("ha_uuid"));
-                    populateHAStatsFromJson(rs.getString("properties"), haStats);
-                    haStats.setMetadata(jsonToMap(rs.getString("metadata")));
-                    haStats.setSettings(jsonToMap(rs.getString("settings")));
-                    haStats.setExt(jsonToMap(rs.getString("ext")));
+                    populateHAStatsFromResultSet(rs);
                     logger.info("Restored HA stats from PostgreSQL database");
                 }
             }
 
-            // Update leader and persist
             haStats.setCurrentLeader(this.workerName);
             if (haStats.getHaUuid() == null) {
                 haStats.setHaUuid(haUuid);
@@ -231,12 +272,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
             ensureVersionInMetadata(haStats.getMetadata());
             doHAStatsUpsert(conn);
-
-            conn.commit();
-        } catch (SQLException e) {
-            logger.error("Failed to enable leader in PostgreSQL", e);
-            throw new RuntimeException("Failed to enable leader", e);
-        }
+        });
 
         logger.info("Leader mode enabled for: {}", this.workerName);
     }
@@ -271,6 +307,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         return workerName;
     }
 
+    // ── SessionState operations ─────────────────────────────────────────
+
     @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
         String sql = "SELECT * FROM " + SESSION_STATE
@@ -289,51 +327,39 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 sessionState.setRuleSetName(rs.getString("rule_set_name"));
                 sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
-                // Handle partial events
                 String partialEventsJson = decryptIfEnabled(rs.getString("partial_matching_events"));
                 if (partialEventsJson != null) {
                     try {
-                        ObjectMapper objectMapper = new ObjectMapper();
-                        List<EventRecord> partialEvents = objectMapper.readValue(partialEventsJson,
-                            new TypeReference<List<EventRecord>>() {});
+                        List<EventRecord> partialEvents = OBJECT_MAPPER.readValue(partialEventsJson, EVENT_RECORD_LIST_TYPE);
                         sessionState.setPartialEvents(partialEvents);
                     } catch (Exception e) {
                         logger.error("Failed to deserialize partial events", e);
                     }
                 }
 
-                // Handle processed event IDs
                 String processedEventIdsJson = rs.getString("processed_event_ids");
                 if (processedEventIdsJson != null) {
                     try {
-                        ObjectMapper objectMapper = new ObjectMapper();
-                        List<String> processedEventIds = objectMapper.readValue(processedEventIdsJson,
-                            new TypeReference<List<String>>() {});
+                        List<String> processedEventIds = OBJECT_MAPPER.readValue(processedEventIdsJson, STRING_LIST_TYPE);
                         sessionState.setProcessedEventIds(processedEventIds);
                     } catch (Exception e) {
                         logger.error("Failed to deserialize processed event IDs", e);
                     }
                 }
 
-                // Handle persisted time
                 Timestamp persistedTime = rs.getTimestamp("persisted_time");
                 if (persistedTime != null) {
                     sessionState.setPersistedTime(persistedTime.getTime());
                 }
 
-                // Handle metadata
                 sessionState.setLeaderId(rs.getString("leader_id"));
-
-                // Handle SHA tracking fields
                 sessionState.setCurrentStateSHA(rs.getString("current_state_sha"));
 
-                // Handle created_time
                 Timestamp createdTime = rs.getTimestamp("created_time");
                 if (createdTime != null) {
                     sessionState.setCreatedTime(createdTime.getTime());
                 }
 
-                // Handle extensibility columns
                 sessionState.setMetadata(jsonToMap(rs.getString("metadata")));
                 sessionState.setProperties(jsonToMap(rs.getString("properties")));
                 sessionState.setSettings(jsonToMap(rs.getString("settings")));
@@ -352,37 +378,19 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public void persistSessionState(SessionState sessionState) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot persist SessionState - not leader");
-        }
-
-        if (sessionState.getRuleSetName() == null) {
-            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
-        }
-
+        validateForPersist(sessionState);
         ensureVersionInMetadata(sessionState.getMetadata());
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to persist SessionState to PostgreSQL", conn -> {
             doSessionStateUpsert(conn, sessionState);
-            conn.commit();
+        });
 
-            logger.debug("Persisted SessionState to PostgreSQL for haUuid: {}", haUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to persist SessionState to PostgreSQL", e);
-            throw new RuntimeException("Failed to persist SessionState to PostgreSQL", e);
-        }
+        logger.debug("Persisted SessionState to PostgreSQL for haUuid: {}", haUuid);
     }
 
     @Override
     public void persistSessionStateAndStats(SessionState sessionState) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot persist SessionState - not leader");
-        }
-
-        if (sessionState.getRuleSetName() == null) {
-            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
-        }
+        validateForPersist(sessionState);
 
         if (haStats == null) {
             // Defensive: haStats should always be initialized before this is called on the hot path
@@ -391,44 +399,20 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
 
         ensureVersionInMetadata(sessionState.getMetadata());
+        prepareHAStatsForPersist();
 
-        // Ensure haUuid is set on stats
-        if (haStats.getHaUuid() == null) {
-            haStats.setHaUuid(haUuid);
-        }
-        ensureVersionInMetadata(haStats.getMetadata());
-
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // 1. Upsert session state
+        executeInTransaction("Failed to persist SessionState and HAStats to PostgreSQL", conn -> {
             doSessionStateUpsert(conn, sessionState);
-
-            // 2. Calculate session state size (reads the row we just wrote)
             haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
-
-            // 3. Upsert HA stats
             doHAStatsUpsert(conn);
+        });
 
-            // Single commit/fsync for both operations
-            conn.commit();
-
-            logger.debug("Persisted SessionState and HAStats to PostgreSQL in single transaction for haUuid: {}", haUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to persist SessionState and HAStats to PostgreSQL", e);
-            throw new RuntimeException("Failed to persist SessionState and HAStats to PostgreSQL", e);
-        }
+        logger.debug("Persisted SessionState and HAStats to PostgreSQL in single transaction for haUuid: {}", haUuid);
     }
 
     @Override
     public void persistSessionStateStatsAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot persist SessionState - not leader");
-        }
-
-        if (sessionState.getRuleSetName() == null) {
-            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
-        }
+        validateForPersist(sessionState);
 
         if (haStats == null) {
             // Defensive: haStats should always be initialized before this is called on the hot path
@@ -440,11 +424,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
 
         ensureVersionInMetadata(sessionState.getMetadata());
-
-        if (haStats.getHaUuid() == null) {
-            haStats.setHaUuid(haUuid);
-        }
-        ensureVersionInMetadata(haStats.getMetadata());
+        prepareHAStatsForPersist();
 
         // Pre-compute encrypted data outside the transaction to minimize lock duration
         String encryptedPartialEvents = null;
@@ -452,7 +432,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             encryptedPartialEvents = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
         }
 
-        // Pre-compute encrypted matching event data and ensure metadata versions
         List<String> encryptedEventDataList = new ArrayList<>();
         List<UUID> meUuids = new ArrayList<>();
         if (!matchingEvents.isEmpty()) {
@@ -463,34 +442,35 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             }
         }
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // 1. Upsert session state (pass pre-computed encrypted data)
-            doSessionStateUpsert(conn, sessionState, encryptedPartialEvents);
-
-            // 2. Calculate session state size
+        final String finalEncryptedPartialEvents = encryptedPartialEvents;
+        executeInTransaction("Failed to persist SessionState, HAStats, and matching events to PostgreSQL", conn -> {
+            doSessionStateUpsert(conn, sessionState, finalEncryptedPartialEvents);
             haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
-
-            // 3. Upsert HA stats
             doHAStatsUpsert(conn);
 
-            // 4. Insert matching events
-            if (!matchingEvents.isEmpty()) {
-                for (int i = 0; i < matchingEvents.size(); i++) {
-                    doMatchingEventInsert(conn, matchingEvents.get(i), meUuids.get(i), encryptedEventDataList.get(i));
-                }
+            for (int i = 0; i < matchingEvents.size(); i++) {
+                doMatchingEventInsert(conn, matchingEvents.get(i), meUuids.get(i), encryptedEventDataList.get(i));
             }
+        });
 
-            // Single commit for all operations
-            conn.commit();
+        logger.debug("Persisted SessionState, HAStats, and {} matching events to PostgreSQL in single transaction for haUuid: {}",
+                     matchingEvents.size(), haUuid);
+    }
 
-            logger.debug("Persisted SessionState, HAStats, and {} matching events to PostgreSQL in single transaction for haUuid: {}",
-                         matchingEvents.size(), haUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to persist SessionState, HAStats, and matching events to PostgreSQL", e);
-            throw new RuntimeException("Failed to persist SessionState, HAStats, and matching events to PostgreSQL", e);
+    private void validateForPersist(SessionState sessionState) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot persist SessionState - not leader");
         }
+        if (sessionState.getRuleSetName() == null) {
+            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
+        }
+    }
+
+    private void prepareHAStatsForPersist() {
+        if (haStats.getHaUuid() == null) {
+            haStats.setHaUuid(haUuid);
+        }
+        ensureVersionInMetadata(haStats.getMetadata());
     }
 
     private void doSessionStateUpsert(Connection conn, SessionState sessionState) throws SQLException {
@@ -502,8 +482,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     }
 
     private void doSessionStateUpsert(Connection conn, SessionState sessionState, String encryptedPartialEvents) throws SQLException {
-        // Upsert session state (single-row-per-session design)
-        // Note: SHA is already calculated in updateInMemorySessionState() before this is called
         String sql = "INSERT INTO " + SESSION_STATE
                 + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha, created_time, leader_id,"
                 + " metadata, properties, settings, ext)"
@@ -525,28 +503,22 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ps.setString(1, sessionState.getHaUuid());
             ps.setString(2, sessionState.getRuleSetName());
             ps.setString(3, sessionState.getRulebookHash());
-
-            // Handle partial events (already encrypted if applicable)
             ps.setString(4, encryptedPartialEvents);
 
-            // Handle processed event IDs
             String processedEventIdsJson = null;
             if (sessionState.getProcessedEventIds() != null) {
                 processedEventIdsJson = toJson(sessionState.getProcessedEventIds());
             }
             ps.setString(5, processedEventIdsJson);
 
-            // Handle persisted time
             if (sessionState.getPersistedTime() > 0) {
                 ps.setTimestamp(6, new Timestamp(sessionState.getPersistedTime()));
             } else {
                 ps.setTimestamp(6, null);
             }
 
-            // Handle SHA tracking fields
             ps.setString(7, sessionState.getCurrentStateSHA());
 
-            // Handle created_time (only used on INSERT, preserved on UPDATE via ON CONFLICT)
             if (sessionState.getCreatedTime() > 0) {
                 ps.setTimestamp(8, new Timestamp(sessionState.getCreatedTime()));
             } else {
@@ -555,7 +527,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
             ps.setString(9, sessionState.getLeaderId());
 
-            // Extensibility columns
             ps.setString(10, mapToJson(sessionState.getMetadata()));
             ps.setString(11, mapToJson(sessionState.getProperties()));
             ps.setString(12, mapToJson(sessionState.getSettings()));
@@ -565,13 +536,14 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
     }
 
+    // ── MatchingEvent operations ────────────────────────────────────────
+
     @Override
     public String addMatchingEvent(MatchingEvent matchingEvent) {
         if (!isLeader) {
             throw new IllegalStateException("Cannot add matching event - not leader");
         }
 
-        // Generate UUID
         UUID meUuid = UUID.randomUUID();
         String meUuidString = meUuid.toString();
         matchingEvent.setMeUuid(meUuidString);
@@ -581,27 +553,16 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
         ensureVersionInMetadata(matchingEvent.getMetadata());
 
-        // Pre-compute encrypted event data outside the transaction
         String encryptedEventData = encryptIfEnabled(matchingEvent.getEventData());
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                doMatchingEventInsert(conn, matchingEvent, meUuid, encryptedEventData);
-                conn.commit();
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            }
+        executeInTransaction("Failed to add matching event to PostgreSQL", conn -> {
+            doMatchingEventInsert(conn, matchingEvent, meUuid, encryptedEventData);
+        });
 
-            logger.debug("Added matching event with UUID: {} for rule: {}/{}",
-                         meUuidString, matchingEvent.getRuleSetName(), matchingEvent.getRuleName());
+        logger.debug("Added matching event with UUID: {} for rule: {}/{}",
+                     meUuidString, matchingEvent.getRuleSetName(), matchingEvent.getRuleName());
 
-            return meUuidString;
-        } catch (SQLException e) {
-            logger.error("Failed to add matching event to PostgreSQL", e);
-            throw new RuntimeException("Failed to add matching event to PostgreSQL", e);
-        }
+        return meUuidString;
     }
 
     @Override
@@ -613,7 +574,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             return List.of();
         }
 
-        // Prepare all matching events: assign UUIDs, timestamps, metadata, and encrypt outside transaction
         List<UUID> meUuids = new ArrayList<>();
         List<String> encryptedEventDataList = new ArrayList<>();
         for (MatchingEvent me : matchingEvents) {
@@ -627,24 +587,54 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             encryptedEventDataList.add(encryptIfEnabled(me.getEventData()));
         }
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to add matching events to PostgreSQL", conn -> {
             for (int i = 0; i < matchingEvents.size(); i++) {
                 doMatchingEventInsert(conn, matchingEvents.get(i), meUuids.get(i), encryptedEventDataList.get(i));
             }
-            conn.commit();
+        });
 
-            List<String> uuids = new ArrayList<>();
-            for (UUID meUuid : meUuids) {
-                String uuidStr = meUuid.toString();
-                uuids.add(uuidStr);
-                logger.debug("Added matching event with UUID: {}", uuidStr);
-            }
-            return uuids;
-        } catch (SQLException e) {
-            logger.error("Failed to add matching events to PostgreSQL", e);
-            throw new RuntimeException("Failed to add matching events to PostgreSQL", e);
+        List<String> uuids = new ArrayList<>();
+        for (UUID meUuid : meUuids) {
+            String uuidStr = meUuid.toString();
+            uuids.add(uuidStr);
+            logger.debug("Added matching event with UUID: {}", uuidStr);
         }
+        return uuids;
+    }
+
+    @Override
+    public List<MatchingEvent> getPendingMatchingEvents() {
+        String sql = "SELECT * FROM " + MATCHING_EVENT + " WHERE ha_uuid = ? ORDER BY created_at";
+        List<MatchingEvent> events = new ArrayList<>();
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, haUuid);
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+                MatchingEvent me = new MatchingEvent();
+                UUID meUuid = (UUID) rs.getObject("me_uuid");
+                me.setMeUuid(meUuid.toString());
+                me.setHaUuid(rs.getString("ha_uuid"));
+                me.setRuleSetName(rs.getString("rule_set_name"));
+                me.setRuleName(rs.getString("rule_name"));
+                me.setEventData(decryptIfEnabled(rs.getString("event_data")));
+                me.setCreatedAt(rs.getLong("created_at"));
+                me.setMetadata(jsonToMap(rs.getString("metadata")));
+                me.setProperties(jsonToMap(rs.getString("properties")));
+                me.setSettings(jsonToMap(rs.getString("settings")));
+                me.setExt(jsonToMap(rs.getString("ext")));
+                events.add(me);
+            }
+
+            logger.debug("Found {} pending matching events for haUuid: {}", events.size(), haUuid);
+        } catch (SQLException e) {
+            logger.error("Failed to get pending matching events from PostgreSQL", e);
+        }
+
+        return events;
     }
 
     private void doMatchingEventInsert(Connection conn, MatchingEvent matchingEvent, UUID meUuid, String encryptedEventData) throws SQLException {
@@ -669,41 +659,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
     }
 
-    @Override
-    public List<MatchingEvent> getPendingMatchingEvents() {
-        String sql = "SELECT * FROM " + MATCHING_EVENT + " WHERE ha_uuid = ? ORDER BY created_at";
-        List<MatchingEvent> events = new ArrayList<>();
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, haUuid);
-            ResultSet rs = ps.executeQuery();
-
-            while (rs.next()) {
-                MatchingEvent me = new MatchingEvent();
-                // PostgreSQL: Read UUID and convert to string
-                UUID meUuid = (UUID) rs.getObject("me_uuid");
-                me.setMeUuid(meUuid.toString());
-                me.setHaUuid(rs.getString("ha_uuid"));
-                me.setRuleSetName(rs.getString("rule_set_name"));
-                me.setRuleName(rs.getString("rule_name"));
-                me.setEventData(decryptIfEnabled(rs.getString("event_data")));
-                me.setCreatedAt(rs.getLong("created_at"));
-                me.setMetadata(jsonToMap(rs.getString("metadata")));
-                me.setProperties(jsonToMap(rs.getString("properties")));
-                me.setSettings(jsonToMap(rs.getString("settings")));
-                me.setExt(jsonToMap(rs.getString("ext")));
-                events.add(me);
-            }
-
-            logger.debug("Found {} pending matching events for haUuid: {}", events.size(), haUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to get pending matching events from PostgreSQL", e);
-        }
-
-        return events;
-    }
+    // ── ActionInfo operations ───────────────────────────────────────────
 
     @Override
     public void addActionInfo(String matchingUuid, int index, String actionData) {
@@ -711,10 +667,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             throw new IllegalStateException("Cannot add action info - not leader");
         }
 
-        // Generate UUID for ActionInfo
         UUID actionId = UUID.randomUUID();
 
-        // Pre-compute encryption outside the transaction
         String encryptedActionData = encryptIfEnabled(actionData);
         String metadataJson = mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION));
 
@@ -723,10 +677,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 + " metadata, properties, settings, ext)"
                 + " VALUES (?::uuid, ?, ?::uuid, ?, ?, ?::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)";
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to add action info to PostgreSQL", conn -> {
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                // PostgreSQL: Use native UUID type
                 ps.setObject(1, actionId);
                 ps.setString(2, haUuid);
                 ps.setObject(3, UUID.fromString(matchingUuid));
@@ -743,13 +695,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 ensureVersionInMetadata(haStats.getMetadata());
                 doHAStatsUpsert(conn);
             }
+        });
 
-            conn.commit();
-            logger.debug("Added action info for matching event: {}, index: {}", matchingUuid, index);
-        } catch (SQLException e) {
-            logger.error("Failed to add action info to PostgreSQL", e);
-            throw new RuntimeException("Failed to add action info to PostgreSQL", e);
-        }
+        logger.debug("Added action info for matching event: {}, index: {}", matchingUuid, index);
     }
 
     @Override
@@ -762,29 +710,21 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                 + " SET action_data = ?"
                 + " WHERE me_uuid = ?::uuid AND index = ?";
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to update action info in PostgreSQL", conn -> {
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, encryptIfEnabled(actionData));
                 ps.setObject(2, UUID.fromString(matchingUuid));
                 ps.setInt(3, index);
 
                 int updated = ps.executeUpdate();
-                conn.commit();
 
                 if (updated > 0) {
                     logger.debug("Updated action info for matching event: {}, index: {}", matchingUuid, index);
                 } else {
                     logger.warn("No action info found to update for matching event: {}, index: {}", matchingUuid, index);
                 }
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
             }
-        } catch (SQLException e) {
-            logger.error("Failed to update action info in PostgreSQL", e);
-            throw new RuntimeException("Failed to update action info in PostgreSQL", e);
-        }
+        });
     }
 
     @Override
@@ -845,51 +785,32 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             throw new IllegalStateException("Cannot delete action info - not leader");
         }
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // Delete ActionInfo records (will cascade due to FK)
+        executeInTransaction("Failed to delete action info from PostgreSQL", conn -> {
             String deleteActionInfo = "DELETE FROM " + ACTION_INFO + " WHERE me_uuid = ?::uuid";
             try (PreparedStatement ps = conn.prepareStatement(deleteActionInfo)) {
                 ps.setObject(1, UUID.fromString(matchingUuid));
                 ps.executeUpdate();
             }
 
-            // Delete MatchingEvent
             String deleteMatchingEvent = "DELETE FROM " + MATCHING_EVENT + " WHERE me_uuid = ?::uuid";
             try (PreparedStatement ps = conn.prepareStatement(deleteMatchingEvent)) {
                 ps.setObject(1, UUID.fromString(matchingUuid));
                 ps.executeUpdate();
             }
+        });
 
-            conn.commit();
-
-            logger.debug("Deleted action info and matching event for UUID: {}", matchingUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to delete action info from PostgreSQL", e);
-            throw new RuntimeException("Failed to delete action info from PostgreSQL", e);
-        }
+        logger.debug("Deleted action info and matching event for UUID: {}", matchingUuid);
     }
+
+    // ── HAStats operations ──────────────────────────────────────────────
 
     @Override
     public HAStats getHAStats() {
         if (haStats != null) {
-            haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
+            haStats.setIncompleteMatchingEvents(countRows("SELECT COUNT(*) AS cnt FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?"));
             haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         }
         return haStats;
-    }
-
-    @Override
-    public void shutdown() {
-        if (dataSource != null && !dataSource.isClosed()) {
-            dataSource.close();
-            logger.info("PostgreSQL HA state manager shut down");
-        }
-        if (tempP12KeystorePath != null) {
-            PemToKeyStoreConverter.cleanup(tempP12KeystorePath);
-            tempP12KeystorePath = null;
-        }
     }
 
     public HAStats loadOrCreateHAStats() {
@@ -902,14 +823,9 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
-                haStats.setHaUuid(rs.getString("ha_uuid"));
-                populateHAStatsFromJson(rs.getString("properties"), haStats);
-                haStats.setMetadata(jsonToMap(rs.getString("metadata")));
-                haStats.setSettings(jsonToMap(rs.getString("settings")));
-                haStats.setExt(jsonToMap(rs.getString("ext")));
+                populateHAStatsFromResultSet(rs);
                 logger.info("Restored HA stats from PostgreSQL database");
             } else {
-                // Create initial stats
                 persistHAStats();
             }
         } catch (SQLException e) {
@@ -925,37 +841,26 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             return;
         }
 
-        // Ensure haUuid is set
-        if (haStats.getHaUuid() == null) {
-            haStats.setHaUuid(haUuid);
-        }
+        prepareHAStatsForPersist();
 
-        // Calculate session state size before persisting
         Long sessionStateSize = calculateSessionStateSize();
         haStats.setSessionStateSize(sessionStateSize);
-        // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
 
-        ensureVersionInMetadata(haStats.getMetadata());
+        executeInTransaction("Failed to persist HA stats to PostgreSQL", conn -> {
+            doHAStatsUpsert(conn);
+        });
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                doHAStatsUpsert(conn);
-                conn.commit();
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            }
-            logger.debug("Persisted HA stats to PostgreSQL");
-        } catch (SQLException e) {
-            logger.error("Failed to persist HA stats to PostgreSQL", e);
-        }
+        logger.debug("Persisted HA stats to PostgreSQL");
     }
 
-    /**
-     * Calculate the size of the latest SessionState record using PostgreSQL's pg_column_size
-     * @return size in bytes, or 0 if no session state exists
-     */
+    private void populateHAStatsFromResultSet(ResultSet rs) throws SQLException {
+        haStats.setHaUuid(rs.getString("ha_uuid"));
+        populateHAStatsFromJson(rs.getString("properties"), haStats);
+        haStats.setMetadata(jsonToMap(rs.getString("metadata")));
+        haStats.setSettings(jsonToMap(rs.getString("settings")));
+        haStats.setExt(jsonToMap(rs.getString("ext")));
+    }
+
     private Long calculateSessionStateSize() {
         try (Connection conn = dataSource.getConnection()) {
             return doCalculateSessionStateSize(conn);
@@ -1018,11 +923,13 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
     }
 
+    // ── Startup / Shutdown ──────────────────────────────────────────────
+
     @Override
     public void logStartupSummary() {
-        int pendingMEs = countIncompleteMatchingEvents();
-        int pendingActions = countActionInfo();
-        int sessionCount = countSessionStates();
+        int pendingMEs = countRows("SELECT COUNT(*) AS cnt FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?");
+        int pendingActions = countRows("SELECT COUNT(*) AS cnt FROM " + ACTION_INFO + " WHERE ha_uuid = ?");
+        int sessionCount = countRows("SELECT COUNT(DISTINCT rule_set_name) AS cnt FROM " + SESSION_STATE + " WHERE ha_uuid = ?");
         int partialEvents = countPartialEventsInMemory();
         String leader = haStats != null ? haStats.getCurrentLeader() : "unknown";
         int switches = haStats != null ? haStats.getLeaderSwitches() : 0;
@@ -1031,27 +938,21 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
                      haUuid, leader, sessionCount, partialEvents, pendingMEs, pendingActions, switches);
     }
 
-    private int countSessionStates() {
-        String sql = "SELECT COUNT(DISTINCT rule_set_name) AS cnt FROM " + SESSION_STATE + " WHERE ha_uuid = ?";
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, haUuid);
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                return rs.getInt("cnt");
-            }
-        } catch (SQLException e) {
-            logger.warn("Failed to count session states: {}", e.getMessage());
+    @Override
+    public void shutdown() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            dataSource.close();
+            logger.info("PostgreSQL HA state manager shut down");
         }
-        return 0;
+        if (tempP12KeystorePath != null) {
+            PemToKeyStoreConverter.cleanup(tempP12KeystorePath);
+            tempP12KeystorePath = null;
+        }
     }
 
-    private int countActionInfo() {
-        String sql = "SELECT COUNT(*) AS cnt FROM " + ACTION_INFO + " WHERE ha_uuid = ?";
+    // ── Counting / query helpers ────────────────────────────────────────
 
+    private int countRows(String sql) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
@@ -1059,28 +960,10 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
-                return rs.getInt("cnt");
+                return rs.getInt(1);
             }
         } catch (SQLException e) {
-            logger.warn("Failed to count action info: {}", e.getMessage());
-        }
-        return 0;
-    }
-
-    private int countIncompleteMatchingEvents() {
-        String sql = "SELECT COUNT(*) AS pending FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?";
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, haUuid);
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                return rs.getInt("pending");
-            }
-        } catch (SQLException e) {
-            logger.warn("Failed to count incomplete matching events: {}", e.getMessage());
+            logger.warn("Failed to execute count query: {}", e.getMessage());
         }
         return 0;
     }
@@ -1104,6 +987,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         return null;
     }
 
+    // ── SSL helpers ─────────────────────────────────────────────────────
+
     /**
      * Detect the SSL key format based on file extension.
      * PKCS#12 and DER are identified by extension; everything else is treated as PEM.
@@ -1126,6 +1011,8 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         return url.replaceAll("(sslpassword=)[^&]*", "$1***");
     }
 
+    // ── JSON serialization helpers ──────────────────────────────────────
+
     private String haStatsToJson(HAStats stats) {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("current_leader", stats.getCurrentLeader());
@@ -1138,7 +1025,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         props.put("global_session_stats", stats.getGlobalSessionStats());
         props.put("partial_fulfilled_rules", stats.getPartialFulfilledRules());
         props.put("session_state_size", stats.getSessionStateSize());
-        // metadata, settings, ext are stored in separate DB columns
         return toJson(props);
     }
 
@@ -1162,7 +1048,6 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         stats.setPartialFulfilledRules(getIntFromMap(props, "partial_fulfilled_rules"));
         Object ssSize = props.get("session_state_size");
         stats.setSessionStateSize(ssSize instanceof Number ? ((Number) ssSize).longValue() : 0L);
-        // metadata, settings, ext are loaded from separate DB columns
     }
 
     private int getIntFromMap(Map<String, Object> map, String key) {

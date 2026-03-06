@@ -19,7 +19,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.drools.ansible.rulebook.integration.ha.api.AbstractHAStateManager;
-import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.drools.ansible.rulebook.integration.ha.model.HAStats;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
@@ -41,6 +40,15 @@ import static org.drools.ansible.rulebook.integration.ha.api.HATableNames.SESSIO
 public class H2StateManager extends AbstractHAStateManager {
 
     private static final Logger logger = LoggerFactory.getLogger(H2StateManager.class);
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<EventRecord>> EVENT_RECORD_LIST_TYPE = new TypeReference<>() {};
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
+
+    @FunctionalInterface
+    private interface SqlWork {
+        void execute(Connection conn) throws SQLException;
+    }
 
     private HikariDataSource dataSource;
     private String leaderId;
@@ -67,6 +75,26 @@ public class H2StateManager extends AbstractHAStateManager {
         }
     }
 
+    // ── Transaction helper ──────────────────────────────────────────────
+
+    private void executeInTransaction(String errorMessage, SqlWork work) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                work.execute(conn);
+                conn.commit();
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            logger.error(errorMessage, e);
+            throw new RuntimeException(errorMessage, e);
+        }
+    }
+
+    // ── Initialization ──────────────────────────────────────────────────
+
     @Override
     public void initializeHA(String uuid, String workerName, Map<String, Object> dbParams, Map<String, Object> config) {
         logger.info("Initializing HA mode with UUID: {}, workerName: {}", uuid, workerName);
@@ -75,31 +103,12 @@ public class H2StateManager extends AbstractHAStateManager {
         this.workerName = workerName;
         this.haStats = new HAStats(uuid);
 
-        // Configure HikariCP connection pool
-        HikariConfig hikariConfig = new HikariConfig();
-
-        // db_file_path in dbParams is required (default ./eda_ha)
-        String dbFilePath = dbParams != null ? (String) dbParams.get("db_file_path") : null;
-        if (dbFilePath == null || dbFilePath.isEmpty()) {
-            dbFilePath = "./eda_ha";
-        }
-        String jdbcUrl = "jdbc:h2:file:" + dbFilePath + ";MODE=PostgreSQL";
-        logger.info("Using file-backed H2 database from db_file_path: {}", dbFilePath);
-        logger.warn("Using H2 database for HA - not suitable for production");
-
-        hikariConfig.setJdbcUrl(jdbcUrl);
-        hikariConfig.setUsername("sa");
-        hikariConfig.setPassword("");
-        hikariConfig.setMaximumPoolSize(10);
-        hikariConfig.setDriverClassName("org.h2.Driver");
-
-        this.dataSource = new HikariDataSource(hikariConfig);
+        this.dataSource = buildDataSource(dbParams);
 
         try {
             H2Schema.createSchema(dataSource);
             H2Schema.migrateSchema(dataSource);
 
-            // Initialize or load HA stats
             loadOrCreateHAStats();
         } catch (SQLException e) {
             logger.error("Failed to initialize HA schema", e);
@@ -109,32 +118,44 @@ public class H2StateManager extends AbstractHAStateManager {
         commonInit(config);
     }
 
+    private HikariDataSource buildDataSource(Map<String, Object> dbParams) {
+        String dbFilePath = dbParams != null ? (String) dbParams.get("db_file_path") : null;
+        if (dbFilePath == null || dbFilePath.isEmpty()) {
+            dbFilePath = "./eda_ha";
+        }
+        String jdbcUrl = "jdbc:h2:file:" + dbFilePath + ";MODE=PostgreSQL";
+        logger.info("Using file-backed H2 database from db_file_path: {}", dbFilePath);
+        logger.warn("Using H2 database for HA - not suitable for production");
+
+        HikariConfig hikariConfig = new HikariConfig();
+        hikariConfig.setJdbcUrl(jdbcUrl);
+        hikariConfig.setUsername("sa");
+        hikariConfig.setPassword("");
+        hikariConfig.setMaximumPoolSize(10);
+        hikariConfig.setDriverClassName("org.h2.Driver");
+
+        return new HikariDataSource(hikariConfig);
+    }
+
+    // ── Leader management ───────────────────────────────────────────────
+
     @Override
     public void enableLeader() {
         this.leaderId = this.workerName;
         this.isLeader = true;
 
-        // Load or create HAStats, set leader, and persist in a single transaction
         String selectSql = "SELECT * FROM " + HA_STATS + " WHERE ha_uuid = ?";
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // Load existing stats
+        executeInTransaction("Failed to enable leader", conn -> {
             try (PreparedStatement ps = conn.prepareStatement(selectSql)) {
                 ps.setString(1, haUuid);
                 ResultSet rs = ps.executeQuery();
                 if (rs.next()) {
-                    haStats.setHaUuid(rs.getString("ha_uuid"));
-                    populateHAStatsFromJson(rs.getString("properties"), haStats);
-                    haStats.setMetadata(jsonToMap(rs.getString("metadata")));
-                    haStats.setSettings(jsonToMap(rs.getString("settings")));
-                    haStats.setExt(jsonToMap(rs.getString("ext")));
+                    populateHAStatsFromResultSet(rs);
                     logger.info("Restored HA stats from database");
                 }
             }
 
-            // Update leader and persist
             haStats.setCurrentLeader(this.workerName);
             if (haStats.getHaUuid() == null) {
                 haStats.setHaUuid(haUuid);
@@ -142,12 +163,7 @@ public class H2StateManager extends AbstractHAStateManager {
             haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
             ensureVersionInMetadata(haStats.getMetadata());
             doHAStatsUpsert(conn);
-
-            conn.commit();
-        } catch (SQLException e) {
-            logger.error("Failed to enable leader", e);
-            throw new RuntimeException("Failed to enable leader", e);
-        }
+        });
 
         logger.info("Leader mode enabled for: {}", this.workerName);
     }
@@ -182,6 +198,8 @@ public class H2StateManager extends AbstractHAStateManager {
         return workerName;
     }
 
+    // ── SessionState operations ─────────────────────────────────────────
+
     @Override
     public SessionState getPersistedSessionState(String ruleSetName) {
         String sql = "SELECT * FROM " + SESSION_STATE
@@ -200,51 +218,39 @@ public class H2StateManager extends AbstractHAStateManager {
                 sessionState.setRuleSetName(rs.getString("rule_set_name"));
                 sessionState.setRulebookHash(rs.getString("rulebook_hash"));
 
-                // Handle partial events
                 String partialEventsJson = decryptIfEnabled(rs.getString("partial_matching_events"));
                 if (partialEventsJson != null) {
                     try {
-                        ObjectMapper objectMapper = new ObjectMapper();
-                        List<EventRecord> partialEvents = objectMapper.readValue(partialEventsJson,
-                            new TypeReference<List<EventRecord>>() {});
+                        List<EventRecord> partialEvents = OBJECT_MAPPER.readValue(partialEventsJson, EVENT_RECORD_LIST_TYPE);
                         sessionState.setPartialEvents(partialEvents);
                     } catch (Exception e) {
                         logger.error("Failed to deserialize partial events", e);
                     }
                 }
 
-                // Handle processed event IDs
                 String processedEventIdsJson = rs.getString("processed_event_ids");
                 if (processedEventIdsJson != null) {
                     try {
-                        ObjectMapper objectMapper = new ObjectMapper();
-                        List<String> processedEventIds = objectMapper.readValue(processedEventIdsJson,
-                            new TypeReference<List<String>>() {});
+                        List<String> processedEventIds = OBJECT_MAPPER.readValue(processedEventIdsJson, STRING_LIST_TYPE);
                         sessionState.setProcessedEventIds(processedEventIds);
                     } catch (Exception e) {
                         logger.error("Failed to deserialize processed event IDs", e);
                     }
                 }
 
-                // Handle persisted time
                 Timestamp persistedTime = rs.getTimestamp("persisted_time");
                 if (persistedTime != null) {
                     sessionState.setPersistedTime(persistedTime.getTime());
                 }
 
-                // Handle metadata
                 sessionState.setLeaderId(rs.getString("leader_id"));
-
-                // Handle SHA tracking fields
                 sessionState.setCurrentStateSHA(rs.getString("current_state_sha"));
 
-                // Handle created_time
                 Timestamp createdTime = rs.getTimestamp("created_time");
                 if (createdTime != null) {
                     sessionState.setCreatedTime(createdTime.getTime());
                 }
 
-                // Handle extensibility columns
                 sessionState.setMetadata(jsonToMap(rs.getString("metadata")));
                 sessionState.setProperties(jsonToMap(rs.getString("properties")));
                 sessionState.setSettings(jsonToMap(rs.getString("settings")));
@@ -263,37 +269,19 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public void persistSessionState(SessionState sessionState) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot persist SessionState - not leader");
-        }
-
-        if (sessionState.getRuleSetName() == null) {
-            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
-        }
-
+        validateForPersist(sessionState);
         ensureVersionInMetadata(sessionState.getMetadata());
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to persist SessionState", conn -> {
             doSessionStateUpsert(conn, sessionState);
-            conn.commit();
+        });
 
-            logger.debug("Persisted SessionState for haUuid: {}", haUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to persist SessionState", e);
-            throw new RuntimeException("Failed to persist SessionState", e);
-        }
+        logger.debug("Persisted SessionState for haUuid: {}", haUuid);
     }
 
     @Override
     public void persistSessionStateAndStats(SessionState sessionState) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot persist SessionState - not leader");
-        }
-
-        if (sessionState.getRuleSetName() == null) {
-            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
-        }
+        validateForPersist(sessionState);
 
         if (haStats == null) {
             // Defensive: haStats should always be initialized before this is called on the hot path
@@ -302,44 +290,20 @@ public class H2StateManager extends AbstractHAStateManager {
         }
 
         ensureVersionInMetadata(sessionState.getMetadata());
+        prepareHAStatsForPersist();
 
-        // Ensure haUuid is set on stats
-        if (haStats.getHaUuid() == null) {
-            haStats.setHaUuid(haUuid);
-        }
-        ensureVersionInMetadata(haStats.getMetadata());
-
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // 1. Upsert session state
+        executeInTransaction("Failed to persist SessionState and HAStats", conn -> {
             doSessionStateUpsert(conn, sessionState);
-
-            // 2. Calculate session state size (reads the row we just wrote)
             haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
-
-            // 3. Upsert HA stats
             doHAStatsUpsert(conn);
+        });
 
-            // Single commit for both operations
-            conn.commit();
-
-            logger.debug("Persisted SessionState and HAStats in single transaction for haUuid: {}", haUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to persist SessionState and HAStats", e);
-            throw new RuntimeException("Failed to persist SessionState and HAStats", e);
-        }
+        logger.debug("Persisted SessionState and HAStats in single transaction for haUuid: {}", haUuid);
     }
 
     @Override
     public void persistSessionStateStatsAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot persist SessionState - not leader");
-        }
-
-        if (sessionState.getRuleSetName() == null) {
-            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
-        }
+        validateForPersist(sessionState);
 
         if (haStats == null) {
             // Defensive: haStats should always be initialized before this is called on the hot path
@@ -351,11 +315,7 @@ public class H2StateManager extends AbstractHAStateManager {
         }
 
         ensureVersionInMetadata(sessionState.getMetadata());
-
-        if (haStats.getHaUuid() == null) {
-            haStats.setHaUuid(haUuid);
-        }
-        ensureVersionInMetadata(haStats.getMetadata());
+        prepareHAStatsForPersist();
 
         // Pre-compute encrypted data outside the transaction to minimize lock duration
         String encryptedPartialEvents = null;
@@ -363,7 +323,6 @@ public class H2StateManager extends AbstractHAStateManager {
             encryptedPartialEvents = encryptIfEnabled(toJson(sessionState.getPartialEvents()));
         }
 
-        // Pre-compute encrypted matching event data and ensure metadata versions
         List<String> encryptedEventDataList = new ArrayList<>();
         if (!matchingEvents.isEmpty()) {
             for (MatchingEvent me : matchingEvents) {
@@ -372,34 +331,35 @@ public class H2StateManager extends AbstractHAStateManager {
             }
         }
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // 1. Upsert session state (pass pre-computed encrypted data)
-            doSessionStateUpsert(conn, sessionState, encryptedPartialEvents);
-
-            // 2. Calculate session state size
+        final String finalEncryptedPartialEvents = encryptedPartialEvents;
+        executeInTransaction("Failed to persist SessionState, HAStats, and matching events", conn -> {
+            doSessionStateUpsert(conn, sessionState, finalEncryptedPartialEvents);
             haStats.setSessionStateSize(doCalculateSessionStateSize(conn));
-
-            // 3. Upsert HA stats
             doHAStatsUpsert(conn);
 
-            // 4. Insert matching events
-            if (!matchingEvents.isEmpty()) {
-                for (int i = 0; i < matchingEvents.size(); i++) {
-                    doMatchingEventInsert(conn, matchingEvents.get(i), encryptedEventDataList.get(i));
-                }
+            for (int i = 0; i < matchingEvents.size(); i++) {
+                doMatchingEventInsert(conn, matchingEvents.get(i), encryptedEventDataList.get(i));
             }
+        });
 
-            // Single commit for all operations
-            conn.commit();
+        logger.debug("Persisted SessionState, HAStats, and {} matching events in single transaction for haUuid: {}",
+                     matchingEvents.size(), haUuid);
+    }
 
-            logger.debug("Persisted SessionState, HAStats, and {} matching events in single transaction for haUuid: {}",
-                         matchingEvents.size(), haUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to persist SessionState, HAStats, and matching events", e);
-            throw new RuntimeException("Failed to persist SessionState, HAStats, and matching events", e);
+    private void validateForPersist(SessionState sessionState) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot persist SessionState - not leader");
         }
+        if (sessionState.getRuleSetName() == null) {
+            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
+        }
+    }
+
+    private void prepareHAStatsForPersist() {
+        if (haStats.getHaUuid() == null) {
+            haStats.setHaUuid(haUuid);
+        }
+        ensureVersionInMetadata(haStats.getMetadata());
     }
 
     private void doSessionStateUpsert(Connection conn, SessionState sessionState) throws SQLException {
@@ -411,8 +371,6 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     private void doSessionStateUpsert(Connection conn, SessionState sessionState, String encryptedPartialEvents) throws SQLException {
-        // Upsert session state (single-row-per-session design)
-        // Note: SHA is already calculated in updateInMemorySessionState() before this is called
         String sql = "MERGE INTO " + SESSION_STATE
                 + " (ha_uuid, rule_set_name, rulebook_hash, partial_matching_events, processed_event_ids, persisted_time, current_state_sha,"
                 + " created_time, leader_id, metadata, properties, settings, ext)"
@@ -425,25 +383,20 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.setString(1, sessionState.getHaUuid());
             ps.setString(2, sessionState.getRuleSetName());
             ps.setString(3, sessionState.getRulebookHash());
-
-            // Handle partial events (already encrypted if applicable)
             ps.setString(4, encryptedPartialEvents);
 
-            // Handle processed event IDs
             String processedEventIdsJson = null;
             if (sessionState.getProcessedEventIds() != null) {
                 processedEventIdsJson = toJson(sessionState.getProcessedEventIds());
             }
             ps.setString(5, processedEventIdsJson);
 
-            // Handle persisted time
             if (sessionState.getPersistedTime() > 0) {
                 ps.setTimestamp(6, new Timestamp(sessionState.getPersistedTime()));
             } else {
                 ps.setTimestamp(6, null);
             }
 
-            // Handle SHA tracking fields
             ps.setString(7, sessionState.getCurrentStateSHA());
 
             // Subquery params for COALESCE(created_time) — preserves original on update
@@ -459,7 +412,6 @@ public class H2StateManager extends AbstractHAStateManager {
 
             ps.setString(11, sessionState.getLeaderId());
 
-            // Extensibility columns
             ps.setString(12, mapToJson(sessionState.getMetadata()));
             ps.setString(13, mapToJson(sessionState.getProperties()));
             ps.setString(14, mapToJson(sessionState.getSettings()));
@@ -468,6 +420,8 @@ public class H2StateManager extends AbstractHAStateManager {
             ps.executeUpdate();
         }
     }
+
+    // ── MatchingEvent operations ────────────────────────────────────────
 
     @Override
     public String addMatchingEvent(MatchingEvent matchingEvent) {
@@ -483,27 +437,16 @@ public class H2StateManager extends AbstractHAStateManager {
 
         ensureVersionInMetadata(matchingEvent.getMetadata());
 
-        // Pre-compute encrypted event data outside the transaction
         String encryptedEventData = encryptIfEnabled(matchingEvent.getEventData());
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                doMatchingEventInsert(conn, matchingEvent, encryptedEventData);
-                conn.commit();
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            }
+        executeInTransaction("Failed to add matching event", conn -> {
+            doMatchingEventInsert(conn, matchingEvent, encryptedEventData);
+        });
 
-            logger.debug("Added matching event with UUID: {} for rule: {}/{}",
-                         meUuid, matchingEvent.getRuleSetName(), matchingEvent.getRuleName());
+        logger.debug("Added matching event with UUID: {} for rule: {}/{}",
+                     meUuid, matchingEvent.getRuleSetName(), matchingEvent.getRuleName());
 
-            return meUuid;
-        } catch (SQLException e) {
-            logger.error("Failed to add matching event", e);
-            throw new RuntimeException("Failed to add matching event", e);
-        }
+        return meUuid;
     }
 
     @Override
@@ -515,7 +458,6 @@ public class H2StateManager extends AbstractHAStateManager {
             return List.of();
         }
 
-        // Prepare all matching events: assign UUIDs, timestamps, metadata, and encrypt outside transaction
         List<String> meUuids = new ArrayList<>();
         List<String> encryptedEventDataList = new ArrayList<>();
         for (MatchingEvent me : matchingEvents) {
@@ -529,43 +471,16 @@ public class H2StateManager extends AbstractHAStateManager {
             encryptedEventDataList.add(encryptIfEnabled(me.getEventData()));
         }
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to add matching events", conn -> {
             for (int i = 0; i < matchingEvents.size(); i++) {
                 doMatchingEventInsert(conn, matchingEvents.get(i), encryptedEventDataList.get(i));
             }
-            conn.commit();
+        });
 
-            for (String meUuid : meUuids) {
-                logger.debug("Added matching event with UUID: {}", meUuid);
-            }
-            return meUuids;
-        } catch (SQLException e) {
-            logger.error("Failed to add matching events", e);
-            throw new RuntimeException("Failed to add matching events", e);
+        for (String meUuid : meUuids) {
+            logger.debug("Added matching event with UUID: {}", meUuid);
         }
-    }
-
-    private void doMatchingEventInsert(Connection conn, MatchingEvent matchingEvent, String encryptedEventData) throws SQLException {
-        String sql = "INSERT INTO " + MATCHING_EVENT
-                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
-                + " metadata, properties, settings, ext)"
-                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, matchingEvent.getMeUuid());
-            ps.setString(2, matchingEvent.getHaUuid());
-            ps.setString(3, matchingEvent.getRuleSetName());
-            ps.setString(4, matchingEvent.getRuleName());
-            ps.setString(5, encryptedEventData);
-            ps.setLong(6, matchingEvent.getCreatedAt());
-            ps.setString(7, mapToJson(matchingEvent.getMetadata()));
-            ps.setString(8, mapToJson(matchingEvent.getProperties()));
-            ps.setString(9, mapToJson(matchingEvent.getSettings()));
-            ps.setString(10, mapToJson(matchingEvent.getExt()));
-
-            ps.executeUpdate();
-        }
+        return meUuids;
     }
 
     @Override
@@ -600,6 +515,30 @@ public class H2StateManager extends AbstractHAStateManager {
         return events;
     }
 
+    private void doMatchingEventInsert(Connection conn, MatchingEvent matchingEvent, String encryptedEventData) throws SQLException {
+        String sql = "INSERT INTO " + MATCHING_EVENT
+                + " (me_uuid, ha_uuid, rule_set_name, rule_name, event_data, created_at,"
+                + " metadata, properties, settings, ext)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, matchingEvent.getMeUuid());
+            ps.setString(2, matchingEvent.getHaUuid());
+            ps.setString(3, matchingEvent.getRuleSetName());
+            ps.setString(4, matchingEvent.getRuleName());
+            ps.setString(5, encryptedEventData);
+            ps.setLong(6, matchingEvent.getCreatedAt());
+            ps.setString(7, mapToJson(matchingEvent.getMetadata()));
+            ps.setString(8, mapToJson(matchingEvent.getProperties()));
+            ps.setString(9, mapToJson(matchingEvent.getSettings()));
+            ps.setString(10, mapToJson(matchingEvent.getExt()));
+
+            ps.executeUpdate();
+        }
+    }
+
+    // ── ActionInfo operations ───────────────────────────────────────────
+
     @Override
     public void addActionInfo(String matchingUuid, int index, String action) {
         if (!isLeader) {
@@ -608,7 +547,6 @@ public class H2StateManager extends AbstractHAStateManager {
 
         String actionId = UUID.randomUUID().toString();
 
-        // Pre-compute encryption outside the transaction
         String encryptedAction = encryptIfEnabled(action);
         String metadataJson = mapToJson(Map.of(DROOLS_VERSION_KEY, DROOLS_VERSION));
 
@@ -617,8 +555,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 + " metadata, properties, settings, ext)"
                 + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to add action", conn -> {
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, actionId);
                 ps.setString(2, haUuid);
@@ -639,13 +576,9 @@ public class H2StateManager extends AbstractHAStateManager {
                 ensureVersionInMetadata(haStats.getMetadata());
                 doHAStatsUpsert(conn);
             }
+        });
 
-            conn.commit();
-            logger.debug("Added action for ME UUID: {}, index: {}", matchingUuid, index);
-        } catch (SQLException e) {
-            logger.error("Failed to add action", e);
-            throw new RuntimeException("Failed to add action", e);
-        }
+        logger.debug("Added action for ME UUID: {}, index: {}", matchingUuid, index);
     }
 
     @Override
@@ -657,29 +590,21 @@ public class H2StateManager extends AbstractHAStateManager {
 
         String sql = "UPDATE " + ACTION_INFO + " SET action_data = ? WHERE me_uuid = ? AND index = ?";
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
+        executeInTransaction("Failed to update action", conn -> {
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, encryptIfEnabled(action));
                 ps.setString(2, matchingUuid);
                 ps.setInt(3, index);
 
                 int updated = ps.executeUpdate();
-                conn.commit();
 
                 if (updated > 0) {
                     logger.debug("Updated action for ME UUID: {}, index: {}", matchingUuid, index);
                 } else {
                     logger.warn("No action found to update for ME UUID: {}, index: {}", matchingUuid, index);
                 }
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
             }
-        } catch (SQLException e) {
-            logger.error("Failed to update action", e);
-            throw new RuntimeException("Failed to update action", e);
-        }
+        });
     }
 
     @Override
@@ -740,68 +665,33 @@ public class H2StateManager extends AbstractHAStateManager {
             return;
         }
 
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-
-            // Delete actions first (due to foreign key)
+        executeInTransaction("Failed to delete actions", conn -> {
             String sqlActions = "DELETE FROM " + ACTION_INFO + " WHERE me_uuid = ?";
             try (PreparedStatement ps1 = conn.prepareStatement(sqlActions)) {
                 ps1.setString(1, matchingUuid);
                 ps1.executeUpdate();
             }
 
-            // Delete matching event
             String sqlME = "DELETE FROM " + MATCHING_EVENT + " WHERE me_uuid = ?";
             try (PreparedStatement ps2 = conn.prepareStatement(sqlME)) {
                 ps2.setString(1, matchingUuid);
                 ps2.executeUpdate();
             }
+        });
 
-            conn.commit();
-            logger.debug("Deleted matching event and actions: {}", matchingUuid);
-        } catch (SQLException e) {
-            logger.error("Failed to delete actions", e);
-            throw new RuntimeException("Failed to delete actions", e);
-        }
+        logger.debug("Deleted matching event and actions: {}", matchingUuid);
     }
+
+    // ── HAStats operations ──────────────────────────────────────────────
 
     @Override
     public HAStats getHAStats() {
         if (haStats != null) {
-            haStats.setIncompleteMatchingEvents(countIncompleteMatchingEvents());
+            haStats.setIncompleteMatchingEvents(countRows("SELECT COUNT(*) AS cnt FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?"));
             haStats.setPartialEventsInMemory(countPartialEventsInMemory());
         }
         return haStats;
     }
-
-    @Override
-    public void shutdown() {
-        if (dataSource != null && !dataSource.isClosed()) {
-            dataSource.close();
-            logger.info("Shutting down H2StateManager");
-        }
-    }
-
-    /**
-     * Force H2 to fully close the database and release all JVM-level caches.
-     * This executes the H2 SHUTDOWN command before closing the connection pool.
-     * Useful in tests to ensure file-backed databases are completely released
-     * between test runs, preventing stale data from H2's internal database cache.
-     */
-    public void shutdownCompletely() {
-        if (dataSource != null && !dataSource.isClosed()) {
-            try (Connection conn = dataSource.getConnection();
-                 var stmt = conn.createStatement()) {
-                stmt.execute("SHUTDOWN");
-            } catch (SQLException e) {
-                logger.debug("H2 SHUTDOWN command failed (may already be closed): {}", e.getMessage());
-            }
-            dataSource.close();
-            logger.info("Shutting down H2StateManager completely");
-        }
-    }
-
-    // Private helper methods
 
     public HAStats loadOrCreateHAStats() {
         String sql = "SELECT * FROM " + HA_STATS + " WHERE ha_uuid = ?";
@@ -813,14 +703,9 @@ public class H2StateManager extends AbstractHAStateManager {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
-                haStats.setHaUuid(rs.getString("ha_uuid"));
-                populateHAStatsFromJson(rs.getString("properties"), haStats);
-                haStats.setMetadata(jsonToMap(rs.getString("metadata")));
-                haStats.setSettings(jsonToMap(rs.getString("settings")));
-                haStats.setExt(jsonToMap(rs.getString("ext")));
+                populateHAStatsFromResultSet(rs);
                 logger.info("Restored HA stats from database");
             } else {
-                // Create initial stats
                 persistHAStats();
             }
         } catch (SQLException e) {
@@ -836,36 +721,24 @@ public class H2StateManager extends AbstractHAStateManager {
             return;
         }
 
-        // Ensure haUuid is set
-        if (haStats.getHaUuid() == null) {
-            haStats.setHaUuid(haUuid);
-        }
+        prepareHAStatsForPersist();
 
-        // Calculate session state size before persisting
         Long sessionStateSize = calculateSessionStateSize();
         haStats.setSessionStateSize(sessionStateSize);
-        // partialFulfilledRules is computed live in AstRulesEngine.getHAStats()
 
-        ensureVersionInMetadata(haStats.getMetadata());
-
-        try (Connection conn = dataSource.getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                doHAStatsUpsert(conn);
-                conn.commit();
-            } catch (SQLException e) {
-                conn.rollback();
-                throw e;
-            }
-        } catch (SQLException e) {
-            logger.error("Failed to persist HA stats", e);
-        }
+        executeInTransaction("Failed to persist HA stats", conn -> {
+            doHAStatsUpsert(conn);
+        });
     }
 
-    /**
-     * Calculate the size of the latest SessionState record using H2's OCTET_LENGTH
-     * @return size in bytes, or 0 if no session state exists
-     */
+    private void populateHAStatsFromResultSet(ResultSet rs) throws SQLException {
+        haStats.setHaUuid(rs.getString("ha_uuid"));
+        populateHAStatsFromJson(rs.getString("properties"), haStats);
+        haStats.setMetadata(jsonToMap(rs.getString("metadata")));
+        haStats.setSettings(jsonToMap(rs.getString("settings")));
+        haStats.setExt(jsonToMap(rs.getString("ext")));
+    }
+
     private Long calculateSessionStateSize() {
         try (Connection conn = dataSource.getConnection()) {
             return doCalculateSessionStateSize(conn);
@@ -919,11 +792,13 @@ public class H2StateManager extends AbstractHAStateManager {
         }
     }
 
+    // ── Startup / Shutdown ──────────────────────────────────────────────
+
     @Override
     public void logStartupSummary() {
-        int pendingMEs = countIncompleteMatchingEvents();
-        int pendingActions = countActionInfo();
-        int sessionCount = countSessionStates();
+        int pendingMEs = countRows("SELECT COUNT(*) AS cnt FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?");
+        int pendingActions = countRows("SELECT COUNT(*) AS cnt FROM " + ACTION_INFO + " WHERE ha_uuid = ?");
+        int sessionCount = countRows("SELECT COUNT(DISTINCT rule_set_name) AS cnt FROM " + SESSION_STATE + " WHERE ha_uuid = ?");
         int partialEvents = countPartialEventsInMemory();
         String leader = haStats != null ? haStats.getCurrentLeader() : "unknown";
         int switches = haStats != null ? haStats.getLeaderSwitches() : 0;
@@ -932,45 +807,36 @@ public class H2StateManager extends AbstractHAStateManager {
                      haUuid, leader, sessionCount, partialEvents, pendingMEs, pendingActions, switches);
     }
 
-    private int countSessionStates() {
-        String sql = "SELECT COUNT(DISTINCT rule_set_name) AS cnt FROM " + SESSION_STATE + " WHERE ha_uuid = ?";
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, haUuid);
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                return rs.getInt("cnt");
-            }
-        } catch (SQLException e) {
-            logger.warn("Failed to count session states: {}", e.getMessage());
+    @Override
+    public void shutdown() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            dataSource.close();
+            logger.info("Shutting down H2StateManager");
         }
-        return 0;
     }
 
-    private int countActionInfo() {
-        String sql = "SELECT COUNT(*) AS cnt FROM " + ACTION_INFO + " WHERE ha_uuid = ?";
-
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, haUuid);
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                return rs.getInt("cnt");
+    /**
+     * Force H2 to fully close the database and release all JVM-level caches.
+     * This executes the H2 SHUTDOWN command before closing the connection pool.
+     * Useful in tests to ensure file-backed databases are completely released
+     * between test runs, preventing stale data from H2's internal database cache.
+     */
+    public void shutdownCompletely() {
+        if (dataSource != null && !dataSource.isClosed()) {
+            try (Connection conn = dataSource.getConnection();
+                 var stmt = conn.createStatement()) {
+                stmt.execute("SHUTDOWN");
+            } catch (SQLException e) {
+                logger.debug("H2 SHUTDOWN command failed (may already be closed): {}", e.getMessage());
             }
-        } catch (SQLException e) {
-            logger.warn("Failed to count action info: {}", e.getMessage());
+            dataSource.close();
+            logger.info("Shutting down H2StateManager completely");
         }
-        return 0;
     }
 
-    private int countIncompleteMatchingEvents() {
-        String sql = "SELECT COUNT(*) AS pending FROM " + MATCHING_EVENT + " WHERE ha_uuid = ?";
+    // ── Counting / query helpers ────────────────────────────────────────
 
+    private int countRows(String sql) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
@@ -978,10 +844,10 @@ public class H2StateManager extends AbstractHAStateManager {
             ResultSet rs = ps.executeQuery();
 
             if (rs.next()) {
-                return rs.getInt("pending");
+                return rs.getInt(1);
             }
         } catch (SQLException e) {
-            logger.warn("Failed to count incomplete matching events: {}", e.getMessage());
+            logger.warn("Failed to execute count query: {}", e.getMessage());
         }
         return 0;
     }
@@ -1005,6 +871,8 @@ public class H2StateManager extends AbstractHAStateManager {
         return null;
     }
 
+    // ── JSON serialization helpers ──────────────────────────────────────
+
     private String haStatsToJson(HAStats stats) {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("current_leader", stats.getCurrentLeader());
@@ -1017,7 +885,6 @@ public class H2StateManager extends AbstractHAStateManager {
         props.put("global_session_stats", stats.getGlobalSessionStats());
         props.put("partial_fulfilled_rules", stats.getPartialFulfilledRules());
         props.put("session_state_size", stats.getSessionStateSize());
-        // metadata, settings, ext are stored in separate DB columns
         return toJson(props);
     }
 
@@ -1041,7 +908,6 @@ public class H2StateManager extends AbstractHAStateManager {
         stats.setPartialFulfilledRules(getIntFromMap(props, "partial_fulfilled_rules"));
         Object ssSize = props.get("session_state_size");
         stats.setSessionStateSize(ssSize instanceof Number ? ((Number) ssSize).longValue() : 0L);
-        // metadata, settings, ext are loaded from separate DB columns
     }
 
     private int getIntFromMap(Map<String, Object> map, String key) {
