@@ -124,6 +124,54 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
     }
 
     @Test
+    void testSessionRecoveryWithAccumulateWindowExpiredDuringOutage() {
+        // This test verifies that when the accumulate_within window expires during outage,
+        // a WARN log is emitted during recovery. (Manually check the log output.)
+        // WARN: accumulate_within window expired during outage for rule 'alert_accumulator' (accumulated count=2, window=10000ms, expired Xms ago)
+
+        // Step 1: Node 1 becomes leader and processes events
+        rulesEngine1.enableLeader();
+
+        // Process first event (t=0, count=0->1)
+        String firstEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":1}");
+        String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
+        assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        // Advance time by 2 seconds (t=2)
+        rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
+
+        // Process second event (t=2, count=1->2)
+        String secondEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":2}");
+        String result2 = rulesEngine1.assertEvent(sessionId1, secondEvent);
+        assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
+
+        // Advance time by 1 more second (t=3)
+        rulesEngine1.advanceTime(sessionId1, 1, "SECONDS");
+
+        // Step 2: Simulate Node 1 crash/shutdown
+        rulesEngine1.disableLeader();
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        // Step 3: Advance Node 2's clock past the window expiration BEFORE recovery
+        // Control was created at t=0 with 10s window, so it expires at t=10.
+        // Advance node 2 to t=12, simulating the outage lasted longer than the window.
+        rulesEngine2.advanceTime(sessionId2, 12, "SECONDS");
+
+        // Step 4: Node 2 takes over — recovery detects the expired accumulate_within control
+        // and logs WARN: accumulate_within window expired during outage for rule 'alert_accumulator' ...
+        rulesEngine2.enableLeader();
+
+        // Step 5: Verify that the accumulation was lost (count reset)
+        // Processing 1 new event should NOT fire the rule (threshold=3, fresh start)
+        String thirdEvent = createEvent("{\"sensu\":{\"process\":{\"type\":\"alert\"},\"host\":\"h1\"},\"sequence\":3}");
+        String result3 = rulesEngine2.assertEvent(sessionId2, thirdEvent);
+        assertThat(readValueAsListOfMapOfStringAndObject(result3)).isEmpty();
+    }
+
+    @Test
     void testSessionRecoveryWithAccumulateWindowExpiration() {
         // This test verifies that the control event expiration is correctly restored across recovery
 
