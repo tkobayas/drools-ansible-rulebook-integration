@@ -692,7 +692,39 @@ public class AstRulesEngine implements Closeable {
 
         return toJson(result);
     }
-    
+
+    /**
+     * Get IDs of events currently held in working memory awaiting rule completion.
+     * Only returns EVENT type records (excludes FACT and CONTROL_* types).
+     *
+     * Called by Python: self._api.getPartialEventIds(session_id)
+     *
+     * @param sessionId The session ID
+     * @return JSON array of event ID strings
+     */
+    public String getPartialEventIds(long sessionId) {
+        requireHaMode();
+
+        RulesExecutor executor = rulesExecutorContainer.get(sessionId);
+        if (executor == null) {
+            throw new NoSuchElementException("No such session id: " + sessionId + ". Was it disposed?");
+        }
+
+        if (!(executor instanceof HARulesExecutor haExecutor)) {
+            return "[]";
+        }
+
+        HASessionContext ctx = haExecutor.getHaSessionContext();
+        Map<String, EventRecord> records = ctx.getTrackedRecords();
+
+        List<String> ids = records.entrySet().stream()
+                .filter(e -> e.getValue().getRecordType() == EventRecord.RecordType.EVENT)
+                .map(Map.Entry::getKey)
+                .toList();
+
+        return toJson(ids);
+    }
+
     private int computePartialFulfilledRules() {
         if (rulesExecutorContainer == null) {
             return 0;
