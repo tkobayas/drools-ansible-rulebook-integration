@@ -113,6 +113,9 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             // pre-scan for grace-eligible controls to determine which rules may produce matches that are eligible for grace period recovery
             Map<String, Long> ruleExpiryTimes = preScanExpiredGraceEligibleControl(currentTimeAtNewNode, partialEvents);
 
+            // pre-scan for expired accumulate_within controls to log WARN (these expire silently during clock advance)
+            logExpiredAccumulateWithinControls(currentTimeAtNewNode, partialEvents);
+
             for (EventRecord eventRecord : partialEvents) {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
                 RecordType recordType = eventRecord.getRecordType();
@@ -211,6 +214,27 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             LOG.info("Recovery pre-scan found {} rules with expired windows: {}", ruleExpiryTimes.size(), ruleExpiryTimes.keySet());
         }
         return ruleExpiryTimes;
+    }
+
+    private void logExpiredAccumulateWithinControls(long currentTimeAtNewNode, List<EventRecord> partialEvents) {
+        for (EventRecord er : partialEvents) {
+            if (er.getRecordType() == RecordType.CONTROL_ACCUMULATE_WITHIN
+                    && er.getExpirationDuration() != null && er.getExpirationDuration() != Long.MAX_VALUE) {
+                long expiryTime = er.getInsertedAt() + er.getExpirationDuration();
+                if (expiryTime <= currentTimeAtNewNode) {
+                    try {
+                        Map<String, Object> data = JsonMapper.readValueAsMapOfStringAndObject(er.getEventJson());
+                        String ruleName = data.get("drools_rule_name") instanceof String s ? s : "unknown";
+                        Object count = data.get("current_count");
+                        long expiredAgo = currentTimeAtNewNode - expiryTime;
+                        LOG.warn("accumulate_within window expired during outage for rule '{}' (accumulated count={}, window={}ms, expired {}ms ago)",
+                                ruleName, count, er.getExpirationDuration(), expiredAgo);
+                    } catch (Exception e) {
+                        LOG.warn("accumulate_within window expired during outage (failed to parse control event details: {})", e.getMessage());
+                    }
+                }
+            }
+        }
     }
 
     private static Set<Map<String, Object>> preScanEmbeddedEventsInControlTimedOut(List<EventRecord> partialEvents) {
