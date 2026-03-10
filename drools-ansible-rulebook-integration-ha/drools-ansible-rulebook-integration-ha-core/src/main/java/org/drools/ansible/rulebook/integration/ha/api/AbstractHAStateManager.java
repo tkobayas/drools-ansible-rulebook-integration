@@ -116,6 +116,9 @@ public abstract class AbstractHAStateManager implements HAStateManager {
             // pre-scan for expired accumulate_within controls to log WARN (these expire silently during clock advance)
             logExpiredAccumulateWithinControls(currentTimeAtNewNode, partialEvents);
 
+            // pre-scan for expired time_window sentinel controls to log WARN
+            logExpiredTimeWindowControls(currentTimeAtNewNode, partialEvents);
+
             for (EventRecord eventRecord : partialEvents) {
                 rulesExecutor.advanceTime(eventRecord.getInsertedAt() - currentTime, java.util.concurrent.TimeUnit.MILLISECONDS);
                 RecordType recordType = eventRecord.getRecordType();
@@ -141,7 +144,7 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                     // How time constraints are handled??
                     // OnceWithin : If a control event exists (= not yet expired), an event is discarded without firing the rule. [on recover]-> Inserting the control event back is sufficient.
                     // AggregateWithin : A control event holds the number of events. Events are discarded until the threshold is met. [on recover] -> Inserting the control event back is sufficient.
-                    // TimeWindow : No control event. [on recover] -> Nothing to do.
+                    // TimeWindow : Sentinel control events per pattern (HA-only). [on recover] -> Insert sentinels back; pre-scan logs WARN for expired ones.
                     // OnceAfter : A main control event holds nested events (main control event may be multiple because of group_by).
                     //             When its start control event expires and its end control event is present, the rule fires. [on recover] -> Inserting the all control events back is sufficient.
                     Map<String, Object> eventData = normalizeControlEventData(JsonMapper.readValueAsMapOfStringAndObject(eventRecord.getEventJson()));
@@ -234,6 +237,57 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                     }
                 }
             }
+        }
+    }
+
+    private void logExpiredTimeWindowControls(long currentTimeAtNewNode, List<EventRecord> partialEvents) {
+        // Group expired CONTROL_TIME_WINDOW sentinels by rule name to produce a single WARN per rule
+        Map<String, List<EventRecord>> expiredByRule = new HashMap<>();
+        for (EventRecord er : partialEvents) {
+            if (er.getRecordType() == RecordType.CONTROL_TIME_WINDOW
+                    && er.getExpirationDuration() != null && er.getExpirationDuration() != Long.MAX_VALUE) {
+                long expiryTime = er.getInsertedAt() + er.getExpirationDuration();
+                if (expiryTime <= currentTimeAtNewNode) {
+                    try {
+                        Map<String, Object> data = JsonMapper.readValueAsMapOfStringAndObject(er.getEventJson());
+                        String ruleName = data.get("drools_rule_name") instanceof String s ? s : "unknown";
+                        expiredByRule.computeIfAbsent(ruleName, k -> new ArrayList<>()).add(er);
+                    } catch (Exception e) {
+                        LOG.warn("all+timeout window sentinel expired during outage (failed to parse details: {})", e.getMessage());
+                    }
+                }
+            }
+        }
+
+        for (Map.Entry<String, List<EventRecord>> entry : expiredByRule.entrySet()) {
+            String ruleName = entry.getKey();
+            List<EventRecord> sentinels = entry.getValue();
+
+            int totalPatterns = 0;
+            long windowMs = 0;
+            long latestExpiry = 0;
+            List<Integer> matchedPatternIndices = new ArrayList<>();
+            List<Object> matchedEvents = new ArrayList<>();
+
+            for (EventRecord sentinel : sentinels) {
+                try {
+                    Map<String, Object> data = JsonMapper.readValueAsMapOfStringAndObject(sentinel.getEventJson());
+                    if (data.get("total_patterns") instanceof Number n) totalPatterns = n.intValue();
+                    if (data.get("pattern_index") instanceof Number n) matchedPatternIndices.add(n.intValue());
+                    // Each sentinel stores the event that triggered it
+                    Object matchedEvent = data.get("matched_event");
+                    if (matchedEvent != null) {
+                        matchedEvents.add(matchedEvent);
+                    }
+                } catch (Exception ignored) { }
+                windowMs = sentinel.getExpirationDuration();
+                latestExpiry = Math.max(latestExpiry, sentinel.getInsertedAt() + sentinel.getExpirationDuration());
+            }
+
+            long expiredAgo = currentTimeAtNewNode - latestExpiry;
+
+            LOG.warn("all+timeout window expired during outage for rule '{}' (matched_patterns={}/{}, window={}ms, expired {}ms ago, matched_events={})",
+                    ruleName, matchedPatternIndices.size(), totalPatterns, windowMs, expiredAgo, matchedEvents);
         }
     }
 

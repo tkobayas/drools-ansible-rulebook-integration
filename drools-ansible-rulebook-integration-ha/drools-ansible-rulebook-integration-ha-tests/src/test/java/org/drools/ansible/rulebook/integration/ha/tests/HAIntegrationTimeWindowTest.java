@@ -183,4 +183,52 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         // The time window constraint requires all events to be within 10 seconds of each other
         assertThat(readValueAsListOfMapOfStringAndObject(result3)).isEmpty();
     }
+
+    @Test
+    void testSessionRecoveryWithTimeWindowExpiredDuringOutage() {
+        // Verifies that when a time window expires during an outage, WARN is logged.
+        // Node 1 processes 2 events, then crashes. Node 2 recovers after the 10s window has elapsed.
+
+        // Step 1: Node 1 becomes leader and processes events
+        rulesEngine1.enableLeader();
+
+        // Process first event (t=0): ping.timeout == true
+        String firstEvent = createEvent("{\"ping\":{\"timeout\":true}}");
+        String result1 = rulesEngine1.assertEvent(sessionId1, firstEvent);
+        assertThat(readValueAsListOfMapOfStringAndObject(result1)).isEmpty();
+
+        // Advance time by 2 seconds (t=2)
+        rulesEngine1.advanceTime(sessionId1, 2, "SECONDS");
+
+        // Process second event (t=2): sensu.process.status == "stopped"
+        String secondEvent = createEvent("{\"sensu\":{\"process\":{\"status\":\"stopped\"}}}");
+        String result2 = rulesEngine1.assertEvent(sessionId1, secondEvent);
+        assertThat(readValueAsListOfMapOfStringAndObject(result2)).isEmpty();
+
+        // Advance time by 1 second (t=3)
+        rulesEngine1.advanceTime(sessionId1, 1, "SECONDS");
+
+        // Node2 must match Node1's clock (t=3)
+        rulesEngine2.advanceTime(sessionId2, 3, "SECONDS");
+
+        // Step 2: Simulate Node 1 crash
+        rulesEngine1.disableLeader();
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        // Step 3: Advance Node 2 clock past the window (t=3 + 9 = t=12, window expired at t=10)
+        rulesEngine2.advanceTime(sessionId2, 9, "SECONDS");
+
+        // Step 4: Node 2 takes over — recovery should detect expired sentinels and log WARN
+        rulesEngine2.enableLeader();
+
+        // Step 5: Even though we send the third event, the window has expired
+        String thirdEvent = createEvent("{\"sensu\":{\"storage\":{\"percent\":97}}}");
+        String result3 = rulesEngine2.assertEvent(sessionId2, thirdEvent);
+
+        // Should NOT match — the first two events' sentinels expired during the outage
+        assertThat(readValueAsListOfMapOfStringAndObject(result3)).isEmpty();
+    }
 }
