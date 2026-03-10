@@ -4,6 +4,7 @@ import org.drools.ansible.rulebook.integration.api.domain.temporal.AccumulateWit
 import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceAfterDefinition;
 import org.drools.ansible.rulebook.integration.api.domain.temporal.OnceWithinDefinition;
 import org.drools.ansible.rulebook.integration.api.domain.temporal.TimedOutDefinition;
+import org.drools.ansible.rulebook.integration.api.domain.temporal.TimeWindowDefinition;
 
 public class EventRecord {
 
@@ -13,7 +14,8 @@ public class EventRecord {
         CONTROL_ONCE_WITHIN(true, OnceWithinDefinition.ONCE_WITHIN_CONTROL),
         CONTROL_ACCUMULATE_WITHIN(true, AccumulateWithinDefinition.ACCUMULATE_WITHIN_CONTROL),
         CONTROL_ONCE_AFTER(true, OnceAfterDefinition.ONCE_AFTER_CONTROL),
-        CONTROL_TIMED_OUT(true, TimedOutDefinition.TIMED_OUT_CONTROL);
+        CONTROL_TIMED_OUT(true, TimedOutDefinition.TIMED_OUT_CONTROL),
+        CONTROL_TIME_WINDOW(true, TimeWindowDefinition.TIME_WINDOW_CONTROL);
 
         private final boolean synthetic;
 

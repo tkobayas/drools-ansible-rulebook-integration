@@ -55,6 +55,12 @@ public class RuleGenerationContext {
 
     private TimeConstraint timeConstraint;
 
+    private boolean haMode;
+
+    public boolean isHaMode() {
+        return haMode;
+    }
+
     public Condition getCondition() {
         return condition;
     }
@@ -220,6 +226,7 @@ public class RuleGenerationContext {
     }
 
     List<Rule> toExecModelRules(RulesSet rulesSet, org.drools.ansible.rulebook.integration.api.domain.Rule ansibleRule, RulesExecutionController rulesExecutionController, AtomicInteger ruleCounter) {
+    	this.haMode = rulesSet.isHaMode();
     	updateContextFromRule(ansibleRule);
 	    if (getRuleName() == null) {
 	        setRuleName("r_" + ruleCounter.getAndIncrement());
