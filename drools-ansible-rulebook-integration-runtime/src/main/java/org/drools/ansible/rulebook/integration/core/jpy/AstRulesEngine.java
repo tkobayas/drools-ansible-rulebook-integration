@@ -347,6 +347,7 @@ public class AstRulesEngine implements Closeable {
         close();
     }
 
+    // This method is not exposed to drools_jpy. Rather shutdown is called to full dispose, but not delete HA SessionState records.
     @Override
     public void close() {
         shutdown = true;
@@ -483,7 +484,8 @@ public class AstRulesEngine implements Closeable {
         // Check if ruleset has been updated
         String localHash = sha256(((HARulesExecutor) executor).getRulesetString());
         if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState)) {
-            logger.info("Ruleset updated for {} - skipping recovery, persisting fresh state as leader", rulesetName);
+            logger.info("Ruleset updated for {} - deleting old session state and persisting fresh state as leader", rulesetName);
+            haStateManager.deleteSessionState(rulesetName);
             SessionState freshState = haStateManager.getInMemorySessionState(rulesetName);
             if (freshState != null) {
                 haStateManager.persistSessionState(freshState);
@@ -528,7 +530,8 @@ public class AstRulesEngine implements Closeable {
 
             if (persistedSessionState != null) {
                 if (rulebookHashMismatch(rulesetName, rulebookHash, persistedSessionState)) {
-                    logger.info("Ruleset updated for {} - creating fresh session instead of recovering", rulesetName);
+                    logger.info("Ruleset updated for {} - deleting old session state and creating fresh session", rulesetName);
+                    haStateManager.deleteSessionState(rulesetName);
                     // Fall through to create fresh executor below
                 } else {
                     // Persisted state exists with same rulebook - recover from it

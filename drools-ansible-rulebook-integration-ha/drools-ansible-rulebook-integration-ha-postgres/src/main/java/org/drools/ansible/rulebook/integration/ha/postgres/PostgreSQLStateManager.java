@@ -798,6 +798,24 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         logger.debug("Deleted action info and matching event for UUID: {}", matchingUuid);
     }
 
+    @Override
+    public void deleteSessionState(String ruleSetName) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot delete session state - not leader");
+        }
+
+        executeInTransaction("Failed to delete SessionState from PostgreSQL", conn -> {
+            String sql = "DELETE FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, haUuid);
+                ps.setString(2, ruleSetName);
+                ps.executeUpdate();
+            }
+        });
+
+        logger.debug("Deleted SessionState for ruleSetName: {}", ruleSetName);
+    }
+
     // ── HAStats operations ──────────────────────────────────────────────
 
     @Override
