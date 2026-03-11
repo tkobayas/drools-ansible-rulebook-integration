@@ -213,6 +213,13 @@ public interface HAStateManager {
     }
 
     /**
+     * Delete the persisted SessionState record for a given ruleset.
+     *
+     * @param ruleSetName The name of the ruleset
+     */
+    void deleteSessionState(String ruleSetName);
+
+    /**
      * Cleanup resources and close connections
      */
     void shutdown();
