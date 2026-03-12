@@ -383,6 +383,11 @@ public abstract class AbstractHAStateManager implements HAStateManager {
         return sessionStateMap.get(ruleSetName);
     }
 
+    @Override
+    public void unregisterSessionState(String ruleSetName) {
+        sessionStateMap.remove(ruleSetName);
+    }
+
     /**
      * Counts the total number of partial events stored in memory across all session (= rule set) states.
      */
