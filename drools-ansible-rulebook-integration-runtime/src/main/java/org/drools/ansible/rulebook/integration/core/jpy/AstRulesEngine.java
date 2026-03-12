@@ -361,12 +361,17 @@ public class AstRulesEngine implements Closeable {
         return rulesExecutorContainer.port();
     }
 
-    private boolean rulebookHashMismatch(String rulesetName, String localHash, SessionState persistedState) {
+    private boolean rulebookHashMismatch(String rulesetName, String localHash, SessionState persistedState, boolean overwrite) {
         String persistedHash = persistedState.getRulebookHash();
         if (persistedHash == null || localHash == null) {
             return false;
         }
         if (!persistedHash.equals(localHash)) {
+            if (overwrite) {
+                logger.info("Rulebook hash mismatch detected for {} (local {}, persisted {}), but overwrite is true - recovering from persisted state",
+                        rulesetName, localHash, persistedHash);
+                return false;
+            }
             logger.warn("Rulebook hash mismatch detected for {} (local {}, persisted {}); Ruleset has been updated.",
                     rulesetName, localHash, persistedHash);
             return true;
@@ -483,7 +488,8 @@ public class AstRulesEngine implements Closeable {
 
         // Check if ruleset has been updated
         String localHash = sha256(((HARulesExecutor) executor).getRulesetString());
-        if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState)) {
+        boolean overwrite = ((HARulesExecutor) executor).getRulesSet().isOverwrite();
+        if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState, overwrite)) {
             logger.info("Ruleset updated for {} - deleting old session state and persisting fresh state as leader", rulesetName);
             haStateManager.deleteSessionState(rulesetName);
             SessionState freshState = haStateManager.getInMemorySessionState(rulesetName);
@@ -529,7 +535,7 @@ public class AstRulesEngine implements Closeable {
             SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
 
             if (persistedSessionState != null) {
-                if (rulebookHashMismatch(rulesetName, rulebookHash, persistedSessionState)) {
+                if (rulebookHashMismatch(rulesetName, rulebookHash, persistedSessionState, rulesSet.isOverwrite())) {
                     logger.info("Ruleset updated for {} - deleting old session state and creating fresh session", rulesetName);
                     haStateManager.deleteSessionState(rulesetName);
                     // Fall through to create fresh executor below

@@ -29,6 +29,8 @@ public class RulesSet {
 
     private boolean matchMultipleRules;
 
+    private boolean overwrite;
+
     private boolean haMode;
 
     private final RuleConfigurationOptions options = new RuleConfigurationOptions();
@@ -144,6 +146,14 @@ public class RulesSet {
 
     public boolean isMatchMultipleRules() {
         return matchMultipleRules;
+    }
+
+    public void setOverwrite(boolean overwrite) {
+        this.overwrite = overwrite;
+    }
+
+    public boolean isOverwrite() {
+        return overwrite;
     }
 
     public boolean isHaMode() {
