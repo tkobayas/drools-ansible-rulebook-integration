@@ -107,7 +107,13 @@ public class AstRulesEngine implements Closeable {
 
     public String dispose(long sessionId) {
         RulesExecutor rulesExecutor = rulesExecutorContainer.get(sessionId);
-        return rulesExecutor == null ? null : toJson( rulesExecutor.dispose() );
+        if (rulesExecutor == null) {
+            return null;
+        }
+        if (haMode && haStateManager != null) {
+            haStateManager.unregisterSessionState(rulesExecutor.getRuleSetName());
+        }
+        return toJson( rulesExecutor.dispose() );
     }
 
     @Deprecated

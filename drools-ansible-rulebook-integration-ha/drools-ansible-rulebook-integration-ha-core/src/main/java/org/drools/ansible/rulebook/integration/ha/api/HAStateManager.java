@@ -241,6 +241,13 @@ public interface HAStateManager {
     SessionState getInMemorySessionState(String ruleSetName);
 
     /**
+     * Unregister the in-memory session state for a given ruleset (e.g. on dispose)
+     *
+     * @param ruleSetName The name of the ruleset
+     */
+    void unregisterSessionState(String ruleSetName);
+
+    /**
      * Verify the integrity of a loaded SessionState.
      * Compares stored SHA with recalculated SHA to detect corruption/tampering.
      *
