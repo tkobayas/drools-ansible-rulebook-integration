@@ -222,6 +222,259 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
         }
     }
 
+    // V2 with overwrite: same conditions as V2 but with "overwrite": true
+    private static final String RULE_SET_V2_OVERWRITE = """
+            {
+                "name": "Test Ruleset",
+                "overwrite": true,
+                "sources": {"EventSource": "test"},
+                "rules": [
+                    {"Rule": {
+                        "name": "humidity_alert",
+                        "condition": {
+                            "GreaterThanExpression": {
+                                "lhs": {"Event": "humidity"},
+                                "rhs": {"Integer": 70}
+                            }
+                        },
+                        "action": {
+                            "run_playbook": [{"name": "alert_v2.yml"}]
+                        }
+                    }}
+                ]
+            }
+            """;
+
+    /**
+     * Scenario: Leader node updates its ruleset with overwrite=true.
+     *
+     * 1. Node1 starts with V1 rules, becomes leader, processes events
+     * 2. Node1 disposes session, creates new session with V2 rules (overwrite=true)
+     * 3. V2 should recover from persisted state despite hash mismatch (because overwrite=true)
+     * 4. The persisted session state should NOT be deleted
+     */
+    @Test
+    void testUpdateRulesetWithOverwrite() {
+        // Phase 1: Start with V1 ruleset
+        engine1 = new AstRulesEngine();
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
+        sessionId1 = engine1.createRuleset(RULE_SET_V1, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1");
+        consumer1.startConsuming(engine1.port());
+
+        engine1.enableLeader();
+
+        // Process a temperature event that matches V1
+        String tempEvent = createEvent("{\"temperature\": 35}");
+        String result1 = engine1.assertEvent(sessionId1, tempEvent);
+        assertThat(result1).contains("temperature_alert");
+
+        // Verify state is persisted
+        HAStateManager assertionManager = createHAStateManagerForAssertion();
+        try {
+            SessionState stateV1 = assertionManager.getPersistedSessionState("Test Ruleset");
+            assertThat(stateV1).isNotNull();
+            String v1Hash = stateV1.getRulebookHash();
+
+            // Phase 2: Dispose and recreate with V2 ruleset (overwrite=true)
+            engine1.dispose(sessionId1);
+            sessionId1 = engine1.createRuleset(RULE_SET_V2_OVERWRITE, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+            // Verify the session state was NOT deleted (overwrite=true skips deletion)
+            SessionState stateAfterOverwrite = assertionManager.getPersistedSessionState("Test Ruleset");
+            assertThat(stateAfterOverwrite).isNotNull();
+            // The hash should still be V1's hash because overwrite=true skipped the delete+fresh-persist
+            assertThat(stateAfterOverwrite.getRulebookHash()).isEqualTo(v1Hash);
+        } finally {
+            assertionManager.shutdown();
+        }
+    }
+
+    /**
+     * Scenario: Node2 has updated ruleset with overwrite=true and takes over as leader.
+     *
+     * 1. Node1 starts with V1 rules, becomes leader, processes events
+     * 2. Node2 starts with V2 rules (overwrite=true)
+     * 3. Node1 fails, Node2 becomes leader
+     * 4. Node2 should recover from V1's persisted state despite hash mismatch (because overwrite=true)
+     * 5. The persisted session state should NOT be deleted
+     */
+    @Test
+    void testUpdateRulesetOnNode2WithOverwriteAndFailover() {
+        // Phase 1: Node1 with V1 ruleset as leader
+        engine1 = new AstRulesEngine();
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
+        sessionId1 = engine1.createRuleset(RULE_SET_V1, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1");
+        consumer1.startConsuming(engine1.port());
+
+        engine1.enableLeader();
+
+        // Process events with V1
+        String tempEvent = createEvent("{\"temperature\": 35}");
+        String result1 = engine1.assertEvent(sessionId1, tempEvent);
+        assertThat(result1).contains("temperature_alert");
+
+        // Phase 2: Node2 starts with V2 ruleset (overwrite=true)
+        engine2 = new AstRulesEngine();
+        engine2.initializeHA(HA_UUID, "worker-2", dbParamsJson, dbHAConfigJson);
+        sessionId2 = engine2.createRuleset(RULE_SET_V2_OVERWRITE, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+        consumer2 = new HAIntegrationTestBase.AsyncConsumer("consumer2");
+        consumer2.startConsuming(engine2.port());
+
+        // Phase 3: Failover - Node1 goes down, Node2 becomes leader
+        engine1.disableLeader();
+        engine2.enableLeader();
+
+        // Phase 4: Verify persisted state was NOT deleted
+        HAStateManager assertionManager = createHAStateManagerForAssertion();
+        try {
+            SessionState state = assertionManager.getPersistedSessionState("Test Ruleset");
+            assertThat(state).isNotNull();
+            // The hash should still be V1's hash because overwrite=true skipped the delete
+            String v1Hash = org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256(RULE_SET_V1);
+            assertThat(state.getRulebookHash()).isEqualTo(v1Hash);
+        } finally {
+            assertionManager.shutdown();
+        }
+    }
+
+    /**
+     * Scenario: Single server restarts with updated ruleset (overwrite=true).
+     *
+     * 1. Node1 starts with V1 rules, becomes leader, processes events
+     * 2. Node1 shuts down (engine.close())
+     * 3. Node1 restarts with V2 rules (overwrite=true), becomes leader
+     * 4. Should recover from V1's persisted state despite hash mismatch (because overwrite=true)
+     * 5. The persisted session state should NOT be deleted
+     */
+    @Test
+    void testUpdateRulesetWithOverwriteAndRestart() {
+        // Phase 1: Start with V1 ruleset
+        engine1 = new AstRulesEngine();
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
+        sessionId1 = engine1.createRuleset(RULE_SET_V1, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1");
+        consumer1.startConsuming(engine1.port());
+
+        engine1.enableLeader();
+
+        // Process a temperature event that matches V1
+        String tempEvent = createEvent("{\"temperature\": 35}");
+        String result1 = engine1.assertEvent(sessionId1, tempEvent);
+        assertThat(result1).contains("temperature_alert");
+
+        // Record V1 hash before shutdown
+        HAStateManager assertionManager = createHAStateManagerForAssertion();
+        String v1Hash;
+        try {
+            SessionState stateV1 = assertionManager.getPersistedSessionState("Test Ruleset");
+            assertThat(stateV1).isNotNull();
+            v1Hash = stateV1.getRulebookHash();
+        } finally {
+            assertionManager.shutdown();
+        }
+
+        // Phase 2: Shut down engine1 completely (simulates server restart)
+        consumer1.stop();
+        consumer1 = null;
+        engine1.close();
+        engine1 = null;
+
+        // Phase 3: Restart with V2 ruleset (overwrite=true)
+        engine1 = new AstRulesEngine();
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
+        sessionId1 = engine1.createRuleset(RULE_SET_V2_OVERWRITE, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1-restarted");
+        consumer1.startConsuming(engine1.port());
+
+        engine1.enableLeader();
+
+        // Phase 4: Verify persisted state was NOT deleted (overwrite=true skips deletion)
+        assertionManager = createHAStateManagerForAssertion();
+        try {
+            SessionState state = assertionManager.getPersistedSessionState("Test Ruleset");
+            assertThat(state).isNotNull();
+            // The hash should still be V1's hash because overwrite=true skipped the delete
+            assertThat(state.getRulebookHash()).isEqualTo(v1Hash);
+        } finally {
+            assertionManager.shutdown();
+        }
+    }
+
+    /**
+     * Scenario: Single server restarts with updated ruleset (overwrite=false, default).
+     *
+     * 1. Node1 starts with V1 rules, becomes leader, processes events
+     * 2. Node1 shuts down (engine.close())
+     * 3. Node1 restarts with V2 rules (no overwrite), becomes leader
+     * 4. Should detect hash mismatch and delete old session state, starting fresh
+     * 5. V2 rules should work correctly
+     */
+    @Test
+    void testUpdateRulesetWithoutOverwriteAndRestart() {
+        // Phase 1: Start with V1 ruleset
+        engine1 = new AstRulesEngine();
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
+        sessionId1 = engine1.createRuleset(RULE_SET_V1, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1");
+        consumer1.startConsuming(engine1.port());
+
+        engine1.enableLeader();
+
+        // Process a temperature event that matches V1
+        String tempEvent = createEvent("{\"temperature\": 35}");
+        String result1 = engine1.assertEvent(sessionId1, tempEvent);
+        assertThat(result1).contains("temperature_alert");
+
+        // Phase 2: Shut down engine1 completely (simulates server restart)
+        consumer1.stop();
+        consumer1 = null;
+        engine1.close();
+        engine1 = null;
+
+        // Phase 3: Restart with V2 ruleset (no overwrite - default)
+        engine1 = new AstRulesEngine();
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
+        sessionId1 = engine1.createRuleset(RULE_SET_V2, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+
+        consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1-restarted");
+        consumer1.startConsuming(engine1.port());
+
+        engine1.enableLeader();
+
+        // Phase 4: Verify old state was deleted and fresh state with V2 hash is persisted
+        HAStateManager assertionManager = createHAStateManagerForAssertion();
+        try {
+            SessionState state = assertionManager.getPersistedSessionState("Test Ruleset");
+            assertThat(state).isNotNull();
+            String v1Hash = org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256(RULE_SET_V1);
+            String v2Hash = org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256(RULE_SET_V2);
+            assertThat(state.getRulebookHash()).isNotEqualTo(v1Hash);
+            assertThat(state.getRulebookHash()).isEqualTo(v2Hash);
+        } finally {
+            assertionManager.shutdown();
+        }
+
+        // Phase 5: Verify V2 rules work correctly
+        // Humidity event should match V2
+        String humidityEvent = createEvent("{\"humidity\": 80}");
+        String result2 = engine1.assertEvent(sessionId1, humidityEvent);
+        assertThat(result2).contains("humidity_alert");
+
+        // Temperature event should NOT match V2
+        String tempEvent2 = createEvent("{\"temperature\": 35}");
+        String result3 = engine1.assertEvent(sessionId1, tempEvent2);
+        List<Map<String, Object>> matchList = JsonMapper.readValueAsListOfMapOfStringAndObject(result3);
+        assertThat(matchList).isEmpty();
+    }
+
     private HAStateManager createHAStateManagerForAssertion() {
         HAStateManager manager = HAStateManagerFactory.create(TEST_DB_TYPE);
         manager.initializeHA(HA_UUID, "FOR_ASSERTION", dbParams, dbHAConfig);
