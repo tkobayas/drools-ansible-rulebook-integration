@@ -58,6 +58,7 @@ public class AstRulesEngine implements Closeable {
     private boolean haMode = false;
     private boolean shutdown = false;
     private int dedupBufferSize = 5;
+    private boolean overwriteIfRulebookChanges = false;
 
     public long createRuleset(String rulesetString) {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
@@ -367,14 +368,14 @@ public class AstRulesEngine implements Closeable {
         return rulesExecutorContainer.port();
     }
 
-    private boolean rulebookHashMismatch(String rulesetName, String localHash, SessionState persistedState, boolean overwrite) {
+    private boolean rulebookHashMismatch(String rulesetName, String localHash, SessionState persistedState) {
         String persistedHash = persistedState.getRulebookHash();
         if (persistedHash == null || localHash == null) {
             return false;
         }
         if (!persistedHash.equals(localHash)) {
-            if (overwrite) {
-                logger.info("Rulebook hash mismatch detected for {} (local {}, persisted {}), but overwrite is true - recovering from persisted state",
+            if (overwriteIfRulebookChanges) {
+                logger.info("Rulebook hash mismatch detected for {} (local {}, persisted {}), but overwrite_if_rulebook_changes is true - recovering from persisted state",
                         rulesetName, localHash, persistedHash);
                 return false;
             }
@@ -424,6 +425,11 @@ public class AstRulesEngine implements Closeable {
                     ? ((Number) config.getOrDefault("dedup_buffer_size", 5)).intValue()
                     : 5;
             logger.info("HA deduplication buffer size set to {}", dedupBufferSize);
+
+            // Extract overwrite_if_rulebook_changes from config
+            this.overwriteIfRulebookChanges = config != null
+                    && Boolean.TRUE.equals(config.get("overwrite_if_rulebook_changes"));
+            logger.info("HA overwrite_if_rulebook_changes set to {}", overwriteIfRulebookChanges);
 
             // HA mode always requires async channel
             rulesExecutorContainer.allowAsync();
@@ -494,8 +500,7 @@ public class AstRulesEngine implements Closeable {
 
         // Check if ruleset has been updated
         String localHash = sha256(((HARulesExecutor) executor).getRulesetString());
-        boolean overwrite = ((HARulesExecutor) executor).getRulesSet().isOverwrite();
-        if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState, overwrite)) {
+        if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState)) {
             logger.info("Ruleset updated for {} - deleting old session state and persisting fresh state as leader", rulesetName);
             haStateManager.deleteSessionState(rulesetName);
             SessionState freshState = haStateManager.getInMemorySessionState(rulesetName);
@@ -541,7 +546,7 @@ public class AstRulesEngine implements Closeable {
             SessionState persistedSessionState = haStateManager.getPersistedSessionState(rulesetName);
 
             if (persistedSessionState != null) {
-                if (rulebookHashMismatch(rulesetName, rulebookHash, persistedSessionState, rulesSet.isOverwrite())) {
+                if (rulebookHashMismatch(rulesetName, rulebookHash, persistedSessionState)) {
                     logger.info("Ruleset updated for {} - deleting old session state and creating fresh session", rulesetName);
                     haStateManager.deleteSessionState(rulesetName);
                     // Fall through to create fresh executor below
