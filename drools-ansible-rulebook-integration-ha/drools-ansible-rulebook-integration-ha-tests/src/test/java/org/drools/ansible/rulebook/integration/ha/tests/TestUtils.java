@@ -62,13 +62,28 @@ public class TestUtils {
     }
 
     /**
+     * Generate a unique H2 file path for test isolation.
+     * Each test method gets its own database file, avoiding file lock contention in CI.
+     */
+    public static String generateUniqueH2FilePath() {
+        return "./target/h2-test/eda_ha_" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    /**
+     * Force H2 to fully close the database at the default test file path.
+     */
+    public static void shutdownH2Database() {
+        shutdownH2Database(TEST_H2_FILE_PATH);
+    }
+
+    /**
      * Force H2 to fully close the database and remove it from the JVM-level cache.
      * H2 maintains an internal static map of open databases. Without an explicit SHUTDOWN,
      * reopening the same file path may return cached (stale) data even after file deletion.
      * Uses IFEXISTS=TRUE to avoid creating a new database if none exists.
      */
-    public static void shutdownH2Database() {
-        String jdbcUrl = "jdbc:h2:file:" + TEST_H2_FILE_PATH + ";MODE=PostgreSQL;IFEXISTS=TRUE";
+    public static void shutdownH2Database(String h2FilePath) {
+        String jdbcUrl = "jdbc:h2:file:" + h2FilePath + ";MODE=PostgreSQL;IFEXISTS=TRUE";
         try (var conn = DriverManager.getConnection(jdbcUrl, "sa", "");
              var stmt = conn.createStatement()) {
             stmt.execute("SHUTDOWN");
@@ -78,15 +93,22 @@ public class TestUtils {
     }
 
     /**
-     * Delete H2 database files for the test file path.
-     * H2 creates .mv.db and optionally .trace.db files.
+     * Delete H2 database files for the default test file path.
      */
     public static void deleteH2Files() {
-        Path dir = Path.of(TEST_H2_FILE_PATH).getParent();
+        deleteH2Files(TEST_H2_FILE_PATH);
+    }
+
+    /**
+     * Delete H2 database files for the given file path.
+     * H2 creates .mv.db and optionally .trace.db files.
+     */
+    public static void deleteH2Files(String h2FilePath) {
+        Path dir = Path.of(h2FilePath).getParent();
         if (dir == null || !Files.exists(dir)) {
             return;
         }
-        String baseName = Path.of(TEST_H2_FILE_PATH).getFileName().toString();
+        String baseName = Path.of(h2FilePath).getFileName().toString();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir, baseName + ".*")) {
             for (Path file : stream) {
                 Files.deleteIfExists(file);
@@ -147,7 +169,8 @@ public class TestUtils {
             user = (String) params.get("user");
             password = (String) params.get("password");
         } else {
-            jdbcUrl = "jdbc:h2:file:" + TEST_H2_FILE_PATH + ";MODE=PostgreSQL";
+            String dbFilePath = (String) params.getOrDefault("db_file_path", TEST_H2_FILE_PATH);
+            jdbcUrl = "jdbc:h2:file:" + dbFilePath + ";MODE=PostgreSQL";
             user = "sa";
             password = "";
         }
