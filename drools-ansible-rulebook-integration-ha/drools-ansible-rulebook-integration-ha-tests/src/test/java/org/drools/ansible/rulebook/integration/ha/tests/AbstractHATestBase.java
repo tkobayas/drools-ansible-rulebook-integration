@@ -39,12 +39,21 @@ public abstract class AbstractHATestBase {
     protected static String dbParamsJson;
     protected static String dbHAConfigJson;
 
+    // Per-test H2 file path (unique per test method to avoid file lock contention)
+    protected String currentH2FilePath;
+
     /**
      * Clean up database before each test to ensure a fresh state.
+     * For H2: generates a unique file path per test to avoid file lock contention in CI.
+     * For PostgreSQL: drops all tables.
      */
     @BeforeEach
     void cleanupDatabaseBeforeTest() {
-        cleanupDatabase();
+        if (USE_POSTGRES) {
+            cleanupDatabase();
+        } else {
+            initializeH2ForTest();
+        }
     }
 
     /**
@@ -99,22 +108,29 @@ public abstract class AbstractHATestBase {
     }
 
     /**
-     * Initialize H2 file-backed database configuration.
-     * All nodes share the same file path, enabling failover tests.
+     * Initialize H2 HA configuration (static part only).
+     * The actual H2 file path is generated per test method in initializeH2ForTest().
      */
     protected static void initializeH2() {
-        System.out.println("Using H2 file-backed database: " + TestUtils.TEST_H2_FILE_PATH);
+        dbHAConfig = Map.of("write_after", 1);
+        dbHAConfigJson = toJson(dbHAConfig);
+    }
 
-        // H2 configuration with db_file_path for shared file-backed database
+    /**
+     * Initialize a unique H2 file path for the current test method.
+     * Each test gets its own database file to avoid file lock contention in CI,
+     * where quick test restarts can leave stale H2 file locks.
+     * Both HA nodes within a single test share the same file (required for failover).
+     */
+    protected void initializeH2ForTest() {
+        currentH2FilePath = TestUtils.generateUniqueH2FilePath();
+        System.out.println("Using H2 file-backed database: " + currentH2FilePath);
+
         dbParams = Map.of(
             "db_type", "h2",
-            "db_file_path", TestUtils.TEST_H2_FILE_PATH
+            "db_file_path", currentH2FilePath
         );
-        dbHAConfig = Map.of("write_after", 1);
-
-        // Convert to JSON for AstRulesEngine API
         dbParamsJson = toJson(dbParams);
-        dbHAConfigJson = toJson(dbHAConfig);
     }
 
     /**
@@ -125,9 +141,9 @@ public abstract class AbstractHATestBase {
     protected void cleanupDatabase() {
         if (USE_POSTGRES) {
             TestUtils.dropPostgresTables(dbParams);
-        } else {
-            TestUtils.shutdownH2Database();
-            TestUtils.deleteH2Files();
+        } else if (currentH2FilePath != null) {
+            TestUtils.shutdownH2Database(currentH2FilePath);
+            TestUtils.deleteH2Files(currentH2FilePath);
         }
     }
 }
