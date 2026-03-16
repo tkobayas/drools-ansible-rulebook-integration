@@ -13,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.drools.ansible.rulebook.integration.api.io.JsonMapper.toJson;
 import static org.drools.ansible.rulebook.integration.ha.tests.TestUtils.createEvent;
 
 /**
@@ -222,42 +223,22 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
         }
     }
 
-    // V2 with overwrite: same conditions as V2 but with "overwrite": true
-    private static final String RULE_SET_V2_OVERWRITE = """
-            {
-                "name": "Test Ruleset",
-                "overwrite": true,
-                "sources": {"EventSource": "test"},
-                "rules": [
-                    {"Rule": {
-                        "name": "humidity_alert",
-                        "condition": {
-                            "GreaterThanExpression": {
-                                "lhs": {"Event": "humidity"},
-                                "rhs": {"Integer": 70}
-                            }
-                        },
-                        "action": {
-                            "run_playbook": [{"name": "alert_v2.yml"}]
-                        }
-                    }}
-                ]
-            }
-            """;
+    // Config JSON with overwrite_if_rulebook_changes enabled
+    private static final String dbHAConfigJsonWithOverwrite = toJson(Map.of("write_after", 1, "overwrite_if_rulebook_changes", true));
 
     /**
-     * Scenario: Leader node updates its ruleset with overwrite=true.
+     * Scenario: Leader node updates its ruleset with overwrite_if_rulebook_changes=true.
      *
      * 1. Node1 starts with V1 rules, becomes leader, processes events
-     * 2. Node1 disposes session, creates new session with V2 rules (overwrite=true)
-     * 3. V2 should recover from persisted state despite hash mismatch (because overwrite=true)
+     * 2. Node1 disposes session, creates new session with V2 rules (overwrite_if_rulebook_changes=true in config)
+     * 3. V2 should recover from persisted state despite hash mismatch (because overwrite_if_rulebook_changes=true)
      * 4. The persisted session state should NOT be deleted
      */
     @Test
     void testUpdateRulesetWithOverwrite() {
-        // Phase 1: Start with V1 ruleset
+        // Phase 1: Start with V1 ruleset (using overwrite config from the start)
         engine1 = new AstRulesEngine();
-        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJsonWithOverwrite);
         sessionId1 = engine1.createRuleset(RULE_SET_V1, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1");
@@ -277,14 +258,14 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
             assertThat(stateV1).isNotNull();
             String v1Hash = stateV1.getRulebookHash();
 
-            // Phase 2: Dispose and recreate with V2 ruleset (overwrite=true)
+            // Phase 2: Dispose and recreate with V2 ruleset (overwrite_if_rulebook_changes=true in config)
             engine1.dispose(sessionId1);
-            sessionId1 = engine1.createRuleset(RULE_SET_V2_OVERWRITE, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+            sessionId1 = engine1.createRuleset(RULE_SET_V2, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
-            // Verify the session state was NOT deleted (overwrite=true skips deletion)
+            // Verify the session state was NOT deleted (overwrite_if_rulebook_changes=true skips deletion)
             SessionState stateAfterOverwrite = assertionManager.getPersistedSessionState("Test Ruleset");
             assertThat(stateAfterOverwrite).isNotNull();
-            // The hash should still be V1's hash because overwrite=true skipped the delete+fresh-persist
+            // The hash should still be V1's hash because overwrite_if_rulebook_changes=true skipped the delete+fresh-persist
             assertThat(stateAfterOverwrite.getRulebookHash()).isEqualTo(v1Hash);
         } finally {
             assertionManager.shutdown();
@@ -292,12 +273,12 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
     }
 
     /**
-     * Scenario: Node2 has updated ruleset with overwrite=true and takes over as leader.
+     * Scenario: Node2 has updated ruleset with overwrite_if_rulebook_changes=true and takes over as leader.
      *
      * 1. Node1 starts with V1 rules, becomes leader, processes events
-     * 2. Node2 starts with V2 rules (overwrite=true)
+     * 2. Node2 starts with V2 rules (overwrite_if_rulebook_changes=true in config)
      * 3. Node1 fails, Node2 becomes leader
-     * 4. Node2 should recover from V1's persisted state despite hash mismatch (because overwrite=true)
+     * 4. Node2 should recover from V1's persisted state despite hash mismatch (because overwrite_if_rulebook_changes=true)
      * 5. The persisted session state should NOT be deleted
      */
     @Test
@@ -317,10 +298,10 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
         String result1 = engine1.assertEvent(sessionId1, tempEvent);
         assertThat(result1).contains("temperature_alert");
 
-        // Phase 2: Node2 starts with V2 ruleset (overwrite=true)
+        // Phase 2: Node2 starts with V2 ruleset (overwrite_if_rulebook_changes=true in config)
         engine2 = new AstRulesEngine();
-        engine2.initializeHA(HA_UUID, "worker-2", dbParamsJson, dbHAConfigJson);
-        sessionId2 = engine2.createRuleset(RULE_SET_V2_OVERWRITE, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+        engine2.initializeHA(HA_UUID, "worker-2", dbParamsJson, dbHAConfigJsonWithOverwrite);
+        sessionId2 = engine2.createRuleset(RULE_SET_V2, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         consumer2 = new HAIntegrationTestBase.AsyncConsumer("consumer2");
         consumer2.startConsuming(engine2.port());
@@ -334,7 +315,7 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
         try {
             SessionState state = assertionManager.getPersistedSessionState("Test Ruleset");
             assertThat(state).isNotNull();
-            // The hash should still be V1's hash because overwrite=true skipped the delete
+            // The hash should still be V1's hash because overwrite_if_rulebook_changes=true skipped the delete
             String v1Hash = org.drools.ansible.rulebook.integration.ha.api.HAUtils.sha256(RULE_SET_V1);
             assertThat(state.getRulebookHash()).isEqualTo(v1Hash);
         } finally {
@@ -343,12 +324,12 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
     }
 
     /**
-     * Scenario: Single server restarts with updated ruleset (overwrite=true).
+     * Scenario: Single server restarts with updated ruleset (overwrite_if_rulebook_changes=true).
      *
      * 1. Node1 starts with V1 rules, becomes leader, processes events
      * 2. Node1 shuts down (engine.close())
-     * 3. Node1 restarts with V2 rules (overwrite=true), becomes leader
-     * 4. Should recover from V1's persisted state despite hash mismatch (because overwrite=true)
+     * 3. Node1 restarts with V2 rules (overwrite_if_rulebook_changes=true in config), becomes leader
+     * 4. Should recover from V1's persisted state despite hash mismatch (because overwrite_if_rulebook_changes=true)
      * 5. The persisted session state should NOT be deleted
      */
     @Test
@@ -385,22 +366,22 @@ class HAIntegrationRulesetUpdateTest extends AbstractHATestBase {
         engine1.close();
         engine1 = null;
 
-        // Phase 3: Restart with V2 ruleset (overwrite=true)
+        // Phase 3: Restart with V2 ruleset (overwrite_if_rulebook_changes=true in config)
         engine1 = new AstRulesEngine();
-        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJson);
-        sessionId1 = engine1.createRuleset(RULE_SET_V2_OVERWRITE, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
+        engine1.initializeHA(HA_UUID, "worker-1", dbParamsJson, dbHAConfigJsonWithOverwrite);
+        sessionId1 = engine1.createRuleset(RULE_SET_V2, RuleConfigurationOption.FULLY_MANUAL_PSEUDOCLOCK);
 
         consumer1 = new HAIntegrationTestBase.AsyncConsumer("consumer1-restarted");
         consumer1.startConsuming(engine1.port());
 
         engine1.enableLeader();
 
-        // Phase 4: Verify persisted state was NOT deleted (overwrite=true skips deletion)
+        // Phase 4: Verify persisted state was NOT deleted (overwrite_if_rulebook_changes=true skips deletion)
         assertionManager = createHAStateManagerForAssertion();
         try {
             SessionState state = assertionManager.getPersistedSessionState("Test Ruleset");
             assertThat(state).isNotNull();
-            // The hash should still be V1's hash because overwrite=true skipped the delete
+            // The hash should still be V1's hash because overwrite_if_rulebook_changes=true skipped the delete
             assertThat(state.getRulebookHash()).isEqualTo(v1Hash);
         } finally {
             assertionManager.shutdown();
