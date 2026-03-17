@@ -453,30 +453,54 @@ public class AstRulesEngine implements Closeable {
         requireRuleCreation();
 
         logger.info("Enabling leader mode for: {}", haStateManager.getWorkerName());
+
+        // Phase 1: Read from DB + in-memory mutations (no DB writes)
         haStateManager.enableLeader();
 
-        restoreAllSessions();
+        // Phase 2: Recover all sessions in-memory, collect persistence intents
+        List<SessionState> statesToPersist = new ArrayList<>();
+        List<String> rulesetsToDelete = new ArrayList<>();
+        List<MatchingEvent> allRecoveryMatches = new ArrayList<>();
 
-        // HAStats already loaded by enableLeader(); update global session stats from it
+        for (RulesExecutor executor : rulesExecutorContainer.getAllExecutors()) {
+            SessionRecoveryResult result = restoreSessionInMemory(executor);
+            if (result != null) {
+                if (result.deleteRulesetName() != null) {
+                    rulesetsToDelete.add(result.deleteRulesetName());
+                }
+                if (result.sessionState() != null) {
+                    statesToPersist.add(result.sessionState());
+                }
+                allRecoveryMatches.addAll(result.recoveryMatches());
+            }
+        }
+
+        // Phase 3: ONE persist call — single transaction
+        haStateManager.persistLeaderStartup(statesToPersist, rulesetsToDelete, allRecoveryMatches);
+        for (MatchingEvent me : allRecoveryMatches) {
+            logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}", me.getRuleName(), me.getMeUuid());
+        }
+
+        // Phase 4: Post-persist (read-only, in-memory)
         updateGlobalSessionStats(haStateManager.getHAStats());
-
-        // Recover pending actions when becoming leader
         recoverPendingMatchingEvents();
-
         haStateManager.logStartupSummary();
     }
 
-    private void restoreAllSessions() {
-        Collection<RulesExecutor> executors = rulesExecutorContainer.getAllExecutors();
-        if (executors.isEmpty()) {
-            // No-op if no sessions exist yet
-            return;
-        }
+    /**
+     * Represents the result of one session's in-memory recovery (no DB writes yet).
+     */
+    private record SessionRecoveryResult(
+        SessionState sessionState,
+        List<MatchingEvent> recoveryMatches,
+        String deleteRulesetName
+    ) {}
 
-        executors.forEach(this::restoreOrCreateSessionStateAsLeader);
-    }
-
-    private void restoreOrCreateSessionStateAsLeader(RulesExecutor executor) {
+    /**
+     * Perform in-memory recovery for a single session and return persistence intents.
+     * Does NOT write to DB.
+     */
+    private SessionRecoveryResult restoreSessionInMemory(RulesExecutor executor) {
         if (!(executor instanceof HARulesExecutor)) {
             throw new IllegalStateException("Expected HARulesExecutor in HA mode");
         }
@@ -491,7 +515,7 @@ public class AstRulesEngine implements Closeable {
 
         if (persistedSessionState == null) {
             // No persisted state - this is the first time for this ruleset
-            return;
+            return null;
         }
 
         // Verify integrity
@@ -502,14 +526,10 @@ public class AstRulesEngine implements Closeable {
         // Check if ruleset has been updated
         String localHash = sha256(((HARulesExecutor) executor).getRulesetString());
         if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState)) {
-            logger.info("Ruleset updated for {} - deleting old session state and persisting fresh state as leader", rulesetName);
+            logger.info("Ruleset updated for {} - will delete old session state and persist fresh state as leader", rulesetName);
             SessionState freshState = haStateManager.getInMemorySessionState(rulesetName);
-            if (freshState != null) {
-                haStateManager.deleteAndPersistSessionState(rulesetName, freshState);
-            } else {
-                haStateManager.deleteSessionState(rulesetName);
-            }
-            return;
+            // Return delete intent + optional fresh state to persist
+            return new SessionRecoveryResult(freshState, List.of(), rulesetName);
         }
 
         RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesetString(), persistedSessionState, executor.asKieSession().getSessionClock().getCurrentTime());
@@ -533,13 +553,10 @@ public class AstRulesEngine implements Closeable {
         haStateManager.registerSessionState(rulesetName, persistedSessionState);
         updateInMemorySessionState((HARulesExecutor) recoveredRulesExecutor, persistedSessionState);
 
-        // Persist refreshed state + recovery matches in single transaction
-        haStateManager.persistSessionStateAndMatchingEvents(persistedSessionState, recoveryMatches);
-        for (MatchingEvent me : recoveryMatches) {
-            logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}", me.getRuleName(), me.getMeUuid());
-        }
-
         logger.info("Recovered session {} from persisted SessionState", rulesetName);
+
+        // Return persistence intents — no DB writes yet
+        return new SessionRecoveryResult(persistedSessionState, recoveryMatches, null);
     }
 
     private RulesExecutor createHARulesExecutorWithSessionState(RulesSet rulesSet, String rulesetString) {
