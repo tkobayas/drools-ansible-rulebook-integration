@@ -220,6 +220,32 @@ public interface HAStateManager {
     void deleteSessionState(String ruleSetName);
 
     /**
+     * Delete old session state and persist fresh session state in a single transaction.
+     * Used on hash-mismatch overwrite path to ensure atomicity.
+     *
+     * @param ruleSetName The name of the ruleset to delete
+     * @param freshState  The fresh session state to persist
+     */
+    default void deleteAndPersistSessionState(String ruleSetName, SessionState freshState) {
+        deleteSessionState(ruleSetName);
+        persistSessionState(freshState);
+    }
+
+    /**
+     * Persist session state and matching events in a single transaction.
+     * Used after session recovery to atomically persist refreshed state and grace-period matches.
+     *
+     * @param sessionState   The session state to persist
+     * @param matchingEvents The matching events to insert (may be empty)
+     */
+    default void persistSessionStateAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
+        persistSessionState(sessionState);
+        if (matchingEvents != null && !matchingEvents.isEmpty()) {
+            addMatchingEvents(matchingEvents);
+        }
+    }
+
+    /**
      * Cleanup resources and close connections
      */
     void shutdown();
