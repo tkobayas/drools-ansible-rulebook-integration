@@ -699,26 +699,6 @@ public class H2StateManager extends AbstractHAStateManager {
     }
 
     @Override
-    public void deleteAndPersistSessionState(String ruleSetName, SessionState freshState) {
-        if (!isLeader) {
-            throw new IllegalStateException("Cannot delete/persist session state - not leader");
-        }
-        ensureVersionInMetadata(freshState.getMetadata());
-
-        executeInTransaction("Failed to delete and persist SessionState", conn -> {
-            String sql = "DELETE FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?";
-            try (PreparedStatement ps = conn.prepareStatement(sql)) {
-                ps.setString(1, haUuid);
-                ps.setString(2, ruleSetName);
-                ps.executeUpdate();
-            }
-            doSessionStateUpsert(conn, freshState);
-        });
-
-        logger.debug("Deleted old and persisted fresh SessionState for ruleSetName: {}", ruleSetName);
-    }
-
-    @Override
     public void persistSessionStateAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
         validateForPersist(sessionState);
         ensureVersionInMetadata(sessionState.getMetadata());
