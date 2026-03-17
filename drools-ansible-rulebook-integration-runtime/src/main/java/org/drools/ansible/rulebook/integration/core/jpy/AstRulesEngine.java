@@ -503,18 +503,19 @@ public class AstRulesEngine implements Closeable {
         String localHash = sha256(((HARulesExecutor) executor).getRulesetString());
         if (rulebookHashMismatch(rulesetName, localHash, persistedSessionState)) {
             logger.info("Ruleset updated for {} - deleting old session state and persisting fresh state as leader", rulesetName);
-            haStateManager.deleteSessionState(rulesetName);
             SessionState freshState = haStateManager.getInMemorySessionState(rulesetName);
             if (freshState != null) {
-                haStateManager.persistSessionState(freshState);
+                haStateManager.deleteAndPersistSessionState(rulesetName, freshState);
+            } else {
+                haStateManager.deleteSessionState(rulesetName);
             }
             return;
         }
 
         RulesExecutor recoveredRulesExecutor = haStateManager.recoverSession(((HARulesExecutor) executor).getRulesetString(), persistedSessionState, executor.asKieSession().getSessionClock().getCurrentTime());
 
-        // Persist grace-period recovery matches before replacing the executor
-        persistRecoveryMatches(recoveredRulesExecutor);
+        // Build grace-period recovery matches (not yet persisted)
+        List<MatchingEvent> recoveryMatches = buildRecoveryMatchingEvents(recoveredRulesExecutor);
 
         long previousId = executor.getId();
         RulesExecutor removed = rulesExecutorContainer.removeExecutor(previousId);
@@ -532,8 +533,11 @@ public class AstRulesEngine implements Closeable {
         haStateManager.registerSessionState(rulesetName, persistedSessionState);
         updateInMemorySessionState((HARulesExecutor) recoveredRulesExecutor, persistedSessionState);
 
-        // Persist the refreshed state so stale partial events (discarded by Drools during recovery) are cleared
-        haStateManager.persistSessionState(persistedSessionState);
+        // Persist refreshed state + recovery matches in single transaction
+        haStateManager.persistSessionStateAndMatchingEvents(persistedSessionState, recoveryMatches);
+        for (MatchingEvent me : recoveryMatches) {
+            logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}", me.getRuleName(), me.getMeUuid());
+        }
 
         logger.info("Recovered session {} from persisted SessionState", rulesetName);
     }
@@ -553,14 +557,15 @@ public class AstRulesEngine implements Closeable {
             if (persistedSessionState != null) {
                 if (rulebookHashMismatch(rulesetName, rulebookHash, persistedSessionState)) {
                     logger.info("Ruleset updated for {} - deleting old session state and creating fresh session", rulesetName);
+                    // deleteSessionState only; fresh state will be persisted below after creating new executor
                     haStateManager.deleteSessionState(rulesetName);
                     // Fall through to create fresh executor below
                 } else {
                     // Persisted state exists with same rulebook - recover from it
                     RulesExecutor recoveredExecutor = haStateManager.recoverSession(rulesetString, persistedSessionState, System.currentTimeMillis());
 
-                    // Persist grace-period recovery matches
-                    persistRecoveryMatches(recoveredExecutor);
+                    // Build grace-period recovery matches (not yet persisted)
+                    List<MatchingEvent> recoveryMatches = buildRecoveryMatchingEvents(recoveredExecutor);
 
                     // Set dedup buffer size on recovered executor
                     ((HARulesExecutor) recoveredExecutor).getHaSessionContext().setMaxProcessedIds(dedupBufferSize);
@@ -569,8 +574,11 @@ public class AstRulesEngine implements Closeable {
                     haStateManager.registerSessionState(rulesetName, persistedSessionState);
                     updateInMemorySessionState((HARulesExecutor) recoveredExecutor, persistedSessionState);
 
-                    // Persist the refreshed state so stale partial events (discarded by Drools during recovery) are cleared
-                    haStateManager.persistSessionState(persistedSessionState);
+                    // Persist refreshed state + recovery matches in single transaction
+                    haStateManager.persistSessionStateAndMatchingEvents(persistedSessionState, recoveryMatches);
+                    for (MatchingEvent me : recoveryMatches) {
+                        logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}", me.getRuleName(), me.getMeUuid());
+                    }
 
                     return recoveredExecutor;
                 }
@@ -835,15 +843,14 @@ public class AstRulesEngine implements Closeable {
     }
 
     /**
-     * Consume grace-period-eligible recovery matches from the executor and persist them
-     * as MatchingEvent entries in the database. These will be dispatched to Python via
-     * the existing recoverPendingMatchingEvents() flow.
+     * Build MatchingEvent objects from grace-period-eligible recovery matches.
+     * Returns empty list if no recovery matches exist.
      */
-    private void persistRecoveryMatches(RulesExecutor executor) {
-        if (!(executor instanceof HARulesExecutor haExecutor)) return;
+    private List<MatchingEvent> buildRecoveryMatchingEvents(RulesExecutor executor) {
+        if (!(executor instanceof HARulesExecutor haExecutor)) return List.of();
 
         List<Match> recoveryMatches = haExecutor.consumeRecoveryMatches();
-        if (recoveryMatches == null || recoveryMatches.isEmpty()) return;
+        if (recoveryMatches == null || recoveryMatches.isEmpty()) return List.of();
 
         String rulesetName = executor.getRuleSetName();
         List<Map<String, Map<String, Object>>> matchList = RuleMatch.asList(recoveryMatches);
@@ -861,11 +868,7 @@ public class AstRulesEngine implements Closeable {
             matchingEvents.add(me);
         }
 
-        List<String> meUuids = haStateManager.addMatchingEvents(matchingEvents);
-        for (int i = 0; i < matchingEvents.size(); i++) {
-            logger.info("Persisted grace-period recovery match for rule '{}' as MatchingEvent {}",
-                         matchingEvents.get(i).getRuleName(), meUuids.get(i));
-        }
+        return matchingEvents;
     }
 
     /**
