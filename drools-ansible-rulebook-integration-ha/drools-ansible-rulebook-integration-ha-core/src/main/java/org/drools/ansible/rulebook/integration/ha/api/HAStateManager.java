@@ -98,16 +98,11 @@ public interface HAStateManager {
 
     /**
      * Add multiple matching events in a single transaction.
-     * <p>
-     * The default implementation calls {@link #addMatchingEvent(MatchingEvent)} in a loop (NOT atomic).
-     * Implementations SHOULD override to batch all inserts into a single commit.
      *
      * @param matchingEvents The matching events to persist
      * @return List of UUIDs for the matching events
      */
-    default List<String> addMatchingEvents(List<MatchingEvent> matchingEvents) {
-        throw new UnsupportedOperationException("addMatchingEvents must be implemented by the concrete class");
-    }
+    List<String> addMatchingEvents(List<MatchingEvent> matchingEvents);
 
     /**
      * Get all pending matching events based on haUuid
@@ -189,28 +184,17 @@ public interface HAStateManager {
 
     /**
      * Persist session state and HA stats in a single transaction.
-     * Implementations should override to combine into one commit/fsync.
      */
-    default void persistSessionStateAndStats(SessionState sessionState) {
-        throw new UnsupportedOperationException("persistSessionStateAndStats must be implemented by the concrete class");
-    }
+    void persistSessionStateAndStats(SessionState sessionState);
 
     /**
      * Persist session state, HA stats, and matching events in a single transaction.
      * This ensures atomicity: a crash cannot leave session state advanced while matching events are missing.
-     * <p>
-     * When {@code matchingEvents} is empty, this behaves identically to {@link #persistSessionStateAndStats(SessionState)}.
-     * <p>
-     * The default implementation is NOT atomic — it calls {@link #persistSessionStateAndStats(SessionState)}
-     * followed by {@link #addMatchingEvent(MatchingEvent)} in a loop. Implementations SHOULD override
-     * to combine all writes into a single commit.
      *
      * @param sessionState the session state to persist
      * @param matchingEvents the matching events to insert (may be empty)
      */
-    default void persistSessionStateStatsAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
-        throw new UnsupportedOperationException("persistSessionStateStatsAndMatchingEvents must be implemented by the concrete class");
-    }
+    void persistSessionStateStatsAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents);
 
     /**
      * Delete the persisted SessionState record for a given ruleset.
@@ -220,30 +204,13 @@ public interface HAStateManager {
     void deleteSessionState(String ruleSetName);
 
     /**
-     * Delete old session state and persist fresh session state in a single transaction.
-     * Used on hash-mismatch overwrite path to ensure atomicity.
-     *
-     * @param ruleSetName The name of the ruleset to delete
-     * @param freshState  The fresh session state to persist
-     */
-    default void deleteAndPersistSessionState(String ruleSetName, SessionState freshState) {
-        deleteSessionState(ruleSetName);
-        persistSessionState(freshState);
-    }
-
-    /**
      * Persist session state and matching events in a single transaction.
      * Used after session recovery to atomically persist refreshed state and grace-period matches.
      *
      * @param sessionState   The session state to persist
      * @param matchingEvents The matching events to insert (may be empty)
      */
-    default void persistSessionStateAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
-        persistSessionState(sessionState);
-        if (matchingEvents != null && !matchingEvents.isEmpty()) {
-            addMatchingEvents(matchingEvents);
-        }
-    }
+    void persistSessionStateAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents);
 
     /**
      * Persist all leader startup DB writes in a single transaction.
@@ -259,11 +226,9 @@ public interface HAStateManager {
      * @param rulesetNamesToDelete   ruleset names whose old session state should be deleted first
      * @param matchingEvents         recovery matching events to insert
      */
-    default void persistLeaderStartup(List<SessionState> sessionStatesToPersist,
-                                      List<String> rulesetNamesToDelete,
-                                      List<MatchingEvent> matchingEvents) {
-        throw new UnsupportedOperationException("persistLeaderStartup must be implemented by the concrete class");
-    }
+    void persistLeaderStartup(List<SessionState> sessionStatesToPersist,
+                              List<String> rulesetNamesToDelete,
+                              List<MatchingEvent> matchingEvents);
 
     /**
      * Cleanup resources and close connections
