@@ -816,6 +816,59 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         logger.debug("Deleted SessionState for ruleSetName: {}", ruleSetName);
     }
 
+    @Override
+    public void deleteAndPersistSessionState(String ruleSetName, SessionState freshState) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot delete/persist session state - not leader");
+        }
+        ensureVersionInMetadata(freshState.getMetadata());
+
+        executeInTransaction("Failed to delete and persist SessionState in PostgreSQL", conn -> {
+            String sql = "DELETE FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, haUuid);
+                ps.setString(2, ruleSetName);
+                ps.executeUpdate();
+            }
+            doSessionStateUpsert(conn, freshState);
+        });
+
+        logger.debug("Deleted old and persisted fresh SessionState for ruleSetName: {}", ruleSetName);
+    }
+
+    @Override
+    public void persistSessionStateAndMatchingEvents(SessionState sessionState, List<MatchingEvent> matchingEvents) {
+        validateForPersist(sessionState);
+        ensureVersionInMetadata(sessionState.getMetadata());
+
+        List<UUID> meUuids = new ArrayList<>();
+        List<String> encryptedEventDataList = new ArrayList<>();
+        if (matchingEvents != null) {
+            for (MatchingEvent me : matchingEvents) {
+                UUID meUuid = UUID.randomUUID();
+                meUuids.add(meUuid);
+                me.setMeUuid(meUuid.toString());
+                if (me.getCreatedAt() == 0L) {
+                    me.setCreatedAt(System.currentTimeMillis());
+                }
+                ensureVersionInMetadata(me.getMetadata());
+                encryptedEventDataList.add(encryptIfEnabled(me.getEventData()));
+            }
+        }
+
+        executeInTransaction("Failed to persist SessionState and matching events in PostgreSQL", conn -> {
+            doSessionStateUpsert(conn, sessionState);
+            if (matchingEvents != null) {
+                for (int i = 0; i < matchingEvents.size(); i++) {
+                    doMatchingEventInsert(conn, matchingEvents.get(i), meUuids.get(i), encryptedEventDataList.get(i));
+                }
+            }
+        });
+
+        logger.debug("Persisted SessionState and {} matching events in single transaction for haUuid: {}",
+                     matchingEvents != null ? matchingEvents.size() : 0, haUuid);
+    }
+
     // ── HAStats operations ──────────────────────────────────────────────
 
     @Override
