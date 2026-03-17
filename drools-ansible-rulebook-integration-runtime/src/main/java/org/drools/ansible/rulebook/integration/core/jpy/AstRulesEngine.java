@@ -58,7 +58,7 @@ public class AstRulesEngine implements Closeable {
     private boolean haMode = false;
     private boolean shutdown = false;
     private int dedupBufferSize = 5;
-    private boolean overwriteIfRulebookChanges = false;
+    private boolean overwriteIfRulebookChanges = true;
 
     public long createRuleset(String rulesetString) {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetString);
@@ -375,13 +375,13 @@ public class AstRulesEngine implements Closeable {
         }
         if (!persistedHash.equals(localHash)) {
             if (overwriteIfRulebookChanges) {
-                logger.info("Rulebook hash mismatch detected for {} (local {}, persisted {}), but overwrite_if_rulebook_changes is true - recovering from persisted state",
+                logger.warn("Rulebook hash mismatch detected for {} (local {}, persisted {}); overwrite_if_rulebook_changes is true - deleting old state and starting fresh",
                         rulesetName, localHash, persistedHash);
-                return false;
+                return true;
             }
-            logger.warn("Rulebook hash mismatch detected for {} (local {}, persisted {}); Ruleset has been updated.",
+            logger.info("Rulebook hash mismatch detected for {} (local {}, persisted {}), but overwrite_if_rulebook_changes is false - recovering from persisted state",
                     rulesetName, localHash, persistedHash);
-            return true;
+            return false;
         }
         return false;
     }
@@ -426,9 +426,10 @@ public class AstRulesEngine implements Closeable {
                     : 5;
             logger.info("HA deduplication buffer size set to {}", dedupBufferSize);
 
-            // Extract overwrite_if_rulebook_changes from config
-            this.overwriteIfRulebookChanges = config != null
-                    && Boolean.TRUE.equals(config.get("overwrite_if_rulebook_changes"));
+            // Extract overwrite_if_rulebook_changes from config (default: true)
+            if (config != null && config.containsKey("overwrite_if_rulebook_changes")) {
+                this.overwriteIfRulebookChanges = Boolean.TRUE.equals(config.get("overwrite_if_rulebook_changes"));
+            }
             logger.info("HA overwrite_if_rulebook_changes set to {}", overwriteIfRulebookChanges);
 
             // HA mode always requires async channel
@@ -527,8 +528,12 @@ public class AstRulesEngine implements Closeable {
         rulesExecutorContainer.register(recoveredRulesExecutor);
         configureScheduledMatchCallback(recoveredRulesExecutor);
 
-        // Update in-memory state to match recovered state
+        // Update in-memory state from recovered executor (refreshes partialEvents from WM)
         haStateManager.registerSessionState(rulesetName, persistedSessionState);
+        updateInMemorySessionState((HARulesExecutor) recoveredRulesExecutor, persistedSessionState);
+
+        // Persist the refreshed state so stale partial events (discarded by Drools during recovery) are cleared
+        haStateManager.persistSessionState(persistedSessionState);
 
         logger.info("Recovered session {} from persisted SessionState", rulesetName);
     }
@@ -560,8 +565,12 @@ public class AstRulesEngine implements Closeable {
                     // Set dedup buffer size on recovered executor
                     ((HARulesExecutor) recoveredExecutor).getHaSessionContext().setMaxProcessedIds(dedupBufferSize);
 
-                    // Register recovered state in memory (for both leader and non-leader)
+                    // Update in-memory state from recovered executor (refreshes partialEvents from WM)
                     haStateManager.registerSessionState(rulesetName, persistedSessionState);
+                    updateInMemorySessionState((HARulesExecutor) recoveredExecutor, persistedSessionState);
+
+                    // Persist the refreshed state so stale partial events (discarded by Drools during recovery) are cleared
+                    haStateManager.persistSessionState(persistedSessionState);
 
                     return recoveredExecutor;
                 }
