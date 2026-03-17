@@ -246,6 +246,26 @@ public interface HAStateManager {
     }
 
     /**
+     * Persist all leader startup DB writes in a single transaction.
+     * Called once at the end of enableLeader() after all in-memory recovery is complete.
+     * <p>
+     * One transaction that:
+     * 1. Upserts HAStats (leader switch already mutated in memory)
+     * 2. Deletes old session states (hash-mismatch rulesets)
+     * 3. Upserts all refreshed session states
+     * 4. Inserts all recovery matching events
+     *
+     * @param sessionStatesToPersist session states to upsert
+     * @param rulesetNamesToDelete   ruleset names whose old session state should be deleted first
+     * @param matchingEvents         recovery matching events to insert
+     */
+    default void persistLeaderStartup(List<SessionState> sessionStatesToPersist,
+                                      List<String> rulesetNamesToDelete,
+                                      List<MatchingEvent> matchingEvents) {
+        throw new UnsupportedOperationException("persistLeaderStartup must be implemented by the concrete class");
+    }
+
+    /**
      * Cleanup resources and close connections
      */
     void shutdown();

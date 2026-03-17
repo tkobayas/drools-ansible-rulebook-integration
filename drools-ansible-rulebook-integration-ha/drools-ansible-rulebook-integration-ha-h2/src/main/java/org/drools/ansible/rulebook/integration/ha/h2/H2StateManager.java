@@ -146,6 +146,8 @@ public class H2StateManager extends AbstractHAStateManager {
 
         String selectSql = "SELECT * FROM " + HA_STATS + " WHERE ha_uuid = ?";
 
+        // Read HAStats from DB and mutate in-memory only — do NOT persist yet.
+        // HAStats will be persisted later in persistLeaderStartup().
         executeInTransaction("Failed to enable leader", conn -> {
             try (PreparedStatement ps = conn.prepareStatement(selectSql)) {
                 ps.setString(1, haUuid);
@@ -161,7 +163,7 @@ public class H2StateManager extends AbstractHAStateManager {
                 haStats.setHaUuid(haUuid);
             }
             ensureVersionInMetadata(haStats.getMetadata());
-            doHAStatsUpsert(conn);
+            // No doHAStatsUpsert(conn) — deferred to persistLeaderStartup()
         });
 
         logger.info("Leader mode enabled for: {}", this.workerName);
@@ -746,6 +748,67 @@ public class H2StateManager extends AbstractHAStateManager {
 
         logger.debug("Persisted SessionState and {} matching events in single transaction for haUuid: {}",
                      matchingEvents != null ? matchingEvents.size() : 0, haUuid);
+    }
+
+    @Override
+    public void persistLeaderStartup(List<SessionState> sessionStatesToPersist,
+                                     List<String> rulesetNamesToDelete,
+                                     List<MatchingEvent> matchingEvents) {
+        // Pre-transaction: validate, encrypt, assign UUIDs
+        for (SessionState ss : sessionStatesToPersist) {
+            validateForPersist(ss);
+            ensureVersionInMetadata(ss.getMetadata());
+        }
+
+        List<String> encryptedEventDataList = new ArrayList<>();
+        if (matchingEvents != null) {
+            for (MatchingEvent me : matchingEvents) {
+                if (me.getMeUuid() == null) {
+                    me.setMeUuid(UUID.randomUUID().toString());
+                }
+                if (me.getCreatedAt() == 0L) {
+                    me.setCreatedAt(System.currentTimeMillis());
+                }
+                ensureVersionInMetadata(me.getMetadata());
+                encryptedEventDataList.add(encryptIfEnabled(me.getEventData()));
+            }
+        }
+
+        ensureVersionInMetadata(haStats.getMetadata());
+
+        executeInTransaction("Failed to persist leader startup", conn -> {
+            // 1. Upsert HAStats
+            doHAStatsUpsert(conn);
+
+            // 2. Delete old session states (hash-mismatch rulesets)
+            if (rulesetNamesToDelete != null) {
+                String deleteSql = "DELETE FROM " + SESSION_STATE + " WHERE ha_uuid = ? AND rule_set_name = ?";
+                for (String rulesetName : rulesetNamesToDelete) {
+                    try (PreparedStatement ps = conn.prepareStatement(deleteSql)) {
+                        ps.setString(1, haUuid);
+                        ps.setString(2, rulesetName);
+                        ps.executeUpdate();
+                    }
+                }
+            }
+
+            // 3. Upsert all refreshed session states
+            for (SessionState ss : sessionStatesToPersist) {
+                doSessionStateUpsert(conn, ss);
+            }
+
+            // 4. Insert all recovery matching events
+            if (matchingEvents != null) {
+                for (int i = 0; i < matchingEvents.size(); i++) {
+                    doMatchingEventInsert(conn, matchingEvents.get(i), encryptedEventDataList.get(i));
+                }
+            }
+        });
+
+        logger.info("Persisted leader startup in single transaction: {} session states, {} deletes, {} matching events",
+                     sessionStatesToPersist.size(),
+                     rulesetNamesToDelete != null ? rulesetNamesToDelete.size() : 0,
+                     matchingEvents != null ? matchingEvents.size() : 0);
     }
 
     // ── HAStats operations ──────────────────────────────────────────────
