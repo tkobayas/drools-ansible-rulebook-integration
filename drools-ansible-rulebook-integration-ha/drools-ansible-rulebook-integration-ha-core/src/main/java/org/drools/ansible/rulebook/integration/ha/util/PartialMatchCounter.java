@@ -43,7 +43,7 @@ public final class PartialMatchCounter {
     }
 
     public static int countPartialTuplesTotal(KieSession ksession) {
-        return countPartialTuplesPerRule(ksession).values().stream().mapToInt(Integer::intValue).sum();
+        return (int) countPartialTuplesPerRule(ksession).values().stream().filter(v -> v > 0).count();
     }
 
     private static void walkObjectSource(ObjectSource source, InternalWorkingMemory wm, Map<String, Integer> counts) {
