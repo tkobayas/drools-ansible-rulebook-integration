@@ -53,7 +53,7 @@
       <plugin>
         <artifactId>maven-shade-plugin</artifactId>
         <configuration>
-          <finalName>${project.artifactId}-${project.version}-HA-PoC</finalName>
+          <finalName>${project.artifactId}-${project.version}-HA</finalName>
           <minimizeJar>true</minimizeJar>
           <filters> <!-- since shading ecj (a transitive dependency), erase signatures see https://docs.oracle.com/en-us/iaas/data-flow/data-flow-tutorial/develop-apps-locally/create-fat-jars.htm -->
             <filter>
