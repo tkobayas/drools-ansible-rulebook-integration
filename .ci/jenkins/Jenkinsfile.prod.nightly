@@ -15,7 +15,7 @@ pipeline{
       string(description: 'The drools product version, if not provided the drools main branch one will be used', name: 'DROOLS_PRODUCT_VERSION')
       string(description: 'The config repository branch', name: 'CONFIG_BRANCH', defaultValue: 'master')
       string(description: 'The build chain definition file owner', name: 'DEFINITION_FILE_OWNER', defaultValue: 'kiegroup')
-      string(description: 'The build chain definition file branch', name: 'DEFINITION_FILE_BRANCH', defaultValue: 'main')
+      string(description: 'The build chain definition file branch', name: 'DEFINITION_FILE_BRANCH', defaultValue: '2.0.x')
     }
     options {
       buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10')
@@ -108,7 +108,7 @@ String getBuildConfigBranch() {
 
 String getBuildBranch() {
   // Fallback to main if none exist
-  return env.BRANCH_NAME ?: env.GIT_BRANCH ?: 'main'
+  return env.BRANCH_NAME ?: env.GIT_BRANCH ?: '2.0.x'
 }
 
 // Parse version from the provided branch/current build branch of the given project

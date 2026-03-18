@@ -69,6 +69,8 @@ public class OnceWithinDefinition extends OnceAbstractTimeConstraint {
 
     public static final String KEYWORD = "once_within";
 
+    public static final String ONCE_WITHIN_CONTROL = "once_within_control";
+
     public OnceWithinDefinition(TimeAmount timeAmount, List<GroupByAttribute> groupByAttributes) {
         super(timeAmount, groupByAttributes);
     }
@@ -87,6 +89,7 @@ public class OnceWithinDefinition extends OnceAbstractTimeConstraint {
     public void executeTimeConstraintConsequence(Drools drools, Object... facts) {
         PrototypeEventInstance controlEvent = getPrototypeEvent(SYNTHETIC_PROTOTYPE_NAME).newInstance()
                 .withExpiration(timeAmount.getAmount(), timeAmount.getTimeUnit());
+        controlEvent.put(CONTROL_NAME, ONCE_WITHIN_CONTROL);
         PrototypeFactInstance fact = (PrototypeFactInstance) facts[0];
         for (GroupByAttribute unique : groupByAttributes) {
             controlEvent.put(unique.getKey(), unique.evalExtractorOnFact(fact));

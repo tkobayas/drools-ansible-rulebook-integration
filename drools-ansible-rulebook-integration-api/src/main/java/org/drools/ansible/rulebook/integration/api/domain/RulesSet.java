@@ -29,6 +29,8 @@ public class RulesSet {
 
     private boolean matchMultipleRules;
 
+    private boolean haMode;
+
     private final RuleConfigurationOptions options = new RuleConfigurationOptions();
 
     private int enabledRulesNumber;
@@ -142,6 +144,14 @@ public class RulesSet {
 
     public boolean isMatchMultipleRules() {
         return matchMultipleRules;
+    }
+
+    public boolean isHaMode() {
+        return haMode;
+    }
+
+    public void setHaMode(boolean haMode) {
+        this.haMode = haMode;
     }
 
     public boolean hasTemporalConstraint() {

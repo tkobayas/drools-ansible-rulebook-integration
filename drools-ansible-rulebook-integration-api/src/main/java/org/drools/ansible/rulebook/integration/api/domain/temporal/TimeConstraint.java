@@ -18,6 +18,8 @@ public interface TimeConstraint {
 
     String COUNT_AS_MATCHED_EVENT = "count_as_matched_event";
 
+    String CONTROL_NAME = "control_name";
+
     boolean requiresAsyncExecution();
 
     ViewItem processTimeConstraint(String ruleName, ViewItem pattern);

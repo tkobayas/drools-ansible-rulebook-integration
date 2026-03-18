@@ -44,12 +44,21 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
 
     public AbstractRulesEvaluator(RulesExecutorSession rulesExecutorSession) {
         this.rulesExecutorSession = rulesExecutorSession;
-        this.registerOnlyAgendaFilter = new RegisterOnlyAgendaFilter(rulesExecutorSession);
+        this.registerOnlyAgendaFilter = new RegisterOnlyAgendaFilter(rulesExecutorSession, this::isOnRecovery);
     }
 
     @Override
     public long getSessionId() {
         return rulesExecutorSession.getId();
+    }
+
+    protected boolean isOnRecovery() {
+        return false;
+    }
+
+    @Override
+    public String getRuleSetName() {
+        return rulesExecutorSession.getRuleSetName();
     }
 
     @Override
@@ -121,7 +130,7 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
 
         return asyncExecutor == null || matches.isEmpty() ?
                 completeFutureOf(matches) :
-                asyncExecutor.submit(() -> writeResponseOnChannel(matches) );
+                asyncExecutor.submit(() -> onScheduledMatches(matches) );
     }
 
     @Override
@@ -142,7 +151,7 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
 
     protected abstract CompletableFuture<List<Match>> engineEvaluate(Supplier<List<Match>> resultSupplier);
 
-    private List<Match> internalAdvanceTime(long amount, TimeUnit unit) {
+    protected List<Match> internalAdvanceTime(long amount, TimeUnit unit) {
         List<Match> matches = atomicRuleEvaluation(false, () -> rulesExecutorSession.advanceTime(amount, unit));
         if (!matches.isEmpty() && log.isInfoEnabled()) {
             log.info("Match(es) caused by automatic clock advance: " + matches);
@@ -184,11 +193,16 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
                                                                      String factAsString = fhs.size() == 1 ? JsonMapper.toJson(factMap) : JsonMapper.toJson(((PrototypeFactInstance) fh.getObject()).asMap());
                                                                      log.debug((processEventInsertion ? "Event " : "Fact ") + factAsString + " didn't match any rule and has been immediately discarded");
                                                                  }
+                                                                 processDiscardedFact(fh);
                                                              }
                                                          }
                                                      });
         rulesExecutorSession.getRulesSetEventStructure().validateRulesSetEventStructureIfRequired(matchList);
         return matchList;
+    }
+
+    protected void processDiscardedFact(InternalFactHandle fh) {
+        // no-op for non-HA mode
     }
 
     private List<InternalFactHandle> insertFacts(Map<String, Object> factMap, boolean event) {
@@ -218,6 +232,15 @@ public abstract class AbstractRulesEvaluator implements RulesEvaluator {
             rulesExecutorSession.registerAsyncResponse(bytes);
         }
         return matches;
+    }
+
+    /**
+     * Hook called when the automatic pseudo clock triggers rule matches.
+     * Default implementation delegates to writeResponseOnChannel.
+     * HARulesEvaluator overrides this to route through the HA pipeline.
+     */
+    protected List<Match> onScheduledMatches(List<Match> matches) {
+        return writeResponseOnChannel(matches);
     }
 
     private final Lock ruleEvaluationLock = new ReentrantLock();

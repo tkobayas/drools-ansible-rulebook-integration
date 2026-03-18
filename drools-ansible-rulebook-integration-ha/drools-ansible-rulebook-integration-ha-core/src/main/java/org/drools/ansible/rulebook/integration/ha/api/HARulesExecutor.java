@@ -1,0 +1,136 @@
+package org.drools.ansible.rulebook.integration.ha.api;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
+
+import org.drools.ansible.rulebook.integration.api.RulesExecutor;
+import org.drools.ansible.rulebook.integration.api.domain.RulesSet;
+import org.drools.ansible.rulebook.integration.api.rulesengine.MemoryMonitorUtil;
+import org.drools.ansible.rulebook.integration.api.rulesengine.RulesEvaluator;
+import org.drools.ansible.rulebook.integration.api.rulesengine.RulesExecutorSession;
+import org.drools.ansible.rulebook.integration.ha.model.EventRecord;
+import org.kie.api.runtime.rule.Match;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelUtil.asFactMap;
+import static org.drools.ansible.rulebook.integration.ha.api.HAUtils.getEventUuid;
+
+public class HARulesExecutor extends RulesExecutor {
+
+    private static final Logger LOG = LoggerFactory.getLogger(HARulesExecutor.class);
+
+    // In HA mode, ID should be consistent across session recoveries for python client.
+    // The ID is essentially used to lookup rulesExecutor from container
+    private long externalSessionId;
+
+    // Retain ruleset string for clean KieBase generation during recovery
+    private String rulesetString;
+
+    // Matches captured during session recovery (grace period feature)
+    private List<Match> recoveryMatches;
+
+    public HARulesExecutor(RulesExecutorSession rulesExecutorSession, String rulesetString) {
+        super(createRulesEvaluator(rulesExecutorSession));
+        this.externalSessionId = rulesEvaluator.getSessionId(); // Initially set to internal session ID
+        this.rulesetString = rulesetString;
+
+        // Pass container lookup ID to evaluator so it can use it for SessionStats, async responses, etc.
+        if (rulesEvaluator instanceof HARulesEvaluator) {
+            ((HARulesEvaluator) rulesEvaluator).setExternalSessionId(this.externalSessionId);
+        }
+    }
+
+    private static RulesEvaluator createRulesEvaluator(RulesExecutorSession rulesExecutorSession) {
+        return new HARulesEvaluator(rulesExecutorSession);
+    }
+
+    public String getRulesetString() {
+        return rulesetString;
+    }
+
+    @Override
+    public long getId() {
+        return externalSessionId;  // Returns container key, not internal ID
+    }
+
+    public void setExternalSessionId(long externalSessionId) {
+        this.externalSessionId = externalSessionId;
+
+        // Update evaluator's container lookup ID as well
+        if (rulesEvaluator instanceof HARulesEvaluator) {
+            ((HARulesEvaluator) rulesEvaluator).setExternalSessionId(externalSessionId);
+        }
+    }
+
+    public void setOnRecovery(boolean onRecovery) {
+        ((HARulesEvaluator) rulesEvaluator).setOnRecovery(onRecovery);
+    }
+
+    public void setScheduledMatchCallback(Function<List<Match>, List<Map<String, Object>>> callback) {
+        ((HARulesEvaluator) rulesEvaluator).setScheduledMatchCallback(callback);
+    }
+
+    public RulesSet getRulesSet() {
+        return ((HARulesEvaluator) rulesEvaluator).getRulesSet();
+    }
+
+    @Override
+    public CompletableFuture<List<Match>> processEvents(String json) {
+        MemoryMonitorUtil.checkMemoryOccupation(rulesEvaluator.getSessionStatsCollector());
+        rulesEvaluator.stashFirstEventJsonForValidation(json);
+
+        Map<String, Object> eventMap = asFactMap(json);
+        String eventUuid = getEventUuid(eventMap)
+                .orElseGet(() -> {
+                    LOG.warn("Event UUID not found in event data, generating random UUID as fallback");
+                    return UUID.randomUUID().toString();
+                });
+
+        // Check for duplicate event
+        if (getHaSessionContext().isAlreadyProcessed(eventUuid)) {
+            LOG.warn("Event {} has already been processed once. Ignoring duplicate.", eventUuid);
+            return CompletableFuture.completedFuture(Collections.emptyList());
+        }
+
+        getHaSessionContext().preparePendingRecord(eventUuid, json, EventRecord.RecordType.EVENT);
+
+        // Record the event ID after preparing the pending record
+        getHaSessionContext().recordProcessedEvent(eventUuid);
+
+        return rulesEvaluator.processEvents(eventMap);
+    }
+
+    @Override
+    public CompletableFuture<List<Match>> processFacts(String json) {
+        MemoryMonitorUtil.checkMemoryOccupation(rulesEvaluator.getSessionStatsCollector());
+        getHaSessionContext().preparePendingRecord(UUID.randomUUID().toString(), json, EventRecord.RecordType.FACT);
+        return rulesEvaluator.processFacts(asFactMap(json));
+    }
+
+    public HASessionContext getHaSessionContext() {
+        return ((HARulesEvaluator) rulesEvaluator).getHaSessionContext();
+    }
+
+    public List<Map<String, Object>> consumeLastAdvanceTimeHAResult() {
+        return ((HARulesEvaluator) rulesEvaluator).consumeLastAdvanceTimeHAResult();
+    }
+
+    public void addRecoveryMatches(List<Match> matches) {
+        if (this.recoveryMatches == null) {
+            this.recoveryMatches = new ArrayList<>();
+        }
+        this.recoveryMatches.addAll(matches);
+    }
+
+    public List<Match> consumeRecoveryMatches() {
+        List<Match> result = this.recoveryMatches;
+        this.recoveryMatches = null;
+        return result;
+    }
+}
