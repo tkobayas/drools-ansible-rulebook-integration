@@ -111,7 +111,8 @@ public class OnceAfterTest {
         // Verify that there is no unexpected event in the returned match
         assertThat(matchedRules.get(0).getDeclarationIds()).containsExactlyInAnyOrder("m_0", "m_1", "m_2");
 
-        // drools.update(control) in _cleanup_duplicate rule changes the order of accumulated results,
+        // drools.update(control) in _cleanup_duplicate rule changes the order of accumulated results (because of rete reevaluation),
+        // but it's not a downgrade. Users should not rely on the order in the results.
         // so we collect results into a map keyed by (host, level) instead of relying on position.
         Map<String, Integer> eventsInWindowByHostLevel = new HashMap<>();
         for (int i = 0; i < 3; i++) {
