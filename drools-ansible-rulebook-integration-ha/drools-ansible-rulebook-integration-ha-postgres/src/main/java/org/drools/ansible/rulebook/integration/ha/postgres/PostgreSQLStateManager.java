@@ -163,14 +163,14 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
     }
 
     private HikariDataSource buildDataSource(Map<String, Object> dbParams) {
-        String host = (String) dbParams.getOrDefault("host", "localhost");
-        Object portObj = dbParams.getOrDefault("port", 5432);
-        Integer port = (portObj instanceof Integer) ? (Integer) portObj : Integer.parseInt(portObj.toString());
+        String host = dbParams.getOrDefault("host", "localhost").toString();
+        String port = dbParams.getOrDefault("port", "5432").toString();
         String database = (String) dbParams.getOrDefault("database", "eda_ha");
         String username = (String) dbParams.getOrDefault("user", "postgres");
         String password = (String) dbParams.getOrDefault("password", "");
         String sslmode = (String) dbParams.getOrDefault("sslmode", "prefer");
         String applicationName = (String) dbParams.getOrDefault("application_name", "drools-eda-ha");
+        String targetSessionAttrs = (String) dbParams.get("target_session_attrs");
 
         String sslkey = (String) dbParams.get("sslkey");
         String sslcert = (String) dbParams.get("sslcert");
@@ -208,9 +208,19 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             }
         }
 
+        // Map libpq-style host/port lists to JDBC host:port pairs
+        String hostPortion = buildHostPortion(host, port);
+        boolean isMultiHost = host.contains(",");
+
         StringBuilder jdbcUrlBuilder = new StringBuilder(
-            String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s&ApplicationName=%s",
-                host, port, database, sslmode, applicationName));
+            String.format("jdbc:postgresql://%s/%s?sslmode=%s&ApplicationName=%s",
+                hostPortion, database, sslmode, applicationName));
+
+        // Append targetServerType only when explicitly requested or when using multi-host
+        if (targetSessionAttrs != null || isMultiHost) {
+            String targetServerType = mapTargetSessionAttrs(targetSessionAttrs);
+            jdbcUrlBuilder.append("&targetServerType=").append(targetServerType);
+        }
 
         if (sslkey != null && !sslkey.isEmpty()) {
             jdbcUrlBuilder.append("&sslkey=").append(URLEncoder.encode(sslkey, StandardCharsets.UTF_8));
@@ -226,7 +236,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
         }
 
         String jdbcUrl = jdbcUrlBuilder.toString();
-        logger.info("Connecting to PostgreSQL at {}:{}/{}", host, port, database);
+        logger.info("Connecting to PostgreSQL at {}/{}", hostPortion, database);
 
         HikariConfig hikariConfig = new HikariConfig();
         hikariConfig.setJdbcUrl(jdbcUrl);
@@ -1100,6 +1110,56 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
             logger.error("Failed to fetch action status from PostgreSQL", e);
         }
         return null;
+    }
+
+    // ── Multi-host / libpq mapping helpers ────────────────────────────────
+
+    /**
+     * Maps libpq-style host and port parameters to a JDBC host:port portion.
+     * <ul>
+     *   <li>Single host: {@code host="server1", port="5432"} → {@code "server1:5432"}</li>
+     *   <li>Multi-host, single port: {@code host="s1,s2", port="5432"} → {@code "s1:5432,s2:5432"}</li>
+     *   <li>Multi-host, multi-port: {@code host="s1,s2", port="5432,5433"} → {@code "s1:5432,s2:5433"}</li>
+     * </ul>
+     */
+    static String buildHostPortion(String host, String port) {
+        String[] hosts = host.split(",");
+        String[] ports = port.split(",");
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < hosts.length; i++) {
+            if (i > 0) {
+                sb.append(",");
+            }
+            sb.append(hosts[i].trim());
+            sb.append(":");
+            // libpq: single port applies to all hosts; per-host ports match by index
+            int portIdx = Math.min(i, ports.length - 1);
+            sb.append(ports[portIdx].trim());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Maps libpq {@code target_session_attrs} values to pgjdbc {@code targetServerType}.
+     */
+    static String mapTargetSessionAttrs(String targetSessionAttrs) {
+        if (targetSessionAttrs == null) {
+            return "any";
+        }
+        switch (targetSessionAttrs) {
+            case "read-write":
+            case "primary":
+                return "primary";
+            case "read-only":
+            case "standby":
+                return "secondary";
+            case "prefer-standby":
+                return "preferSecondary";
+            case "any":
+            default:
+                return "any";
+        }
     }
 
     // ── SSL helpers ─────────────────────────────────────────────────────
