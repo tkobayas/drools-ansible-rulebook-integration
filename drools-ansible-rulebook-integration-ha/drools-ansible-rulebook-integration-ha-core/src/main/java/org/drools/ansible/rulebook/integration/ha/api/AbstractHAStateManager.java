@@ -36,6 +36,8 @@ public abstract class AbstractHAStateManager implements HAStateManager {
 
     protected long gracePeriodMs = 0;
 
+    private volatile Thread shutdownHook;
+
     /**
      * Common initialization for cross-cutting concerns (encryption, future features).
      * Must be called by every subclass at the end of {@code initializeHA()}.
@@ -43,6 +45,38 @@ public abstract class AbstractHAStateManager implements HAStateManager {
     protected final void commonInit(Map<String, Object> config) {
         initializeEncryption(config);
         initializeGracePeriod(config);
+        registerShutdownHook();
+    }
+
+    private void registerShutdownHook() {
+        if (shutdownHook != null) {
+            return; // already registered
+        }
+        shutdownHook = new Thread(() -> {
+            LOG.warn("JVM shutdown hook triggered -- closing HA state manager");
+            try {
+                shutdown();
+            } catch (Exception e) {
+                // Best-effort; logging may already be shut down
+            }
+        }, "ha-state-manager-shutdown");
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
+        LOG.debug("Registered JVM shutdown hook for HA state manager cleanup");
+    }
+
+    /**
+     * Remove the shutdown hook during normal shutdown to avoid redundant execution.
+     * Subclasses should call this at the beginning of their {@code shutdown()} method.
+     */
+    protected void deregisterShutdownHook() {
+        if (shutdownHook != null) {
+            try {
+                Runtime.getRuntime().removeShutdownHook(shutdownHook);
+            } catch (IllegalStateException e) {
+                // JVM is already shutting down -- hook is running or has run
+            }
+            shutdownHook = null;
+        }
     }
 
     private void initializeGracePeriod(Map<String, Object> config) {
