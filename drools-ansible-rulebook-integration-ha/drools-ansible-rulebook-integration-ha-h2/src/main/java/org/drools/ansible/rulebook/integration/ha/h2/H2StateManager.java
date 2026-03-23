@@ -922,6 +922,7 @@ public class H2StateManager extends AbstractHAStateManager {
 
     @Override
     public void shutdown() {
+        deregisterShutdownHook();
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
             logger.info("Shutting down H2StateManager");
