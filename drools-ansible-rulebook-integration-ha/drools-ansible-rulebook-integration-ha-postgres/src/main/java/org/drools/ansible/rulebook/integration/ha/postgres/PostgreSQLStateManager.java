@@ -1065,6 +1065,7 @@ public class PostgreSQLStateManager extends AbstractHAStateManager {
 
     @Override
     public void shutdown() {
+        deregisterShutdownHook();
         if (dataSource != null && !dataSource.isClosed()) {
             dataSource.close();
             logger.info("PostgreSQL HA state manager shut down");
