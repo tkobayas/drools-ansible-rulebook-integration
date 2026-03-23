@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -35,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
  *   <li>Concurrent create+migrate: both threads succeed</li>
  * </ul>
  */
+@EnabledIfSystemProperty(named = "test.db.type", matches = "postgres(ql)?")
 class ConcurrentSchemaCreationTest {
 
     private static final Logger logger = LoggerFactory.getLogger(ConcurrentSchemaCreationTest.class);

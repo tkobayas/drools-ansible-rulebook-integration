@@ -123,7 +123,7 @@ public class H2StateManager extends AbstractHAStateManager {
         if (dbFilePath == null || dbFilePath.isEmpty()) {
             dbFilePath = "./eda_ha";
         }
-        String jdbcUrl = "jdbc:h2:file:" + dbFilePath + ";MODE=PostgreSQL";
+        String jdbcUrl = "jdbc:h2:file:" + dbFilePath + ";MODE=PostgreSQL;FILE_LOCK=NO";
         logger.info("Using file-backed H2 database from db_file_path: {}", dbFilePath);
         logger.warn("Using H2 database for HA - not suitable for production");
 
