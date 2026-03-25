@@ -22,7 +22,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         java-version: [17]
-        maven-version: ['3.9.3']
+        maven-version: ['3.9.11']
       fail-fast: false
     runs-on: ${{ matrix.os }}
     name: Ansible Integration / ${{ matrix.os }} / Java-${{ matrix.java-version }} / Maven-${{ matrix.maven-version }}
@@ -58,7 +58,7 @@ jobs:
         uses: kiegroup/kie-ci/.ci/actions/maven@main
         with:
           java-version: '17'
-          maven-version: '3.9.3'
+          maven-version: '3.9.11'
 
       - name: Build Chain
         uses: kiegroup/kie-ci/.ci/actions/build-chain@main
