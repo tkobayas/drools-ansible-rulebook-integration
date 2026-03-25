@@ -1,18 +1,7 @@
 version: "2.1"
 dependencies:
   - project: kiegroup/drools
-    mapping:
-      dependant:
-        default:
-          # whenever drools branch changes, please update .ci/jenkins/Jenkinsfile.prod.nightly as well if needed
-          - source: 9.103.x-prod
-            target: 1.0.x
-
+    
   - project: kiegroup/drools-ansible-rulebook-integration
     dependencies:
       - project: kiegroup/drools
-    mapping:
-      dependencies:
-        default:
-          - source: 1.0.x
-            target: 9.103.x-prod
