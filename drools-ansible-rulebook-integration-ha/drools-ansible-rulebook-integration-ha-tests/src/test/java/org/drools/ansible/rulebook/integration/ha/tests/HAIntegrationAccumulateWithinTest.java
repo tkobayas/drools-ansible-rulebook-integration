@@ -126,8 +126,7 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
     @Test
     void testSessionRecoveryWithAccumulateWindowExpiredDuringOutage() {
         // This test verifies that when the accumulate_within window expires during outage,
-        // a WARN log is emitted during recovery. (Manually check the log output.)
-        // WARN: accumulate_within window expired during outage for rule 'alert_accumulator' (accumulated count=2, window=10000ms, expired Xms ago)
+        // a WARN log is emitted during recovery.
 
         // Step 1: Node 1 becomes leader and processes events
         rulesEngine1.enableLeader();
@@ -162,7 +161,13 @@ class HAIntegrationAccumulateWithinTest extends HAIntegrationTestBase {
 
         // Step 4: Node 2 takes over — recovery detects the expired accumulate_within control
         // and logs WARN: accumulate_within window expired during outage for rule 'alert_accumulator' ...
-        rulesEngine2.enableLeader();
+        String logs;
+        try {
+            logs = TestOutputCapture.captureStdout(() -> rulesEngine2.enableLeader());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        assertThat(logs).contains("accumulate_within window expired during outage for rule 'alert_accumulator'");
 
         // Step 5: Verify that the accumulation was lost (count reset)
         // Processing 1 new event should NOT fire the rule (threshold=3, fresh start)
