@@ -137,4 +137,43 @@ class HAIntegrationOnceWithinTest extends HAIntegrationTestBase {
                 .containsEntry("name", "alert_throttle")
                 .containsKey("matching_uuid");
     }
+
+    @Test
+    void testOnceWithinExpiryDuringOutageNeedsNoWarning() {
+        rulesEngine1.enableLeader();
+
+        // First event starts the suppression window at t=0.
+        String firstEvent = createEvent("{\"alert\":{\"type\":\"warning\",\"host\":\"h1\"}}");
+        List<Map<String, Object>> firstMatches = readValueAsListOfMapOfStringAndObject(rulesEngine1.assertEvent(sessionId1, firstEvent));
+        assertThat(firstMatches).hasSize(1);
+
+        // Advance leader clock to t=3 and persist that state.
+        rulesEngine1.advanceTime(sessionId1, 3, "SECONDS");
+
+        // Simulate an outage longer than the 10-second once_within window.
+        rulesEngine2.advanceTime(sessionId2, 12, "SECONDS");
+
+        rulesEngine1.disableLeader();
+        rulesEngine1.close();
+        rulesEngine1 = null;
+        consumer1.stop();
+        consumer1 = null;
+
+        String logs;
+        try {
+            logs = TestOutputCapture.captureStdout(() -> rulesEngine2.enableLeader());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        assertThat(logs).doesNotContain("once_within window expired during outage");
+
+        // Suppression window expired during downtime, so the next event should be processed normally.
+        String secondEvent = createEvent("{\"alert\":{\"type\":\"warning\",\"host\":\"h1\"}}");
+        List<Map<String, Object>> secondMatches = readValueAsListOfMapOfStringAndObject(rulesEngine2.assertEvent(sessionId2, secondEvent));
+        assertThat(secondMatches).hasSize(1);
+        assertThat(secondMatches.get(0))
+                .containsEntry("name", "alert_throttle")
+                .containsKey("matching_uuid");
+    }
 }

@@ -215,7 +215,13 @@ class HAIntegrationTimedOutGracePeriodTest extends AbstractHATestBase {
             consumer1 = null;
 
             // Node2 becomes leader — the timeout expired 690s ago, outside 600s grace period
-            rulesEngine2.enableLeader();
+            String logs;
+            try {
+                logs = TestOutputCapture.captureStdout(() -> rulesEngine2.enableLeader());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+            assertThat(logs).contains("Dropping expired recovery match for rule 'maint failed'");
 
             // The match should NOT be persisted
             HAStateManager assertionManager = createHAStateManagerForAssertion();
