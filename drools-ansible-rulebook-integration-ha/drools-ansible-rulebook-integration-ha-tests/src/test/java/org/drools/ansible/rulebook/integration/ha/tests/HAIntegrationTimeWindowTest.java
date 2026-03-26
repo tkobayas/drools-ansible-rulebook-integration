@@ -222,7 +222,13 @@ class HAIntegrationTimeWindowTest extends HAIntegrationTestBase {
         rulesEngine2.advanceTime(sessionId2, 9, "SECONDS");
 
         // Step 4: Node 2 takes over — recovery should detect expired sentinels and log WARN
-        rulesEngine2.enableLeader();
+        String logs;
+        try {
+            logs = TestOutputCapture.captureStdout(() -> rulesEngine2.enableLeader());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        assertThat(logs).contains("all+timeout window expired during outage for rule 'multi_event_correlation'");
 
         // Step 5: Even though we send the third event, the window has expired
         String thirdEvent = createEvent("{\"sensu\":{\"storage\":{\"percent\":97}}}");
