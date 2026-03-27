@@ -46,6 +46,16 @@ jobs:
           annotations-prefix: ${{ runner.os }}-${{ matrix.java-version }}/${{ matrix.maven-version }}
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
+      - name: Build for PostgreSQL HA tests
+        run: |
+          cd kiegroup_drools-ansible-rulebook-integration
+          mvn --batch-mode --update-snapshots install -DskipTests
+
+      - name: Verify HA with PostgreSQL
+        run: |
+          cd kiegroup_drools-ansible-rulebook-integration/drools-ansible-rulebook-integration-ha
+          mvn --batch-mode --update-snapshots verify -Dtest.db.type=postgres
+
   memory-leak-test:
     name: Memory Leak Test
     runs-on: ubuntu-latest
