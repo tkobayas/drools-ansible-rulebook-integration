@@ -53,7 +53,7 @@
       <plugin>
         <artifactId>maven-shade-plugin</artifactId>
         <configuration>
-          <finalName>${project.artifactId}-${project.version}-HA</finalName>
+          <shadedArtifactAttached>true</shadedArtifactAttached>
           <minimizeJar>true</minimizeJar>
           <filters> <!-- since shading ecj (a transitive dependency), erase signatures see https://docs.oracle.com/en-us/iaas/data-flow/data-flow-tutorial/develop-apps-locally/create-fat-jars.htm -->
             <filter>
@@ -105,6 +105,7 @@
               <goal>shade</goal>
             </goals>
             <configuration>
+              <shadedClassifierName>HA</shadedClassifierName>
               <transformers>
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
               </transformers>
