@@ -47,7 +47,7 @@ public class PostgreSQLSchema {
                         + "id BIGSERIAL PRIMARY KEY, "
                         + "ha_uuid VARCHAR(255) NOT NULL, "
                         + "rule_set_name VARCHAR(255) NOT NULL, "
-                        + "rulebook_hash VARCHAR(64), "
+                        + "rulebook_hash VARCHAR(64) NOT NULL, "
                         + "partial_matching_events TEXT, "
                         + "processed_event_ids TEXT, "
                         + "persisted_time TIMESTAMP, "
@@ -171,7 +171,8 @@ public class PostgreSQLSchema {
                 stmt.execute("ALTER TABLE " + SESSION_STATE + " DROP COLUMN IF EXISTS version");
                 // Step 3: Add new unique constraint (idempotent via CREATE UNIQUE INDEX IF NOT EXISTS)
                 stmt.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_session_state_ha_ruleset ON " + SESSION_STATE + " (ha_uuid, rule_set_name)");
-                // Step 4: current_state_sha is required for all persisted state
+                // Step 4: rulebook_hash and current_state_sha are required for all persisted state
+                stmt.execute("ALTER TABLE " + SESSION_STATE + " ALTER COLUMN rulebook_hash SET NOT NULL");
                 stmt.execute("ALTER TABLE " + SESSION_STATE + " ALTER COLUMN current_state_sha SET NOT NULL");
 
                 conn.commit();

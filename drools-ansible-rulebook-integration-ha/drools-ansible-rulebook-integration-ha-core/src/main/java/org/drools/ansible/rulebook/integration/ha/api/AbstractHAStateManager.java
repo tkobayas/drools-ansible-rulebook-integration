@@ -143,6 +143,9 @@ public abstract class AbstractHAStateManager implements HAStateManager {
         if (sessionState.getRuleSetName() == null) {
             throw new IllegalArgumentException("SessionState.ruleSetName must be set");
         }
+        if (sessionState.getRulebookHash() == null || sessionState.getRulebookHash().isEmpty()) {
+            throw new IllegalArgumentException("SessionState.rulebookHash must be set");
+        }
         if (sessionState.getCreatedTime() <= 0) {
             throw new IllegalArgumentException("SessionState.createdTime must be > 0");
         }

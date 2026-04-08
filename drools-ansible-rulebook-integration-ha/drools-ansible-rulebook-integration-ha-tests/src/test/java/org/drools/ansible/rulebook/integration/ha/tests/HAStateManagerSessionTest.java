@@ -297,6 +297,26 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
     }
 
     @Test
+    void testPersistSessionStateRejectsMissingRulebookHash() {
+        stateManager.enableLeader();
+
+        SessionState sessionState = new SessionState();
+        sessionState.setHaUuid(HA_UUID);
+        sessionState.setRuleSetName(RULE_SET_NAME);
+        sessionState.setLeaderId(LEADER_ID);
+        sessionState.setPartialEvents(List.of());
+
+        long now = System.currentTimeMillis();
+        sessionState.setCreatedTime(now);
+        sessionState.setPersistedTime(now);
+        sessionState.setCurrentStateSHA(calculateStateSHA(sessionState));
+
+        assertThatThrownBy(() -> stateManager.persistSessionState(sessionState))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("rulebookHash");
+    }
+
+    @Test
     void testPersistSessionStateRejectsNonPositiveCreatedTime() {
         stateManager.enableLeader();
 
