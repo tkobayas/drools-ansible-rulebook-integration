@@ -468,8 +468,9 @@ public abstract class AbstractHAStateManager implements HAStateManager {
 
         String storedSHA = sessionState.getCurrentStateSHA();
         if (storedSHA == null) {
-            LOG.warn("SessionState has no SHA - cannot verify integrity for {}", sessionState.getRuleSetName());
-            return true;  // Allow states without SHA (e.g., old persisted states before this feature)
+            LOG.error("SessionState integrity check FAILED! Missing SHA for {}", sessionState.getRuleSetName());
+            throw new IllegalStateException("SessionState integrity check failed: missing SHA for "
+                    + sessionState.getRuleSetName());
         }
 
         // Recalculate SHA from content

@@ -41,7 +41,7 @@ public class H2Schema {
                         + "partial_matching_events CLOB, "
                         + "processed_event_ids CLOB, "
                         + "persisted_time TIMESTAMP, "
-                        + "current_state_sha VARCHAR(64), "
+                        + "current_state_sha VARCHAR(64) NOT NULL, "
                         + "created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
                         + "leader_id VARCHAR(255), "
                         + "metadata CLOB DEFAULT '{}', "
@@ -176,6 +176,8 @@ public class H2Schema {
                 } catch (SQLException e) {
                     // Ignore — constraint may already exist
                 }
+
+                stmt.execute("ALTER TABLE " + SESSION_STATE + " ALTER COLUMN current_state_sha SET NOT NULL");
 
                 conn.commit();
                 logger.debug("H2 schema migration completed");

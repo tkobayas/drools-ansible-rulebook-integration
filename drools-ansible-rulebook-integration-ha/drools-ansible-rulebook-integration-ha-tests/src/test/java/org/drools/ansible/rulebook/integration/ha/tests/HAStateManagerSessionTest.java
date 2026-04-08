@@ -340,6 +340,22 @@ class HAStateManagerSessionTest extends HAStateManagerTestBase {
     }
 
     @Test
+    void testVerifySessionStateFailsFastOnMissingSha() {
+        SessionState sessionState = new SessionState();
+        sessionState.setHaUuid(HA_UUID);
+        sessionState.setRuleSetName(RULE_SET_NAME);
+        sessionState.setLeaderId(LEADER_ID);
+        sessionState.setRulebookHash("rulebook-sha-001");
+        long now = System.currentTimeMillis();
+        sessionState.setCreatedTime(now);
+        sessionState.setPersistedTime(now);
+
+        assertThatThrownBy(() -> stateManager.verifySessionState(sessionState))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("missing SHA");
+    }
+
+    @Test
     void testMultipleRuleSetsPersistIndependently() {
         stateManager.enableLeader();
 
