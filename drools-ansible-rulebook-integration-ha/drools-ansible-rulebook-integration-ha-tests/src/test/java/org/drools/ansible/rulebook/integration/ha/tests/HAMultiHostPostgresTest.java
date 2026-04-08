@@ -13,6 +13,7 @@ import java.util.logging.Logger;
 
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManager;
 import org.drools.ansible.rulebook.integration.ha.api.HAStateManagerFactory;
+import org.drools.ansible.rulebook.integration.ha.api.HAUtils;
 import org.drools.ansible.rulebook.integration.ha.model.MatchingEvent;
 import org.drools.ansible.rulebook.integration.ha.model.SessionState;
 import org.junit.jupiter.api.AfterEach;
@@ -240,7 +241,10 @@ class HAMultiHostPostgresTest {
         ss.setRuleSetName("multihost-ruleset");
         ss.setRulebookHash("abc123");
         ss.setLeaderId(WORKER_NAME);
-        ss.setCurrentStateSHA("sha-000");
+        long now = System.currentTimeMillis();
+        ss.setCreatedTime(now);
+        ss.setPersistedTime(now);
+        ss.setCurrentStateSHA(HAUtils.calculateStateSHA(ss));
         stateManager.persistSessionState(ss);
 
         // Read it back

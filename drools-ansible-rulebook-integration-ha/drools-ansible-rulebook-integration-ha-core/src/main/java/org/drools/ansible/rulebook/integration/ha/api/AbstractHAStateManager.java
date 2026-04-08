@@ -133,6 +133,32 @@ public abstract class AbstractHAStateManager implements HAStateManager {
         metadata.put(DROOLS_VERSION_KEY, DROOLS_VERSION);
     }
 
+    protected final void validateSessionStateForPersist(SessionState sessionState, boolean isLeader) {
+        if (!isLeader) {
+            throw new IllegalStateException("Cannot persist SessionState - not leader");
+        }
+        if (sessionState == null) {
+            throw new IllegalArgumentException("SessionState must not be null");
+        }
+        if (sessionState.getRuleSetName() == null) {
+            throw new IllegalArgumentException("SessionState.ruleSetName must be set");
+        }
+        if (sessionState.getCreatedTime() <= 0) {
+            throw new IllegalArgumentException("SessionState.createdTime must be > 0");
+        }
+
+        String currentStateSHA = sessionState.getCurrentStateSHA();
+        if (currentStateSHA == null || currentStateSHA.isEmpty()) {
+            throw new IllegalArgumentException("SessionState.currentStateSHA must be set");
+        }
+
+        String recalculatedSHA = HAUtils.calculateStateSHA(sessionState);
+        if (!currentStateSHA.equals(recalculatedSHA)) {
+            throw new IllegalArgumentException(
+                    "SessionState.currentStateSHA does not match calculated state SHA");
+        }
+    }
+
     @Override
     public RulesExecutor recoverSession(String rulesetString, SessionState sessionState, long currentTimeAtNewNode) {
         return HARulesExecutorFactory.createRulesExecutorWithRecovery(rulesetString, rulesExecutor -> {
@@ -456,6 +482,7 @@ public abstract class AbstractHAStateManager implements HAStateManager {
                       storedSHA, recalculatedSHA);
             LOG.error("SessionState may be corrupted or tampered. RuleSetName: {}, HaUuid: {}",
                       sessionState.getRuleSetName(), sessionState.getHaUuid());
+            throw new IllegalStateException("SessionState integrity check failed for " + sessionState.getRuleSetName());
         } else {
             LOG.debug("SessionState integrity check passed for {}", sessionState.getRuleSetName());
         }

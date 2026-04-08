@@ -519,9 +519,7 @@ public class AstRulesEngine implements Closeable {
         }
 
         // Verify integrity
-        if (!haStateManager.verifySessionState(persistedSessionState)) {
-            logger.error("Continuing with potentially corrupted SessionState for {}", rulesetName);
-        }
+        haStateManager.verifySessionState(persistedSessionState);
 
         // Check if ruleset has been updated
         String localHash = sha256(((HARulesExecutor) executor).getRulesetString());
