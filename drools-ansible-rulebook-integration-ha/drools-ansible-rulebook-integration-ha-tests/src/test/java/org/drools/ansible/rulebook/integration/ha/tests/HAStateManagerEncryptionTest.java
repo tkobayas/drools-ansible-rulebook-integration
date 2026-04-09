@@ -82,6 +82,7 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
         SessionState state = new SessionState();
         state.setHaUuid(haUuid);
         state.setRuleSetName(RULE_SET_NAME);
+        state.setRulebookHash("rulebook-hash-encryption");
         state.setPartialEvents(List.of(
                 new EventRecord("{\"temperature\": 35}", System.currentTimeMillis(), EventRecord.RecordType.EVENT)));
         long now = System.currentTimeMillis();
@@ -158,6 +159,7 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
         SessionState state = new SessionState();
         state.setHaUuid(haUuid);
         state.setRuleSetName(RULE_SET_NAME);
+        state.setRulebookHash("rulebook-hash-encryption");
         state.setPartialEvents(List.of(
                 new EventRecord("{\"data\": \"secret\"}", System.currentTimeMillis(), EventRecord.RecordType.EVENT)));
         long now = System.currentTimeMillis();
@@ -219,6 +221,7 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
         SessionState state = new SessionState();
         state.setHaUuid(haUuid);
         state.setRuleSetName(RULE_SET_NAME);
+        state.setRulebookHash("rulebook-hash-encryption");
         state.setPartialEvents(List.of(
                 new EventRecord("{\"temp\": 25}", System.currentTimeMillis(), EventRecord.RecordType.EVENT)));
         long now = System.currentTimeMillis();
@@ -240,6 +243,7 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
         SessionState state = new SessionState();
         state.setHaUuid(haUuid);
         state.setRuleSetName(RULE_SET_NAME);
+        state.setRulebookHash("rulebook-hash-encryption");
         state.setPartialEvents(List.of(
                 new EventRecord("{\"old\": \"data\"}", System.currentTimeMillis(), EventRecord.RecordType.EVENT)));
         long now = System.currentTimeMillis();
@@ -283,6 +287,7 @@ class HAStateManagerEncryptionTest extends HAStateManagerTestBase {
         SessionState state = new SessionState();
         state.setHaUuid(haUuid);
         state.setRuleSetName(RULE_SET_NAME);
+        state.setRulebookHash("rulebook-hash-encryption");
         state.setPartialEvents(List.of(
                 new EventRecord("{\"i\": 1}", System.currentTimeMillis(), EventRecord.RecordType.EVENT)));
         long now = System.currentTimeMillis();
