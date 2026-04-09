@@ -348,6 +348,7 @@ class HAPostgresSSLTest {
         SessionState sessionState = new SessionState();
         sessionState.setHaUuid(haUuid);
         sessionState.setRuleSetName(RULE_SET_NAME);
+        sessionState.setRulebookHash("rulebook-hash-ssl-test");
         long now = System.currentTimeMillis();
         sessionState.setCreatedTime(now);
         sessionState.setPersistedTime(now);
