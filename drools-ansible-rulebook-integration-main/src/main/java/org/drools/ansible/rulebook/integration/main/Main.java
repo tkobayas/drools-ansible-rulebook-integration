@@ -50,6 +50,7 @@ public class Main {
     public static void main(String[] args) throws InterruptedException {
         boolean haEnabled = false;
         String haDbParamsJson = null;
+        String haConfigJson = null;
         String haUuid = null;
         boolean failoverRecovery = false;
         List<String> positionalArgs = new ArrayList<>();
@@ -62,6 +63,14 @@ public class Main {
                     haDbParamsJson = args[++i];
                 } else {
                     System.err.println("ERROR: --ha-db-params requires a JSON argument");
+                    System.exit(1);
+                }
+            } else if ("--ha-config".equals(args[i])) {
+                haEnabled = true;
+                if (i + 1 < args.length) {
+                    haConfigJson = args[++i];
+                } else {
+                    System.err.println("ERROR: --ha-config requires a JSON argument");
                     System.exit(1);
                 }
             } else if ("--ha-uuid".equals(args[i])) {
@@ -79,7 +88,7 @@ public class Main {
             }
         }
         String jsonFile = positionalArgs.isEmpty() ? DEFAULT_JSON : positionalArgs.get(0);
-        parallelExecute(jsonFile, haEnabled, haDbParamsJson, haUuid, failoverRecovery);
+        parallelExecute(jsonFile, haEnabled, haDbParamsJson, haConfigJson, haUuid, failoverRecovery);
 
         // for test script convenience, print the information about the execution to STDERR
         StringBuilder sb = new StringBuilder();
@@ -98,12 +107,12 @@ public class Main {
         System.err.println(sb.toString());
     }
 
-    private static void parallelExecute(String jsonFile, boolean haEnabled, String haDbParamsJson, String haUuid, boolean failoverRecovery) throws InterruptedException {
+    private static void parallelExecute(String jsonFile, boolean haEnabled, String haDbParamsJson, String haConfigJson, String haUuid, boolean failoverRecovery) throws InterruptedException {
         ExecutorService executor = Executors.newFixedThreadPool(THREADS_NR);
 
         for (int n = 0; n < THREADS_NR; n++) {
             executor.execute(() -> {
-                ExecuteResult result = execute(jsonFile, haEnabled, haDbParamsJson, haUuid, failoverRecovery);
+                ExecuteResult result = execute(jsonFile, haEnabled, haDbParamsJson, haConfigJson, haUuid, failoverRecovery);
                 LOGGER.info("Executed in " + result.getDuration() + " msecs");
             });
         }
@@ -118,10 +127,10 @@ public class Main {
     }
 
     public static ExecuteResult execute(String jsonFile) {
-        return execute(jsonFile, false, null, null, false);
+        return execute(jsonFile, false, null, null, null, false);
     }
 
-    public static ExecuteResult execute(String jsonFile, boolean haEnabled, String haDbParamsJson, String haUuid, boolean failoverRecovery) {
+    public static ExecuteResult execute(String jsonFile, boolean haEnabled, String haDbParamsJson, String haConfigJson, String haUuid, boolean failoverRecovery) {
         if (haEnabled && haDbParamsJson == null) {
             cleanH2Files();
         }
@@ -134,11 +143,11 @@ public class Main {
             RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, JSON_OF_JSONRULESET);
 
             if (failoverRecovery) {
-                return executeHAFailoverRecovery(engine, rulesSet, JSON_OF_JSONRULESET, haDbParamsJson, haUuid);
+                return executeHAFailoverRecovery(engine, rulesSet, JSON_OF_JSONRULESET, haDbParamsJson, haConfigJson, haUuid);
             }
 
             if (haEnabled) {
-                return executeHA(engine, rulesSet, JSON_OF_JSONRULESET, payload, haDbParamsJson, haUuid);
+                return executeHA(engine, rulesSet, JSON_OF_JSONRULESET, payload, haDbParamsJson, haConfigJson, haUuid);
             }
 
             // Non-HA path (original)
@@ -172,11 +181,11 @@ public class Main {
         }
     }
 
-    private static ExecuteResult executeHA(AstRulesEngine engine, RulesSet rulesSet, String rulesetJson, Payload payload, String customDbParamsJson, String customHaUuid) {
+    private static ExecuteResult executeHA(AstRulesEngine engine, RulesSet rulesSet, String rulesetJson, Payload payload, String customDbParamsJson, String customHaConfigJson, String customHaUuid) {
         // 1. Initialize HA (also calls allowAsync() internally)
         String haUuid = customHaUuid != null ? customHaUuid : "loadtest-ha-" + System.currentTimeMillis();
         String dbParamsJson = customDbParamsJson != null ? customDbParamsJson : "{\"db_type\":\"h2\",\"db_file_path\":\"./target/loadtest_ha_db\"}";
-        String configJson = "{\"write_after\":1}";
+        String configJson = customHaConfigJson != null ? customHaConfigJson : "{\"write_after\":1}";
         engine.initializeHA(haUuid, "loadtest-worker", dbParamsJson, configJson);
 
         // 2. Create ruleset with rulesetString (required for HA session recovery)
@@ -230,7 +239,7 @@ public class Main {
         }
     }
 
-    private static ExecuteResult executeHAFailoverRecovery(AstRulesEngine engine, RulesSet rulesSet, String rulesetJson, String customDbParamsJson, String haUuid) {
+    private static ExecuteResult executeHAFailoverRecovery(AstRulesEngine engine, RulesSet rulesSet, String rulesetJson, String customDbParamsJson, String customHaConfigJson, String haUuid) {
         if (haUuid == null) {
             throw new IllegalArgumentException("--ha-uuid is required for --failover-recovery mode");
         }
@@ -239,7 +248,7 @@ public class Main {
         }
 
         // 1. Initialize HA with the same UUID as the loading node
-        String configJson = "{\"write_after\":1}";
+        String configJson = customHaConfigJson != null ? customHaConfigJson : "{\"write_after\":1}";
         engine.initializeHA(haUuid, "recovery-worker", customDbParamsJson, configJson);
 
         // 2. Create ruleset (required for recovery to rebuild KieSession)
