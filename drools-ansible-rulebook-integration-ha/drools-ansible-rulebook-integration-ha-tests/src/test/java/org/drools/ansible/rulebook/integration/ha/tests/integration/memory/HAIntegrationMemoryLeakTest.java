@@ -1,9 +1,5 @@
 package org.drools.ansible.rulebook.integration.ha.tests.integration.memory;
 
-import org.drools.ansible.rulebook.integration.ha.tests.support.TestUtils;
-
-import org.drools.ansible.rulebook.integration.ha.tests.support.AbstractHATestBase;
-
 import java.io.IOException;
 import java.net.Socket;
 import java.util.List;
@@ -12,6 +8,7 @@ import java.util.Map;
 import org.drools.ansible.rulebook.integration.api.RuleConfigurationOption;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 import org.drools.ansible.rulebook.integration.core.jpy.AstRulesEngine;
+import org.drools.ansible.rulebook.integration.ha.tests.support.AbstractHATestBase;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
