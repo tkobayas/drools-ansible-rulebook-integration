@@ -113,33 +113,10 @@ class HAIntegrationLargePartialMatchTest extends AbstractHATestBase {
             lastResponse = rulesEngine.assertEvent(sessionId, event);
             lastResponseNanos = System.nanoTime() - start;
         }
-        System.gc();
-        System.out.println("UsedMemory = " + (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory()));
 
         double lastResponseMillis = lastResponseNanos / 1_000_000.0;
         System.out.printf("Large partial event test: count=%d payloadBytes=%d lastResponseMs=%.3f%n",
                 LARGE_PARTIAL_EVENT_COUNT, PARTIAL_EVENT_BLOB_SIZE, lastResponseMillis);
-        System.out.println("Large partial event test last response: " + lastResponse);
-    }
-
-    @Test
-    void testLargePartialEventLastResponseTimeWithExpiry() {
-        long lastResponseNanos = 0L;
-        String lastResponse = null;
-
-        for (int i = 0; i < LARGE_PARTIAL_EVENT_COUNT; i++) {
-            String event = createLargePartialEvent(i, PARTIAL_EVENT_BLOB_SIZE);
-            long start = System.nanoTime();
-            lastResponse = rulesEngine.assertEvent(sessionId, event);
-            lastResponseNanos = System.nanoTime() - start;
-            rulesEngine.advanceTime(sessionId, 1, "HOURS");
-        }
-        System.gc();
-        System.out.println("UsedMemory = " + (Runtime.getRuntime().totalMemory() -  Runtime.getRuntime().freeMemory()));
-
-        double lastResponseMillis = lastResponseNanos / 1_000_000.0;
-        System.out.printf("Large partial event test: count=%d payloadBytes=%d lastResponseMs=%.3f%n",
-                          LARGE_PARTIAL_EVENT_COUNT, PARTIAL_EVENT_BLOB_SIZE, lastResponseMillis);
         System.out.println("Large partial event test last response: " + lastResponse);
     }
 

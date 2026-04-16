@@ -1,5 +1,7 @@
 package org.drools.ansible.rulebook.integration.ha.tests.support;
 
+import org.drools.ansible.rulebook.integration.ha.tests.support.TestUtils;
+
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
