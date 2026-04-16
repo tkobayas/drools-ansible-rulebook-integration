@@ -109,9 +109,7 @@ public class Main {
         }
 
         executor.shutdown();
-        while (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
-            LOGGER.info("Load test still running after waiting 60 seconds; continuing to wait for completion");
-        }
+        executor.awaitTermination(300, TimeUnit.SECONDS);
 
         if (foundError) {
             System.err.println("ERROR FOUND!!! Check above logs");
