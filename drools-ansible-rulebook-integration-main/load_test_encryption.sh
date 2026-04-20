@@ -2,8 +2,7 @@
 
 # Usage: ./load_test_encryption.sh [100|500|1k]
 #
-# Measures HA PostgreSQL encryption overhead on the same temporal once_within
-# workload used by load_test_temporal.sh.
+# Measures HA PostgreSQL encryption overhead on the 24 KB event workload.
 # Runs the workload twice:
 #   1. HA encryption OFF
 #   2. HA encryption ON
@@ -32,7 +31,14 @@ case "$size" in
     ;;
 esac
 
-test_file="once_within_${size}_events.json"
+test_file="24kb_${size}_events.json"
+
+if [ ! -f "src/main/resources/${test_file}" ]; then
+  echo "ERROR: Test fixture not found: src/main/resources/${test_file}"
+  echo "Available 24kb fixtures:"
+  ls -1 src/main/resources/24kb_*_events.json 2>/dev/null || true
+  exit 1
+fi
 
 out="result_encryption_${size}.txt"
 LOG="out_encryption.log"
@@ -144,7 +150,7 @@ pg_truncate() {
 plain_config='{"write_after":1}'
 encrypted_config="{\"write_after\":1,\"encryption_key_primary\":\"${ENCRYPTION_KEY}\"}"
 
-header=$(printf "=== HA Encryption Load Test (once_within, size=%s) ===" "$size")
+header=$(printf "=== HA Encryption Load Test (24kb, size=%s) ===" "$size")
 table_header=$(printf "\n%-14s %14s %9s %10s %10s %10s %16s" "Mode" "Memory(bytes)" "Time(ms)" "SESSION" "MATCHING" "ACTION" "PayloadBytes")
 separator=$(printf "%s" "$(head -c 101 < /dev/zero | tr '\0' '-')")
 
