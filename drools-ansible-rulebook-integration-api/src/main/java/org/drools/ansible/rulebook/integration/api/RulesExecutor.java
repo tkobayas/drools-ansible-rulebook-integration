@@ -24,13 +24,17 @@ public class RulesExecutor {
 
     protected static final Logger log = LoggerFactory.getLogger(RulesExecutor.class);
 
-    private final RulesEvaluator rulesEvaluator;
+    protected final RulesEvaluator rulesEvaluator;
 
     RulesExecutor(RulesExecutorSession rulesExecutorSession, boolean async) {
         this.rulesEvaluator = RulesEvaluator.createRulesEvaluator(rulesExecutorSession, async);
     }
 
-    void startAutomaticPseudoClock(long period, TimeUnit unit) {
+    protected RulesExecutor(RulesEvaluator rulesEvaluator) {
+        this.rulesEvaluator = rulesEvaluator;
+    }
+
+    public void startAutomaticPseudoClock(long period, TimeUnit unit) {
         this.rulesEvaluator.startAutomaticPseudoClock(period, unit);
     }
 
@@ -44,6 +48,10 @@ public class RulesExecutor {
 
     public long getId() {
         return rulesEvaluator.getSessionId();
+    }
+
+    public String getRuleSetName() {
+        return rulesEvaluator.getRuleSetName();
     }
 
     public SessionStats getSessionStats() {
@@ -99,6 +107,7 @@ public class RulesExecutor {
     }
 
     public CompletableFuture<List<Match>> advanceTime(long amount, TimeUnit unit ) {
+        log.debug("Advancing time by {} {}", amount, unit);
         return rulesEvaluator.advanceTime(amount, unit );
     }
 

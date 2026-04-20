@@ -18,15 +18,16 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 import static org.drools.ansible.rulebook.integration.api.RuleConfigurationOption.*;
 
 public class RulesExecutorFactory {
     private static final Logger LOG = LoggerFactory.getLogger(RulesExecutorFactory.class);
 
-    private static final AtomicLong ID_GENERATOR = new AtomicLong(1);
+    protected static final AtomicLong ID_GENERATOR = new AtomicLong(1);
 
-    static final long DEFAULT_AUTOMATIC_TICK_PERIOD_IN_MILLIS = 100; // 100 milliseconds
+    protected static final long DEFAULT_AUTOMATIC_TICK_PERIOD_IN_MILLIS = 100; // 100 milliseconds
 
     public static RulesExecutor createFromYaml(String yaml) {
         return createFromYaml(RuleNotation.CoreNotation.INSTANCE, yaml);
@@ -50,6 +51,11 @@ public class RulesExecutorFactory {
 
     public static RulesExecutor createRulesExecutor(RulesSet rulesSet) {
         RulesExecutor rulesExecutor = new RulesExecutor(createRulesExecutorSession(rulesSet), rulesSet.hasOption(ASYNC_EVALUATION));
+        configurePseudoClock(rulesSet, rulesExecutor);
+        return rulesExecutor;
+    }
+
+    protected static void configurePseudoClock(RulesSet rulesSet, RulesExecutor rulesExecutor) {
         if (!rulesSet.hasOption(FULLY_MANUAL_PSEUDOCLOCK)) {
             if (rulesSet.getClockPeriod() != null) {
                 rulesExecutor.startAutomaticPseudoClock(rulesSet.getClockPeriod().getAmount(), rulesSet.getClockPeriod().getTimeUnit());
@@ -59,7 +65,6 @@ public class RulesExecutorFactory {
         } else {
             LOG.info("No automatic advance of internal pseudo-clock since option {} was detected", FULLY_MANUAL_PSEUDOCLOCK);
         }
-        return rulesExecutor;
     }
 
     private static RulesExecutorSession createRulesExecutorSession(RulesSet rulesSet) {
@@ -68,7 +73,7 @@ public class RulesExecutorFactory {
         return new RulesExecutorSession(rulesSet, kieSession, rulesExecutionController, ID_GENERATOR.getAndIncrement());
     }
 
-    private static KieSession createKieSession(RulesSet rulesSet, RulesExecutionController rulesExecutionController) {
+    protected static KieSession createKieSession(RulesSet rulesSet, RulesExecutionController rulesExecutionController) {
         Model model = rulesSet.toExecModel(rulesExecutionController);
         KieBase kieBase = KieBaseBuilder.createKieBaseFromModel( model, KieBaseMutabilityOption.DISABLED, EventProcessingOption.STREAM );
         KieSessionConfiguration conf = KieServices.get().newKieSessionConfiguration();

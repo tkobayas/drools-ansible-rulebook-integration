@@ -14,6 +14,8 @@ public interface RulesEvaluator {
 
     long getSessionId();
 
+    String getRuleSetName();
+
     int rulesCount();
 
     Collection<?> getAllFacts();

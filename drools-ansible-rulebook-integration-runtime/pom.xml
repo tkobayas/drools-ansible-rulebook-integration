@@ -30,6 +30,22 @@
       <scope>test</scope>
       <classifier>tests</classifier>
     </dependency>
+    <dependency>
+      <groupId>org.drools</groupId>
+      <artifactId>drools-ansible-rulebook-integration-ha-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.drools</groupId>
+      <artifactId>drools-ansible-rulebook-integration-ha-h2</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.drools</groupId>
+      <artifactId>drools-ansible-rulebook-integration-ha-postgres</artifactId>
+      <version>${project.version}</version>
+    </dependency>
   </dependencies>
 
   <build>
@@ -37,6 +53,7 @@
       <plugin>
         <artifactId>maven-shade-plugin</artifactId>
         <configuration>
+          <finalName>${project.artifactId}-${project.version}-HA</finalName>
           <minimizeJar>true</minimizeJar>
           <filters> <!-- since shading ecj (a transitive dependency), erase signatures see https://docs.oracle.com/en-us/iaas/data-flow/data-flow-tutorial/develop-apps-locally/create-fat-jars.htm -->
             <filter>
@@ -47,6 +64,38 @@
                   <exclude>META-INF/*.RSA</exclude>
             </excludes>
             </filter>
+            <!-- Include H2 and PostgreSQL state managers loaded via reflection -->
+            <filter>
+              <artifact>org.drools:drools-ansible-rulebook-integration-ha-h2</artifact>
+              <includes>
+                <include>**</include>
+              </includes>
+            </filter>
+            <filter>
+              <artifact>com.h2database:h2</artifact>
+              <includes>
+                <include>**</include>
+              </includes>
+            </filter>
+            <filter>
+              <artifact>org.drools:drools-ansible-rulebook-integration-ha-postgres</artifact>
+              <includes>
+                <include>**</include>
+              </includes>
+            </filter>
+            <filter>
+              <artifact>org.postgresql:postgresql</artifact>
+              <includes>
+                <include>**</include>
+              </includes>
+            </filter>
+            <!-- BouncyCastle crypto provider classes are loaded via reflection -->
+            <filter>
+              <artifact>org.bouncycastle:*</artifact>
+              <includes>
+                <include>**</include>
+              </includes>
+            </filter>
           </filters>
         </configuration>
         <executions>
@@ -55,6 +104,11 @@
             <goals>
               <goal>shade</goal>
             </goals>
+            <configuration>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+              </transformers>
+            </configuration>
           </execution>
         </executions>
       </plugin>
