@@ -76,7 +76,7 @@ public final class PayloadGenerator {
 
         Map<String, Object> event = buildEvent();
 
-        for (String size : List.of("1k", "10k", "100k", "1m")) {
+        for (String size : List.of("1k", "5k", "10k", "100k", "1m")) {
             int repeatCount = sizeToRepeatCount(size);
             write(resourcesDir.resolve("24kb_" + size + "_events.json"),
                     matchRuleset("24kb " + size + " events", event, repeatCount));
@@ -96,6 +96,7 @@ public final class PayloadGenerator {
     private static int sizeToRepeatCount(String size) {
         switch (size) {
             case "1k":   return 1_000;
+            case "5k":   return 5_000;
             case "10k":  return 10_000;
             case "100k": return 100_000;
             case "1m":   return 1_000_000;
