@@ -10,11 +10,11 @@ public final class Measurement {
 
     private Measurement() {}
 
-    public static TimedResult timeWork(Supplier<List<Map>> work) {
+    public static TimedResult timeWork(Supplier<Payload.Execution> work) {
         Instant start = Instant.now();
-        List<Map> matches = work.get();
+        Payload.Execution execution = work.get();
         long durationMs = Duration.between(start, Instant.now()).toMillis();
-        return new TimedResult(matches, durationMs);
+        return new TimedResult(execution.matches, execution.matchCount, durationMs);
     }
 
     public static long captureUsedMemoryAfterGc() {
@@ -32,10 +32,12 @@ public final class Measurement {
 
     public static final class TimedResult {
         public final List<Map> matches;
+        public final int matchCount;
         public final long durationMs;
 
-        public TimedResult(List<Map> matches, long durationMs) {
+        public TimedResult(List<Map> matches, int matchCount, long durationMs) {
             this.matches = matches;
+            this.matchCount = matchCount;
             this.durationMs = durationMs;
         }
     }

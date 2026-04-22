@@ -116,10 +116,20 @@ public class Payload {
         return new PayloadRunner(this, engine, sessionId);
     }
 
-    public List<Map> execute(AstRulesEngine engine, long sessionId) {
+    public Execution execute(AstRulesEngine engine, long sessionId) {
         PayloadRunner payloadRunner = new PayloadRunner(this, engine, sessionId);
         payloadRunner.run();
-        return payloadRunner.getReturnedMatches();
+        return new Execution(payloadRunner.getReturnedMatches(), payloadRunner.getMatchCount());
+    }
+
+    public static final class Execution {
+        public final List<Map> matches;
+        public final int matchCount;
+
+        public Execution(List<Map> matches, int matchCount) {
+            this.matches = matches;
+            this.matchCount = matchCount;
+        }
     }
 
     public static class PayloadRunner implements Runnable {
@@ -131,6 +141,8 @@ public class Payload {
         private final long sessionId;
 
         private List<Map> returnedMatches = new ArrayList<>();
+
+        private int matchCount = 0;
 
         private PayloadRunner(Payload payload, AstRulesEngine engine, long sessionId) {
             this.payload = payload;
@@ -152,8 +164,10 @@ public class Payload {
             for (int i = 0; i < payload.loopCount; i++) {
                 for (String p : payload.list) {
                     String resultJson = engine.assertEvent(sessionId, injectMetaUuid(p));
+                    List<Map<String, Object>> parsed = JsonMapper.readValueAsListOfMapOfStringAndObject(resultJson);
+                    matchCount += parsed.size();
                     if (!payload.discardMatchedEvents) {
-                        returnedMatches.addAll(JsonMapper.readValueAsListOfMapOfStringAndObject(resultJson));
+                        returnedMatches.addAll(parsed);
                     }
                     sleepSeconds(payload.eventDelay);
                 }
@@ -179,6 +193,10 @@ public class Payload {
 
         public List<Map> getReturnedMatches() {
             return returnedMatches;
+        }
+
+        public int getMatchCount() {
+            return matchCount;
         }
     }
 }

@@ -19,9 +19,10 @@ class MeasurementTest {
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
-            return stubMatches;
+            return new Payload.Execution(stubMatches, stubMatches.size());
         });
         assertThat(t.matches).isSameAs(stubMatches);
+        assertThat(t.matchCount).isEqualTo(1);
         assertThat(t.durationMs).isGreaterThanOrEqualTo(0L);
     }
 
