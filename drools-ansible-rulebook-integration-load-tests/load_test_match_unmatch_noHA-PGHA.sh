@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Usage: ./load_test_match_unmatch_HA.sh
+# Usage: ./load_test_match_unmatch_noHA-PGHA.sh
 #
 # Loops 3 sizes x {match, unmatch} x {noHA, HA-PG} = 12 runs.
 # Sizes capped at 10k because HA-PG becomes prohibitively slow above that.
-# Emits one combined result_match_unmatch_HA.txt and runs MemoryLeakAnalyzer.
+# Emits one combined result_match_unmatch_noHA-PGHA.txt and runs MemoryLeakAnalyzer.
 # Requires Docker for PostgreSQL.
 
 set -euo pipefail
@@ -13,8 +13,8 @@ SIZES=("1k" "5k" "10k")
 SCENARIOS=("match" "unmatch")
 MODES=("noHA" "HA-PG")
 
-OUT="result_match_unmatch_HA.txt"
-LOG="out_match_unmatch_HA.log"
+OUT="result_match_unmatch_noHA-PGHA.txt"
+LOG="out_match_unmatch_noHA-PGHA.log"
 > "$OUT"
 > "$LOG"
 
