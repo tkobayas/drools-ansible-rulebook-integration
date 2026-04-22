@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Usage: ./load_test_all.sh
+# Usage: ./load_test_match_unmatch_HA.sh
 #
-# Loops 4 sizes x {match, unmatch} x {noHA, HA-PG} = 16 runs.
-# Emits one combined result_all.txt (metric lines) and runs MemoryLeakAnalyzer.
+# Loops 3 sizes x {match, unmatch} x {noHA, HA-PG} = 12 runs.
+# Sizes capped at 10k because HA-PG becomes prohibitively slow above that.
+# Emits one combined result_match_unmatch_HA.txt and runs MemoryLeakAnalyzer.
 # Requires Docker for PostgreSQL.
 
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 
-SIZES=("1k" "10k" "100k" "1m")
+SIZES=("1k" "5k" "10k")
 SCENARIOS=("match" "unmatch")
 MODES=("noHA" "HA-PG")
 
-OUT="result_all.txt"
-LOG="out_all.log"
+OUT="result_match_unmatch_HA.txt"
+LOG="out_match_unmatch_HA.log"
 > "$OUT"
 > "$LOG"
 
@@ -39,15 +40,13 @@ for size in "${SIZES[@]}"; do
         echo "Running $label..."
         jvm_run "$label" "$file" --ha-db-params "$PG_PARAMS"
       fi
-      # Append the metric line from this run to result_all.txt.
-      # Metric line begins with the events-json name (optionally followed by " (HA-PG)").
       echo "$_run_stderr" | grep "^${file}" | tail -1 >> "$OUT" || echo "$file (${mode}), FAILED, FAILED" >> "$OUT"
     done
   done
 done
 
 echo ""
-echo "All 16 runs complete. Result lines:"
+echo "All 12 runs complete. Result lines:"
 cat "$OUT"
 echo ""
 
