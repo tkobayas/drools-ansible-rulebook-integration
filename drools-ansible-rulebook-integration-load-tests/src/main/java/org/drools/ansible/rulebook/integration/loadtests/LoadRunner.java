@@ -25,7 +25,7 @@ public final class LoadRunner {
             });
             LOGGER.info("*** End measuring execution time, duration = {} ms", t.durationMs);
 
-            OutcomeCheck.verify(t.matches, expected, eventsJson);
+            OutcomeCheck.verify(t.matchCount, expected, eventsJson);
 
             String stats = engine.sessionStats(id);
             LOGGER.info(stats);
