@@ -180,6 +180,7 @@ public class MemoryLeakAnalyzer {
         if (name.contains("1m_")) return 1_000_000;
         if (name.contains("100k_")) return 100_000;
         if (name.contains("10k_")) return 10_000;
+        if (name.contains("5k_")) return 5_000;
         if (name.contains("1k_")) return 1_000;
         return 0;
     }
