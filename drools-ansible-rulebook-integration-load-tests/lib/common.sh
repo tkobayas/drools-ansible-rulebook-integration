@@ -151,3 +151,15 @@ fmt_per_event_kb() {
   fi
   awk "BEGIN { printf \"%.1f\", $bytes / $count / 1024 }"
 }
+
+# size_to_int <100|500|1k>
+# Echoes the integer event count for a retention/temporal size label.
+# Prints "ERR" and returns non-zero for an unknown label.
+size_to_int() {
+  case "$1" in
+    100)  echo 100 ;;
+    500)  echo 500 ;;
+    1k)   echo 1000 ;;
+    *)    echo "ERR"; return 1 ;;
+  esac
+}
