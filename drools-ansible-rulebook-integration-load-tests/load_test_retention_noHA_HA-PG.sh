@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: ./load_test_retention_noHA-PGHA.sh
+# Usage: ./load_test_retention_noHA_HA-PG.sh
 #
 # Measures memory growth when events accumulate as partial matches.
 # Uses retention_<N>_events.json (2-condition join, only condition 1 satisfied).
@@ -13,8 +13,8 @@ SIZES=("100" "500" "1k")
 FILES=("retention_100_events.json" "retention_500_events.json" "retention_1k_events.json")
 COUNTS=(100 500 1000)
 
-OUT="result_retention_noHA-PGHA.txt"
-LOG="out_retention_noHA-PGHA.log"
+OUT="result_retention_noHA_HA-PG.txt"
+LOG="out_retention_noHA_HA-PG.log"
 > "$LOG"
 
 require_jar
