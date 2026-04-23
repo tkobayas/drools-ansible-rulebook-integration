@@ -130,6 +130,10 @@ public class Payload {
             this.matches = matches;
             this.matchCount = matchCount;
         }
+
+        public static Execution empty() {
+            return new Execution(List.of(), 0);
+        }
     }
 
     public static class PayloadRunner implements Runnable {
