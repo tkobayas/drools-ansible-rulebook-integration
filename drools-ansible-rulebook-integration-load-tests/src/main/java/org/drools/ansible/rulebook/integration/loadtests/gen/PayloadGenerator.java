@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 
 /**
@@ -24,6 +25,8 @@ import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
  *       -Dexec.classpathScope=compile
  */
 public final class PayloadGenerator {
+
+    private static final ObjectMapper PRETTY_MAPPER = new ObjectMapper();
 
     private static final long SEED = 42L;
     private static final int TARGET_EVENT_BYTES = 24_000;
@@ -256,8 +259,9 @@ public final class PayloadGenerator {
     }
 
     private static void write(Path path, Map<String, Object> content) throws IOException {
-        String json = JsonMapper.toJson(List.of(content));
-        Files.writeString(path, json, StandardCharsets.UTF_8);
+        String json = PRETTY_MAPPER.writerWithDefaultPrettyPrinter()
+                .writeValueAsString(List.of(content));
+        Files.writeString(path, json + System.lineSeparator(), StandardCharsets.UTF_8);
         System.out.println("  wrote " + path + " (" + json.length() + " bytes)");
     }
 }
