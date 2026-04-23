@@ -16,7 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.drools.ansible.rulebook.integration.api.io.JsonMapper;
 
 /**
- * Generates the 11 test-event JSON files under src/main/resources/.
+ * Generates the 16 test-event JSON files under src/main/resources/.
  * Deterministic: the only randomness is a fixed-seed word shuffle used to
  * build the bulky message field. Run manually:
  *
@@ -93,7 +93,15 @@ public final class PayloadGenerator {
                     retentionRuleset("retention " + label + " events", event, n));
         }
 
-        System.out.println("Wrote 11 payload JSON files to " + resourcesDir.toAbsolutePath());
+        for (int n : new int[] { 100, 500, 1000 }) {
+            String label = n == 1000 ? "1k" : String.valueOf(n);
+            // 10 groups, N/10 iterations → N total events per file.
+            int repeatCount = n / 10;
+            write(resourcesDir.resolve("once_within_" + label + "_events.json"),
+                    temporalRuleset("once_within " + label + " events", event, repeatCount));
+        }
+
+        System.out.println("Wrote 16 payload JSON files to " + resourcesDir.toAbsolutePath());
     }
 
     private static int sizeToRepeatCount(String size) {
@@ -199,6 +207,79 @@ public final class PayloadGenerator {
                 equalsCondition("b", 1)
         );
         return buildRuleset(name, event, repeatCount, conditions, /* discardMatchedEvents= */ false);
+    }
+
+    /**
+     * Builds a once_within rule set that groups by a common event field.
+     *
+     * Shape:
+     *   - payload array: 10 entries, one per group_id 0..9
+     *   - repeat_count: repeatCount (which will be N/10 for total events = N)
+     *   - rule: AllCondition(event.i == 1), action=debug,
+     *           throttle { group_by_attributes: ["event.group_id"], once_within: "60 seconds" }
+     *   - discard_matched_events: true
+     *
+     * With 10 groups and first-event-per-group firing, MATCHING_EVENT rows
+     * stay at 10 regardless of size; what scales is per-event HA-write and
+     * suppression overhead.
+     */
+    private static Map<String, Object> temporalRuleset(String name, Map<String, Object> event, int repeatCount) {
+        List<Map<String, Object>> conditions = List.of(equalsCondition("a", 1));
+
+        LinkedHashMap<String, Object> condition = new LinkedHashMap<>();
+        condition.put("AllCondition", conditions);
+
+        LinkedHashMap<String, Object> actionBody = new LinkedHashMap<>();
+        actionBody.put("action", "debug");
+        actionBody.put("action_args", new LinkedHashMap<>());
+        LinkedHashMap<String, Object> action = new LinkedHashMap<>();
+        action.put("Action", actionBody);
+
+        LinkedHashMap<String, Object> throttle = new LinkedHashMap<>();
+        throttle.put("group_by_attributes", List.of("event.group_id"));
+        throttle.put("once_within", "60 seconds");
+
+        LinkedHashMap<String, Object> ruleBody = new LinkedHashMap<>();
+        ruleBody.put("name", "r1");
+        ruleBody.put("condition", condition);
+        ruleBody.put("action", action);
+        ruleBody.put("enabled", true);
+        ruleBody.put("throttle", throttle);
+        LinkedHashMap<String, Object> rule = new LinkedHashMap<>();
+        rule.put("Rule", ruleBody);
+
+        // Ten event templates, one per group_id 0..9. Each carries the 24KB
+        // realistic payload plus a top-level group_id field.
+        List<Map<String, Object>> templates = new ArrayList<>(10);
+        for (int g = 0; g < 10; g++) {
+            LinkedHashMap<String, Object> copy = new LinkedHashMap<>(event);
+            copy.put("group_id", g);
+            templates.add(copy);
+        }
+
+        LinkedHashMap<String, Object> sourceArgs = new LinkedHashMap<>();
+        sourceArgs.put("discard_matched_events", true);
+        sourceArgs.put("repeat_count", repeatCount);
+        sourceArgs.put("payload", templates);
+
+        LinkedHashMap<String, Object> eventSource = new LinkedHashMap<>();
+        eventSource.put("name", "generic");
+        eventSource.put("source_name", "generic");
+        eventSource.put("source_args", sourceArgs);
+        eventSource.put("source_filters", List.of());
+
+        LinkedHashMap<String, Object> sourceEntry = new LinkedHashMap<>();
+        sourceEntry.put("EventSource", eventSource);
+
+        LinkedHashMap<String, Object> ruleSet = new LinkedHashMap<>();
+        ruleSet.put("name", name);
+        ruleSet.put("hosts", List.of("all"));
+        ruleSet.put("sources", List.of(sourceEntry));
+        ruleSet.put("rules", List.of(rule));
+
+        LinkedHashMap<String, Object> wrapper = new LinkedHashMap<>();
+        wrapper.put("RuleSet", ruleSet);
+        return wrapper;
     }
 
     private static Map<String, Object> equalsCondition(String eventField, int value) {
