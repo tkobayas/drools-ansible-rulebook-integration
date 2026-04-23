@@ -22,6 +22,8 @@ public final class LoadTestMain {
 
     public static void main(String[] args) {
         String haDbParamsJson = null;
+        String haUuid = null;
+        boolean failoverRecovery = false;
         List<String> positional = new ArrayList<>();
         for (int i = 0; i < args.length; i++) {
             if ("--ha-db-params".equals(args[i])) {
@@ -30,6 +32,14 @@ public final class LoadTestMain {
                     System.exit(1);
                 }
                 haDbParamsJson = args[++i];
+            } else if ("--ha-uuid".equals(args[i])) {
+                if (i + 1 >= args.length) {
+                    System.err.println("ERROR: --ha-uuid requires a value");
+                    System.exit(1);
+                }
+                haUuid = args[++i];
+            } else if ("--failover-recovery".equals(args[i])) {
+                failoverRecovery = true;
             } else {
                 positional.add(args[i]);
             }
@@ -53,11 +63,22 @@ public final class LoadTestMain {
         RulesSet rulesSet = RuleNotation.CoreNotation.INSTANCE.toRulesSet(RuleFormat.JSON, rulesetJson);
 
         boolean haPg = haDbParamsJson != null;
-        Result result = haPg
-                ? HaLoadRunner.runLoad(rulesSet, rulesetJson, rulesSetMap, haDbParamsJson, expected, eventsJson)
-                : LoadRunner.run(rulesSet, rulesSetMap, expected, eventsJson);
+        Result result;
+        if (failoverRecovery) {
+            if (haDbParamsJson == null) {
+                throw new IllegalArgumentException("--ha-db-params is required for --failover-recovery mode");
+            }
+            if (haUuid == null) {
+                throw new IllegalArgumentException("--ha-uuid is required for --failover-recovery mode");
+            }
+            result = HaFailoverRecoveryRunner.runRecovery(rulesSet, rulesetJson, haDbParamsJson, haUuid);
+        } else if (haPg) {
+            result = HaLoadRunner.runLoad(rulesSet, rulesetJson, rulesSetMap, haDbParamsJson, expected, eventsJson, haUuid);
+        } else {
+            result = LoadRunner.run(rulesSet, rulesSetMap, expected, eventsJson);
+        }
 
-        MetricReporter.report(System.err, eventsJson, haPg, result.usedMemoryBytes, result.durationMs);
+        MetricReporter.report(System.err, eventsJson, haPg, failoverRecovery, result.usedMemoryBytes, result.durationMs);
     }
 
     private static String readRulesJson(String name) {
