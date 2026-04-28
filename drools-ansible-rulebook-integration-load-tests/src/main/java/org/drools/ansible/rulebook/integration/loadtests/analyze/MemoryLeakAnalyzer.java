@@ -4,9 +4,11 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * See spec section 5.8. Groups test results four ways
@@ -18,20 +20,23 @@ public class MemoryLeakAnalyzer {
 
     private static final double INCREASE_GROWTH_THRESHOLD = 3.0;
     private static final long ABSOLUTE_INCREASE_THRESHOLD = 50_000_000;
+    private static final double TIME_PER_EVENT_GROWTH_THRESHOLD = 2.5;
+    private static final double TOTAL_TIME_PER_EVENT_GROWTH_THRESHOLD = 4.0;
 
     public static void main(String[] args) {
-        if (args.length != 1) {
-            System.err.println("Usage: java MemoryLeakAnalyzer <result_file>");
+        CliOptions options = CliOptions.parse(args);
+        if (options == null) {
+            System.err.println("Usage: java MemoryLeakAnalyzer [--ignore-time-anomaly-group=<group>] <result_file>");
             System.exit(1);
         }
         try {
-            AnalyzeResult r = new MemoryLeakAnalyzer().analyzeFile(args[0]);
-            if (r.hasLeak || r.exceptionFound) {
-                System.err.println("\n❌ MEMORY LEAK DETECTED OR EXCEPTION FOUND!");
+            AnalyzeResult r = new MemoryLeakAnalyzer().analyzeFile(options.resultFile, options.ignoredTimeAnomalyGroups);
+            if (r.hasLeak || r.hasTimeAnomaly || r.exceptionFound) {
+                System.err.println("\n❌ MEMORY LEAK, RESPONSE-TIME ANOMALY, OR EXCEPTION FOUND!");
                 System.err.println("  Review the result file for details.\n");
                 System.exit(1);
             }
-            System.out.println("\n✅ No memory leak detected.");
+            System.out.println("\n✅ No memory leak or response-time anomaly detected.");
             System.exit(0);
         } catch (Exception e) {
             System.err.println("Error analyzing results: " + e.getMessage());
@@ -41,9 +46,13 @@ public class MemoryLeakAnalyzer {
     }
 
     public AnalyzeResult analyzeFile(String filename) throws IOException {
+        return analyzeFile(filename, Set.of());
+    }
+
+    public AnalyzeResult analyzeFile(String filename, Set<String> ignoredTimeAnomalyGroups) throws IOException {
         ParseResult pr = parseResultFile(filename);
-        boolean hasLeak = analyzeResults(pr.results);
-        return new AnalyzeResult(hasLeak, pr.exceptionFound);
+        AnalysisSummary summary = analyzeResults(pr.results, ignoredTimeAnomalyGroups);
+        return new AnalyzeResult(summary.hasLeak, summary.hasTimeAnomaly, pr.exceptionFound);
     }
 
     private ParseResult parseResultFile(String filename) throws IOException {
@@ -81,36 +90,32 @@ public class MemoryLeakAnalyzer {
         return new ParseResult(results, exceptionFound);
     }
 
-    private boolean analyzeResults(List<TestResult> results) {
+    private AnalysisSummary analyzeResults(List<TestResult> results, Set<String> ignoredTimeAnomalyGroups) {
         System.out.println("Memory Leak Analysis Report");
         System.out.println("===========================\n");
 
         Map<String, List<TestResult>> groups = new LinkedHashMap<>();
-        groups.put("match/noHA", new ArrayList<>());
-        groups.put("match/HA-PG", new ArrayList<>());
-        groups.put("unmatch/noHA", new ArrayList<>());
-        groups.put("unmatch/HA-PG", new ArrayList<>());
-
         for (TestResult r : results) {
-            boolean unmatch = r.testName.contains("unmatch");
-            boolean haPg = r.testName.contains(" (HA-PG)");
-            String key = (unmatch ? "unmatch" : "match") + "/" + (haPg ? "HA-PG" : "noHA");
-            groups.get(key).add(r);
+            groups.computeIfAbsent(groupKey(r.testName), k -> new ArrayList<>()).add(r);
         }
 
         boolean hasLeak = false;
+        boolean hasTimeAnomaly = false;
         for (Map.Entry<String, List<TestResult>> entry : groups.entrySet()) {
             List<TestResult> tests = entry.getValue();
             if (tests.isEmpty()) continue;
-            System.out.println(entry.getKey() + ":");
-            hasLeak |= analyzeTestGroup(tests);
+            String groupKey = entry.getKey();
+            System.out.println(groupKey + ":");
+            GroupAnalysis analysis = analyzeTestGroup(groupKey, tests, ignoredTimeAnomalyGroups.contains(groupKey));
+            hasLeak |= analysis.hasLeak;
+            hasTimeAnomaly |= analysis.hasTimeAnomaly;
             System.out.println();
         }
-        return hasLeak;
+        return new AnalysisSummary(hasLeak, hasTimeAnomaly);
     }
 
-    private boolean analyzeTestGroup(List<TestResult> tests) {
-        if (tests.isEmpty()) return false;
+    private GroupAnalysis analyzeTestGroup(String groupKey, List<TestResult> tests, boolean ignoreTimeAnomaly) {
+        if (tests.isEmpty()) return new GroupAnalysis(false, false);
 
         tests.sort((a, b) -> Integer.compare(extractEventCount(a.testName), extractEventCount(b.testName)));
 
@@ -173,7 +178,77 @@ public class MemoryLeakAnalyzer {
                 System.out.printf(" ✓%n");
             }
         }
-        return hasLeak;
+
+        System.out.println("\nResponse Time Scaling Analysis:");
+        boolean hasTimeAnomaly = false;
+        int consecutiveTimeAnomalies = 0;
+        Double previousPerEventTime = null;
+        TestResult first = tests.get(0);
+        TestResult last = tests.get(tests.size() - 1);
+        for (TestResult curr : tests) {
+            int events = extractEventCount(curr.testName);
+            if (events <= 0 || curr.duration <= 0) {
+                continue;
+            }
+            double perEventTime = (double) curr.duration / events;
+            if (previousPerEventTime != null) {
+                double ratio = perEventTime / previousPerEventTime;
+                System.out.printf("  %s: %.6f ms/event (%.2fx previous)%n",
+                        curr.testName, perEventTime, ratio);
+                if (ratio > TIME_PER_EVENT_GROWTH_THRESHOLD) {
+                    consecutiveTimeAnomalies++;
+                    if (consecutiveTimeAnomalies >= 2) {
+                        System.out.println("    ⚠️  SUPERLINEAR RESPONSE-TIME GROWTH!");
+                        hasTimeAnomaly = true;
+                    } else {
+                        System.out.println("    ⚠ first superlinear increase noted");
+                    }
+                } else {
+                    consecutiveTimeAnomalies = 0;
+                }
+            } else {
+                System.out.printf("  %s: %.6f ms/event%n", curr.testName, perEventTime);
+            }
+            previousPerEventTime = perEventTime;
+        }
+
+        int firstEvents = extractEventCount(first.testName);
+        int lastEvents = extractEventCount(last.testName);
+        if (firstEvents > 0 && lastEvents > 0 && first.duration > 0 && last.duration > 0 && tests.size() >= 2) {
+            double firstPerEvent = (double) first.duration / firstEvents;
+            double lastPerEvent = (double) last.duration / lastEvents;
+            double totalRatio = lastPerEvent / firstPerEvent;
+            System.out.printf("%nTotal per-event time change (first → last): %.2fx", totalRatio);
+            if (totalRatio > TOTAL_TIME_PER_EVENT_GROWTH_THRESHOLD) {
+                System.out.printf(" ⚠️  EXCESSIVE SUPERLINEAR GROWTH!%n");
+                hasTimeAnomaly = true;
+            } else {
+                System.out.printf(" ✓%n");
+            }
+        }
+        if (ignoreTimeAnomaly && hasTimeAnomaly) {
+            System.out.printf("  NOTE: response-time anomaly for group '%s' is configured as warn-only and will not fail the analyzer. Tracked in issue #183: https://github.com/kiegroup/drools-ansible-rulebook-integration/issues/183%n",
+                    groupKey);
+            hasTimeAnomaly = false;
+        }
+        return new GroupAnalysis(hasLeak, hasTimeAnomaly);
+    }
+
+    private String groupKey(String testName) {
+        String scenario;
+        if (testName.contains("failover-recovery")) {
+            scenario = "failover-recovery";
+        } else if (testName.contains("unmatch")) {
+            scenario = "unmatch";
+        } else if (testName.contains("retention_")) {
+            scenario = "retention";
+        } else if (testName.contains("once_within_")) {
+            scenario = "temporal";
+        } else {
+            scenario = "match";
+        }
+        String mode = testName.contains(" (HA-PG)") ? "HA-PG" : "noHA";
+        return scenario + "/" + mode;
     }
 
     private int extractEventCount(String name) {
@@ -182,6 +257,8 @@ public class MemoryLeakAnalyzer {
         if (name.contains("10k_")) return 10_000;
         if (name.contains("5k_")) return 5_000;
         if (name.contains("1k_")) return 1_000;
+        if (name.contains("500_events")) return 500;
+        if (name.contains("100_events")) return 100;
         return 0;
     }
 
@@ -193,11 +270,64 @@ public class MemoryLeakAnalyzer {
 
     public static final class AnalyzeResult {
         public final boolean hasLeak;
+        public final boolean hasTimeAnomaly;
         public final boolean exceptionFound;
 
-        public AnalyzeResult(boolean hasLeak, boolean exceptionFound) {
+        public AnalyzeResult(boolean hasLeak, boolean hasTimeAnomaly, boolean exceptionFound) {
             this.hasLeak = hasLeak;
+            this.hasTimeAnomaly = hasTimeAnomaly;
             this.exceptionFound = exceptionFound;
+        }
+    }
+
+    private static final class AnalysisSummary {
+        final boolean hasLeak;
+        final boolean hasTimeAnomaly;
+
+        private AnalysisSummary(boolean hasLeak, boolean hasTimeAnomaly) {
+            this.hasLeak = hasLeak;
+            this.hasTimeAnomaly = hasTimeAnomaly;
+        }
+    }
+
+    private static final class GroupAnalysis {
+        final boolean hasLeak;
+        final boolean hasTimeAnomaly;
+
+        private GroupAnalysis(boolean hasLeak, boolean hasTimeAnomaly) {
+            this.hasLeak = hasLeak;
+            this.hasTimeAnomaly = hasTimeAnomaly;
+        }
+    }
+
+    private static final class CliOptions {
+        final String resultFile;
+        final Set<String> ignoredTimeAnomalyGroups;
+
+        private CliOptions(String resultFile, Set<String> ignoredTimeAnomalyGroups) {
+            this.resultFile = resultFile;
+            this.ignoredTimeAnomalyGroups = ignoredTimeAnomalyGroups;
+        }
+
+        static CliOptions parse(String[] args) {
+            if (args.length == 0) {
+                return null;
+            }
+            String resultFile = null;
+            Set<String> ignoredGroups = new HashSet<>();
+            for (String arg : args) {
+                if (arg.startsWith("--ignore-time-anomaly-group=")) {
+                    ignoredGroups.add(arg.substring("--ignore-time-anomaly-group=".length()));
+                } else if (resultFile == null) {
+                    resultFile = arg;
+                } else {
+                    return null;
+                }
+            }
+            if (resultFile == null) {
+                return null;
+            }
+            return new CliOptions(resultFile, ignoredGroups);
         }
     }
 

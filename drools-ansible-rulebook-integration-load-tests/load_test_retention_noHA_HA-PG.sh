@@ -55,6 +55,7 @@ for run_mode in noHA HA-PG; do
     mem="$_mem"
     time="$_time"
     per_event=$(fmt_per_event_kb "$mem" "$count")
+    append_metric_line "$OUT" "$_run_stderr" "$file" "$file ($run_mode)"
 
     printf "%-10s %-8s %14s %9s %14s %10s %14s\n" \
       "$run_mode" "$size" "$mem" "$time" "$per_event" "$matching_rows" "$blob_size" | tee -a "$OUT"
@@ -116,3 +117,4 @@ done
 
 echo "Results written to $OUT"
 echo "Full logs in $LOG"
+run_memory_analyzer "$OUT" --ignore-time-anomaly-group=retention/HA-PG

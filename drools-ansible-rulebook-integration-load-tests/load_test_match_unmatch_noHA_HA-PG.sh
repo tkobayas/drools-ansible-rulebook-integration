@@ -40,7 +40,7 @@ for size in "${SIZES[@]}"; do
         echo "Running $label..."
         jvm_run "$label" "$file" --ha-db-params "$PG_PARAMS"
       fi
-      echo "$_run_stderr" | grep "^${file}" | tail -1 >> "$OUT" || echo "$file (${mode}), FAILED, FAILED" >> "$OUT"
+      append_metric_line "$OUT" "$_run_stderr" "$file" "$label"
     done
   done
 done
@@ -50,9 +50,4 @@ echo "All 12 runs complete. Result lines:"
 cat "$OUT"
 echo ""
 
-echo "Running MemoryLeakAnalyzer..."
-java -cp "target/classes:target/drools-ansible-rulebook-integration-load-tests-jar-with-dependencies.jar" \
-     org.drools.ansible.rulebook.integration.loadtests.analyze.MemoryLeakAnalyzer "$OUT"
-ANALYZER_EXIT=$?
-echo "Analyzer exit code: $ANALYZER_EXIT"
-exit $ANALYZER_EXIT
+run_memory_analyzer "$OUT"

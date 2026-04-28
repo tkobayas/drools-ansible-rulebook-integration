@@ -39,6 +39,7 @@ for size in "${SIZES[@]}"; do
   kb=$(fmt_per_event_kb "$_mem" "$events")
   matching=$(pg_count drools_ansible_matching_event)
   blob=$(pg_blob_size)
+  append_metric_line "$OUT" "$_run_stderr" "$file" "$label"
   printf "%-32s %8d %14s %9s %14s %10s %12s\n" \
     "$file" "$events" "$_mem" "$_time" "$kb" "$matching" "$blob" | tee -a "$OUT"
 done
@@ -46,3 +47,4 @@ done
 echo ""
 echo "Results written to $OUT"
 echo "Full logs in $LOG"
+run_memory_analyzer "$OUT"

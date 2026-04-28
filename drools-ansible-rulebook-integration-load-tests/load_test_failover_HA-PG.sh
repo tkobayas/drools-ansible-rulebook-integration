@@ -4,7 +4,8 @@
 # Measures HA failover recovery time across two JVM runs sharing one PG:
 #   Phase 1 (Load):     --ha-db-params $PG_PARAMS --ha-uuid $HA_UUID
 #   Phase 2 (Recovery): + --failover-recovery, times engine.enableLeader()
-# Uses retention_{size}_events.json (2-condition join, partial matches retained).
+# Uses retention_{size}_events.json only as a fixture to seed recoverable HA state.
+# Analyzer input is restricted to failover recovery runs so this script focuses on failover behavior.
 # HA-PG only. Requires Docker for PostgreSQL.
 
 set -euo pipefail
@@ -48,6 +49,7 @@ for size in "${SIZES[@]}"; do
   echo "Running $label..."
   jvm_run "$label" "$file" --ha-db-params "$PG_PARAMS" --ha-uuid "$HA_UUID" --failover-recovery
   fmt_parse_metrics "$_run_stderr" "$file"
+  append_metric_line "$OUT" "$_run_stderr" "$file" "$label"
   RECOVERY_MS[$size]="$_time"
   printf "%-34s %-14s %14s %9s\n" "$file" "Recovery(PG)" "$_mem" "$_time" | tee -a "$OUT"
 done
@@ -72,3 +74,4 @@ done
 echo ""
 echo "Results written to $OUT"
 echo "Full logs in $LOG"
+run_memory_analyzer "$OUT"

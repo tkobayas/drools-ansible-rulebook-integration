@@ -2,6 +2,7 @@ package org.drools.ansible.rulebook.integration.loadtests.analyze;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -40,6 +41,7 @@ class MemoryLeakAnalyzerTest {
 
         assertThat(r.exceptionFound).isFalse();
         assertThat(r.hasLeak).isFalse();
+        assertThat(r.hasTimeAnomaly).isFalse();
     }
 
     @Test
@@ -55,6 +57,7 @@ class MemoryLeakAnalyzerTest {
         MemoryLeakAnalyzer.AnalyzeResult r = new MemoryLeakAnalyzer().analyzeFile(f.toString());
 
         assertThat(r.hasLeak).isTrue();
+        assertThat(r.hasTimeAnomaly).isFalse();
     }
 
     @Test
@@ -69,5 +72,37 @@ class MemoryLeakAnalyzerTest {
         MemoryLeakAnalyzer.AnalyzeResult r = new MemoryLeakAnalyzer().analyzeFile(f.toString());
 
         assertThat(r.exceptionFound).isTrue();
+    }
+
+    @Test
+    void superlinearResponseTime_reportsAnomaly(@TempDir Path tmp) throws Exception {
+        Path f = tmp.resolve("result.txt");
+        Files.writeString(f, String.join("\n",
+                "once_within_100_events.json (HA-PG), 5100000, 100",
+                "once_within_500_events.json (HA-PG), 5120000, 1800",
+                "once_within_1k_events.json (HA-PG), 5140000, 9000"
+        ));
+
+        MemoryLeakAnalyzer.AnalyzeResult r = new MemoryLeakAnalyzer().analyzeFile(f.toString());
+
+        assertThat(r.hasLeak).isFalse();
+        assertThat(r.hasTimeAnomaly).isTrue();
+    }
+
+    @Test
+    void ignoredTimeAnomalyGroup_isReportedButDoesNotFail(@TempDir Path tmp) throws Exception {
+        Path f = tmp.resolve("result.txt");
+        Files.writeString(f, String.join("\n",
+                "retention_100_events.json (HA-PG), 13113048, 2552",
+                "retention_500_events.json (HA-PG), 34290208, 39035",
+                "retention_1k_events.json (HA-PG), 60078240, 146367"
+        ));
+
+        MemoryLeakAnalyzer.AnalyzeResult r = new MemoryLeakAnalyzer()
+                .analyzeFile(f.toString(), Set.of("retention/HA-PG"));
+
+        assertThat(r.hasLeak).isFalse();
+        assertThat(r.hasTimeAnomaly).isFalse();
+        assertThat(r.exceptionFound).isFalse();
     }
 }

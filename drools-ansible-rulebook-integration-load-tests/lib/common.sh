@@ -141,6 +141,29 @@ fmt_parse_metrics() {
   fi
 }
 
+append_metric_line() {
+  local out_file="$1"
+  local stderr_output="$2"
+  local filename="$3"
+  local label="${4:-$filename}"
+  local metrics_line
+  metrics_line=$(echo "$stderr_output" | grep "^${filename}" | tail -1)
+  if [ -z "$metrics_line" ]; then
+    echo "${label}, FAILED, FAILED" >> "$out_file"
+  else
+    echo "$metrics_line" >> "$out_file"
+  fi
+}
+
+run_memory_analyzer() {
+  local result_file="$1"
+  shift || true
+  local analyzer_cp="target/classes:${JAR}"
+  echo "Running MemoryLeakAnalyzer..."
+  java -cp "$analyzer_cp" \
+       org.drools.ansible.rulebook.integration.loadtests.analyze.MemoryLeakAnalyzer "$@" "$result_file"
+}
+
 # fmt_per_event_kb <bytes> <count> -> prints "%.1f" KB or "N/A".
 fmt_per_event_kb() {
   local bytes="$1"
