@@ -17,14 +17,14 @@ jobs:
           distribution: 'adopt'
 
 
-      - name: Checkout Drools 9.105.0
+      - name: Checkout Drools 9.106.0
         uses: actions/checkout@v6
         with:
           repository: kiegroup/drools
           path: drools
-          ref: 9.105.x-prod
+          ref: 9.106.x-prod
 
-      - name: Build Drools 9.105.0 with Maven
+      - name: Build Drools 9.106.0 with Maven
         run: cd drools && mvn --batch-mode --update-snapshots install -Dquickly && cd ..
 
       - uses: actions/checkout@v6

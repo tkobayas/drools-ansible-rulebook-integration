@@ -23,7 +23,7 @@ jobs:
         with:
           repository: kiegroup/drools
           path: drools
-          ref: 9.105.x-prod
+          ref: 9.106.x-prod
 
       - name: Build Drools Snapshot with Maven
         run: cd drools && mvn --batch-mode --update-snapshots install -Dquickly && cd ..
