@@ -72,9 +72,17 @@ jobs:
           retention-days: 30
 
   memory-leak-test:
-    name: Memory Leak Test
-    runs-on: ubuntu-latest
+    concurrency:
+      group: pr-memory-leak_${{ matrix.java-version }}_${{ github.head_ref }}
+      cancel-in-progress: true
     timeout-minutes: 30
+    strategy:
+      matrix:
+        # Note: Java 25 is not yet supported on drools. Just for testing purpose.
+        java-version: [17, 21, 25]
+      fail-fast: false
+    runs-on: ubuntu-latest
+    name: Memory Leak Test / Java-${{ matrix.java-version }}
     steps:
       - name: Clean Disk Space
         uses: kiegroup/kie-ci/.ci/actions/ubuntu-disk-space@main
@@ -82,7 +90,7 @@ jobs:
       - name: Java and Maven Setup
         uses: kiegroup/kie-ci/.ci/actions/maven@main
         with:
-          java-version: '17'
+          java-version: ${{ matrix.java-version }}
           maven-version: '3.9.11'
 
       - name: Build Chain
@@ -118,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: memory-leak-test-results
+          name: memory-leak-test-results-java${{ matrix.java-version }}
           path: |
             kiegroup_drools-ansible-rulebook-integration/drools-ansible-rulebook-integration-load-tests/result_*.txt
             kiegroup_drools-ansible-rulebook-integration/drools-ansible-rulebook-integration-load-tests/out_*.log
