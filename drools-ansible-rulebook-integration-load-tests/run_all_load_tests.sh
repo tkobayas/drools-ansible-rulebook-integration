@@ -21,6 +21,8 @@ SCRIPTS=(
   load_test_failover_HA-PG.sh
 )
 
+chmod +x "${SCRIPTS[@]}"
+
 FAILED=()
 
 for script in "${SCRIPTS[@]}"; do
