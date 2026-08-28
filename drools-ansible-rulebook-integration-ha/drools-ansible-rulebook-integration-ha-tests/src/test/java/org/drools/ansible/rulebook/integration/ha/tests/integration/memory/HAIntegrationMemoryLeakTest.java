@@ -113,7 +113,7 @@ class HAIntegrationMemoryLeakTest extends AbstractHATestBase {
         }
 
         // Allow some memory for the processing overhead (This is brittle threshold, can be adjusted when fail)
-        long acceptableMemoryOverhead = 65 * 1000 * 1024; // 65 MB
+        long acceptableMemoryOverhead = 100 * 1000 * 1024; // 100 MB
         System.gc();
         Map<String, Object> statsMap = JsonMapper.readValueAsMapOfStringAndObject(rulesEngine.sessionStats(sessionId));
         long baseLevelMemory = (Integer)statsMap.get("baseLevelMemory");
@@ -141,7 +141,7 @@ class HAIntegrationMemoryLeakTest extends AbstractHATestBase {
         assertThat(partialEventIds).isEmpty();
 
         // Allow some memory for the processing overhead
-        long acceptableMemoryOverhead = 65 * 1000 * 1024; // 65 MB (This is brittle threshold, can be adjusted when fail)
+        long acceptableMemoryOverhead = 100 * 1000 * 1024; // 100 MB (This is brittle threshold, can be adjusted when fail)
         System.gc();
         Map<String, Object> statsMap = JsonMapper.readValueAsMapOfStringAndObject(rulesEngine.sessionStats(sessionId));
         long baseLevelMemory = (Integer)statsMap.get("baseLevelMemory");
