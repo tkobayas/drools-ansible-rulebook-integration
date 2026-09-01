@@ -10,8 +10,6 @@ import org.kie.api.runtime.rule.AgendaFilter;
 import org.kie.api.runtime.rule.FactHandle;
 import org.kie.api.runtime.rule.Match;
 import org.kie.api.time.SessionPseudoClock;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,21 +25,6 @@ import static org.drools.ansible.rulebook.integration.api.rulesmodel.RulesModelU
 
 
 public class RulesExecutorSession {
-
-    private static final Logger log = LoggerFactory.getLogger(RulesExecutorSession.class);
-    private static final int DEFAULT_PURGE_CANCELLED_JOB_EVENT_COUNT_THRESHOLD = 100;
-
-    static {
-        String purgeThresholdEnvValue = System.getenv("DROOLS_PURGE_CANCELLED_JOB_EVENT_COUNT_THRESHOLD");
-        if (purgeThresholdEnvValue != null && !purgeThresholdEnvValue.isEmpty()) {
-            System.setProperty("drools.pseudoclock.cancelledJobPurgeThreshold", purgeThresholdEnvValue);
-            log.info("Cancelled pseudo-clock job purge threshold set to {} for drools-core", purgeThresholdEnvValue);
-        } else {
-            System.setProperty("drools.pseudoclock.cancelledJobPurgeThreshold",
-                               String.valueOf(DEFAULT_PURGE_CANCELLED_JOB_EVENT_COUNT_THRESHOLD));
-            log.info("Cancelled pseudo-clock job purge threshold set to {} for drools-core", DEFAULT_PURGE_CANCELLED_JOB_EVENT_COUNT_THRESHOLD);
-        }
-    }
 
     protected final RulesSet rulesSet;
 
