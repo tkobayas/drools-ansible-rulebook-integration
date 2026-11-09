@@ -34,6 +34,7 @@
     <version.org.antlr4>4.13.2</version.org.antlr4><!-- antlr4 (and exec:java) maven plugins not managed in drools-build-parent -->
     <version.jmh>1.37</version.jmh>
     <version.com.fasterxml.jackson>2.21.8</version.com.fasterxml.jackson>
+    <version.org.apache.commons.lang3>3.21.0</version.org.apache.commons.lang3> <!-- override drools-build-parent 9.103.1 (3.14.0) for CVE-2025-48924 -->
   </properties>
 
   <repositories>
@@ -98,6 +99,11 @@
         <version>${version.com.fasterxml.jackson}</version>
         <type>pom</type>
         <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-lang3</artifactId>
+        <version>${version.org.apache.commons.lang3}</version>
       </dependency>
       <dependency>
         <groupId>org.kie</groupId>
